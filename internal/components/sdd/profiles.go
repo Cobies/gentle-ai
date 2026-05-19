@@ -289,7 +289,6 @@ func GenerateProfileOverlay(profile model.Profile, homeDir string) ([]byte, erro
 
 	// Sub-agent entries
 	promptDir := SharedPromptDir(homeDir)
-	useSlim := profileUsesSlimAssets(profile)
 	phaseDescriptions := map[string]string{
 		"sdd-init":    "Bootstrap SDD context and project configuration",
 		"sdd-explore": "Investigate codebase and think through ideas",
@@ -306,9 +305,6 @@ func GenerateProfileOverlay(profile model.Profile, homeDir string) ([]byte, erro
 	for _, phase := range profilePhaseOrder {
 		key := phase + suffix
 		prompt := "{file:" + filepath.Join(promptDir, phase+".md") + "}"
-		if useSlim && (phase == "sdd-apply" || phase == "sdd-verify") {
-			prompt = slimProfileSubAgentPrompt(phase)
-		}
 		entry := map[string]any{
 			"mode":        "subagent",
 			"hidden":      true,
@@ -348,11 +344,16 @@ func GenerateProfileOverlay(profile model.Profile, homeDir string) ([]byte, erro
 // buildProfileOrchestratorPrompt constructs the orchestrator prompt for a named
 // profile. It:
 //  1. Reads the base OpenCode-specific orchestrator asset
-//  2. Injects a model assignments table reflecting the profile's models
-//  3. Replaces bare sub-agent references (e.g. sdd-init) with suffixed ones
+//  2. Extracts the section matching the profile's model capability (capable or small)
+//  3. Injects a model assignments table reflecting the profile's models
+//  4. Replaces bare sub-agent references (e.g. sdd-init) with suffixed ones
 //     (e.g. sdd-init-{name}) in the prompt text
 func buildProfileOrchestratorPrompt(profile model.Profile) (string, error) {
-	base := assets.MustRead(sddOrchestratorAsset(model.AgentOpenCode, profileUsesSlimAssets(profile)))
+	base := assets.MustRead(sddOrchestratorAsset(model.AgentOpenCode))
+
+	// Extract section based on model capability.
+	capability := modelCapability(profile)
+	base = extractModelSection(base, capability)
 
 	// Inject model assignments table.
 	const openMarker = "<!-- gentle-ai:sdd-model-assignments -->"
@@ -381,21 +382,30 @@ func buildProfileOrchestratorPrompt(profile model.Profile) (string, error) {
 	return base, nil
 }
 
-func profileUsesSlimAssets(profile model.Profile) bool {
+// modelCapability returns "capable" or "small" based on the profile name.
+// This is the simple heuristic for now: "cheap" or name contains "slim" → small.
+func modelCapability(profile model.Profile) string {
 	name := strings.TrimSpace(strings.ToLower(profile.Name))
-	return profile.Slim || name == "cheap" || strings.Contains(name, "slim")
+	if name == "cheap" || strings.Contains(name, "slim") {
+		return "small"
+	}
+	return "capable"
 }
 
-func slimProfileSubAgentPrompt(phase string) string {
-	skill := phase
-	switch phase {
-	case "sdd-apply":
-		skill = "sdd-apply-slim"
-	case "sdd-verify":
-		skill = "sdd-verify-slim"
+// extractModelSection extracts the section matching the given capability
+// ("capable" or "small") from content containing <!-- section:model-capable -->
+// and <!-- section:model-small --> markers. If no matching section is found,
+// the full content is returned.
+func extractModelSection(content, capability string) string {
+	openMarker := "<!-- section:model-" + capability + " -->"
+	closeMarker := "<!-- /section:model-" + capability + " -->"
+	start := strings.Index(content, openMarker)
+	end := strings.Index(content, closeMarker)
+	if start == -1 || end == -1 || end <= start {
+		return content
 	}
-
-	return "You are an SDD executor for the " + strings.TrimPrefix(phase, "sdd-") + " phase, not the orchestrator. Do this phase's work yourself. Do NOT delegate, Do NOT call task/delegate, and Do NOT launch sub-agents. Read your skill file at ~/.config/opencode/skills/" + skill + "/SKILL.md and follow it exactly."
+	afterOpen := start + len(openMarker)
+	return content[afterOpen:end]
 }
 
 // replacePhaseRef replaces occurrences of 'from' with 'to' in content.

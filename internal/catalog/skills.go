@@ -14,9 +14,7 @@ var mvpSkills = []Skill{
 	{ID: model.SkillSDDInit, Name: "sdd-init", Category: "sdd", Priority: "p0"},
 
 	{ID: model.SkillSDDApply, Name: "sdd-apply", Category: "sdd", Priority: "p0"},
-	{ID: model.SkillSDDApplySlim, Name: "sdd-apply-slim", Category: "sdd", Priority: "p0"},
 	{ID: model.SkillSDDVerify, Name: "sdd-verify", Category: "sdd", Priority: "p0"},
-	{ID: model.SkillSDDVerifySlim, Name: "sdd-verify-slim", Category: "sdd", Priority: "p0"},
 	{ID: model.SkillSDDExplore, Name: "sdd-explore", Category: "sdd", Priority: "p0"},
 	{ID: model.SkillSDDPropose, Name: "sdd-propose", Category: "sdd", Priority: "p0"},
 	{ID: model.SkillSDDSpec, Name: "sdd-spec", Category: "sdd", Priority: "p0"},

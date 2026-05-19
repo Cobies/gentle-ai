@@ -421,37 +421,9 @@ func TestGenerateProfileOverlay_Structure(t *testing.T) {
 			t.Errorf("sub-agent %q hidden = false, want true", key)
 		}
 		prompt, _ := agent["prompt"].(string)
-		if phase == "sdd-apply" || phase == "sdd-verify" {
-			if !strings.Contains(prompt, phase+"-slim/SKILL.md") {
-				t.Errorf("sub-agent %q prompt = %q, want slim skill reference", key, prompt)
-			}
-			continue
-		}
 		if !strings.HasPrefix(prompt, "{file:") {
 			t.Errorf("sub-agent %q prompt = %q, want {file:...} reference", key, prompt)
 		}
-	}
-}
-
-func TestGenerateProfileOverlay_CheapUsesSlimAssets(t *testing.T) {
-	home := t.TempDir()
-	overlay, err := GenerateProfileOverlay(makeHaikuProfile(), home)
-	if err != nil {
-		t.Fatalf("GenerateProfileOverlay() error = %v", err)
-	}
-
-	var root map[string]any
-	if err := json.Unmarshal(overlay, &root); err != nil {
-		t.Fatalf("overlay is not valid JSON: %v", err)
-	}
-	agentMap := root["agent"].(map[string]any)
-	orch := agentMap["sdd-orchestrator-cheap"].(map[string]any)
-	prompt := orch["prompt"].(string)
-	if !strings.Contains(prompt, "SDD Orchestrator (SLIM)") {
-		t.Fatalf("cheap orchestrator prompt does not use slim asset")
-	}
-	if !strings.Contains(prompt, "sdd-apply-cheap") || !strings.Contains(prompt, "sdd-verify-cheap") {
-		t.Fatalf("cheap orchestrator prompt does not reference suffixed apply/verify agents")
 	}
 }
 
@@ -586,12 +558,6 @@ func TestGenerateProfileOverlay_SubAgentFileRefs(t *testing.T) {
 		agent := agentMap[key].(map[string]any)
 		prompt, _ := agent["prompt"].(string)
 		expectedRef := "{file:" + filepath.Join(promptDir, phase+".md") + "}"
-		if phase == "sdd-apply" || phase == "sdd-verify" {
-			if !strings.Contains(prompt, phase+"-slim/SKILL.md") {
-				t.Errorf("sub-agent %q prompt = %q, want slim skill reference", key, prompt)
-			}
-			continue
-		}
 		if prompt != expectedRef {
 			t.Errorf("sub-agent %q prompt = %q, want %q", key, prompt, expectedRef)
 		}

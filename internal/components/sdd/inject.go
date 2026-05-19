@@ -247,7 +247,7 @@ func Inject(homeDir string, adapter agents.Adapter, sddMode model.SDDModeID, opt
 			// Write the SDD orchestrator as a standalone Jinja include module.
 			// The static KIMI.md template references it via {% include "sdd-orchestrator.md" %}.
 			configDir := adapter.GlobalConfigDir(homeDir)
-			content := assets.MustRead(sddOrchestratorAsset(adapter.Agent(), false))
+			content := assets.MustRead(sddOrchestratorAsset(adapter.Agent()))
 			modulePath := filepath.Join(configDir, "sdd-orchestrator.md")
 			writeResult, err := filemerge.WriteFileAtomic(modulePath, []byte(content), 0o644)
 			if err != nil {
@@ -463,7 +463,7 @@ func Inject(homeDir string, adapter agents.Adapter, sddMode model.SDDModeID, opt
 
 			sddSkills := []string{
 				"sdd-init", "sdd-explore", "sdd-propose", "sdd-spec",
-				"sdd-design", "sdd-tasks", "sdd-apply", "sdd-apply-slim", "sdd-verify", "sdd-verify-slim", "sdd-archive",
+				"sdd-design", "sdd-tasks", "sdd-apply", "sdd-verify", "sdd-archive",
 				"sdd-onboard", "judgment-day",
 			}
 
@@ -774,10 +774,10 @@ func inlineOpenCodeSDDPrompts(overlayBytes []byte, homeDir, settingsPath string,
 		if existingPrompt != "" {
 			orchestratorMap["prompt"] = migratePreservedOpenCodeOrchestratorPrompt(existingPrompt)
 		} else {
-			orchestratorMap["prompt"] = assets.MustRead(sddOrchestratorAsset(model.AgentOpenCode, false))
+			orchestratorMap["prompt"] = assets.MustRead(sddOrchestratorAsset(model.AgentOpenCode))
 		}
 	} else {
-		orchestratorMap["prompt"] = assets.MustRead(sddOrchestratorAsset(model.AgentOpenCode, false))
+		orchestratorMap["prompt"] = assets.MustRead(sddOrchestratorAsset(model.AgentOpenCode))
 	}
 
 	// Replace sub-agent prompt placeholders with {file:<absolutePath>} references.
@@ -1384,11 +1384,7 @@ func hasSDDOrchestrator(content string) bool {
 
 // sddOrchestratorAsset returns the embedded asset path for the SDD orchestrator
 // content based on the agent. Agent-specific assets take priority; generic is fallback.
-func sddOrchestratorAsset(agent model.AgentID, slim bool) string {
-	if slim {
-		return "generic/sdd-orchestrator-slim.md"
-	}
-
+func sddOrchestratorAsset(agent model.AgentID) string {
 	switch agent {
 	case model.AgentGeminiCLI:
 		return "gemini/sdd-orchestrator.md"
@@ -1430,7 +1426,7 @@ func injectFileAppend(homeDir string, adapter agents.Adapter) (InjectionResult, 
 	}
 
 	// Use agent-specific SDD orchestrator content when available; fall back to generic.
-	content := assets.MustRead(sddOrchestratorAsset(adapter.Agent(), false))
+	content := assets.MustRead(sddOrchestratorAsset(adapter.Agent()))
 
 	// If there is a bare (un-marked) legacy orchestrator block, strip it first
 	// so InjectMarkdownSection can re-inject the current canonical content.

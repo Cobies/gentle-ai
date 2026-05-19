@@ -2581,10 +2581,8 @@ func TestInjectCopiesAllFilesFromSkillDirectory(t *testing.T) {
 	}{
 		{"sdd-apply", "SKILL.md"},
 		{"sdd-apply", "strict-tdd.md"},
-		{"sdd-apply-slim", "SKILL.md"},
 		{"sdd-verify", "SKILL.md"},
 		{"sdd-verify", "strict-tdd-verify.md"},
-		{"sdd-verify-slim", "SKILL.md"},
 	}
 
 	for _, tt := range tests {
@@ -3383,20 +3381,9 @@ func TestSDDOrchestratorAssetSelection(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(string(tt.agent), func(t *testing.T) {
-			got := sddOrchestratorAsset(tt.agent, false)
+			got := sddOrchestratorAsset(tt.agent)
 			if got != tt.want {
 				t.Fatalf("sddOrchestratorAsset(%q) = %q, want %q", tt.agent, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestSDDOrchestratorAssetSelection_Slim(t *testing.T) {
-	for _, agent := range []model.AgentID{model.AgentOpenCode, model.AgentGeminiCLI, model.AgentClaudeCode} {
-		t.Run(string(agent), func(t *testing.T) {
-			got := sddOrchestratorAsset(agent, true)
-			if got != "generic/sdd-orchestrator-slim.md" {
-				t.Fatalf("sddOrchestratorAsset(%q, true) = %q, want generic/sdd-orchestrator-slim.md", agent, got)
 			}
 		})
 	}
