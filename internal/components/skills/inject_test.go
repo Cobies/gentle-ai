@@ -281,6 +281,37 @@ func assertNonEmptyFile(t *testing.T, path string) {
 	}
 }
 
+func TestInjectWithCapability_SkipsSDDSkillsWhenCapabilityEmpty(t *testing.T) {
+	home := t.TempDir()
+
+	// When capability is empty, SDD skills are skipped (same as Inject).
+	// The skills component skips SDD skills to avoid conflicts with SDD component.
+	result, err := InjectWithCapability(home, opencodeAdapter(), []model.SkillID{model.SkillSDDApply}, "")
+	if err != nil {
+		t.Fatalf("InjectWithCapability() error = %v", err)
+	}
+	// SDD skills are skipped when capability is empty.
+	if len(result.Files) != 0 {
+		t.Fatalf("InjectWithCapability(capability=%q) files len = %d, want 0 (SDD skills skipped)", "", len(result.Files))
+	}
+}
+
+func TestInjectWithCapability_WritesNonSDDSkillsRegardlessOfCapability(t *testing.T) {
+	home := t.TempDir()
+
+	// Non-SDD skills should always be written, regardless of capability.
+	result, err := InjectWithCapability(home, opencodeAdapter(), []model.SkillID{model.SkillCreator}, "capable")
+	if err != nil {
+		t.Fatalf("InjectWithCapability() error = %v", err)
+	}
+	if len(result.Files) != 1 {
+		t.Fatalf("InjectWithCapability() files len = %d, want 1", len(result.Files))
+	}
+	if len(result.Skipped) != 0 {
+		t.Fatalf("InjectWithCapability() skipped len = %d, want 0", len(result.Skipped))
+	}
+}
+
 func containsFile(files []string, want string) bool {
 	for _, file := range files {
 		if file == want {

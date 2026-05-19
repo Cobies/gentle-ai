@@ -344,15 +344,18 @@ func GenerateProfileOverlay(profile model.Profile, homeDir string) ([]byte, erro
 // buildProfileOrchestratorPrompt constructs the orchestrator prompt for a named
 // profile. It:
 //  1. Reads the base OpenCode-specific orchestrator asset
-//  2. Extracts the section matching the profile's model capability (capable or small)
+//  2. Extracts the section matching the orchestrator's model capability (capable or small)
 //  3. Injects a model assignments table reflecting the profile's models
 //  4. Replaces bare sub-agent references (e.g. sdd-init) with suffixed ones
 //     (e.g. sdd-init-{name}) in the prompt text
 func buildProfileOrchestratorPrompt(profile model.Profile) (string, error) {
 	base := assets.MustRead(sddOrchestratorAsset(model.AgentOpenCode))
 
-	// Extract section based on model capability.
-	capability := modelCapability(profile)
+	// Extract section based on model capability (derived from model name).
+	capability := "capable"
+	if profile.OrchestratorModel.ModelID != "" {
+		capability = model.ModelCapability(profile.OrchestratorModel.ModelID)
+	}
 	base = extractModelSection(base, capability)
 
 	// Inject model assignments table.
@@ -380,16 +383,6 @@ func buildProfileOrchestratorPrompt(profile model.Profile) (string, error) {
 	base = replacePhaseRef(base, "sdd-orchestrator", "sdd-orchestrator"+suffix)
 
 	return base, nil
-}
-
-// modelCapability returns "capable" or "small" based on the profile name.
-// This is the simple heuristic for now: "cheap" or name contains "slim" → small.
-func modelCapability(profile model.Profile) string {
-	name := strings.TrimSpace(strings.ToLower(profile.Name))
-	if name == "cheap" || strings.Contains(name, "slim") {
-		return "small"
-	}
-	return "capable"
 }
 
 // extractModelSection extracts the section matching the given capability
