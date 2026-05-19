@@ -11,6 +11,7 @@ const (
 	AgentVSCodeCopilot AgentID = "vscode-copilot"
 	AgentCodex         AgentID = "codex"
 	AgentAntigravity   AgentID = "antigravity"
+	AgentAntigravityCLI AgentID = "antigravity-cli"
 	AgentWindsurf      AgentID = "windsurf"
 	AgentKimi          AgentID = "kimi"
 	AgentQwenCode      AgentID = "qwen-code"

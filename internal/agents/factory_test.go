@@ -35,6 +35,33 @@ func TestDefaultRegistryIncludesPi(t *testing.T) {
 	}
 }
 
+func TestFactoryResolvesAntigravityCLIAdapter(t *testing.T) {
+	adapter, err := NewAdapter(model.AgentAntigravityCLI)
+	if err != nil {
+		t.Fatalf("NewAdapter(%q) returned error: %v", model.AgentAntigravityCLI, err)
+	}
+
+	if got := adapter.Agent(); got != model.AgentAntigravityCLI {
+		t.Fatalf("adapter.Agent() = %q, want %q", got, model.AgentAntigravityCLI)
+	}
+}
+
+func TestDefaultRegistryIncludesAntigravityCLI(t *testing.T) {
+	registry, err := NewDefaultRegistry()
+	if err != nil {
+		t.Fatalf("NewDefaultRegistry() returned error: %v", err)
+	}
+
+	adapter, ok := registry.Get(model.AgentAntigravityCLI)
+	if !ok {
+		t.Fatalf("registry missing %s adapter", model.AgentAntigravityCLI)
+	}
+
+	if got := adapter.Agent(); got != model.AgentAntigravityCLI {
+		t.Fatalf("registry adapter.Agent() = %q, want %q", got, model.AgentAntigravityCLI)
+	}
+}
+
 func TestDefaultRegistrySupportedAgentsMatchesFactoryAgents(t *testing.T) {
 	registry, err := NewDefaultRegistry()
 	if err != nil {
@@ -43,6 +70,7 @@ func TestDefaultRegistrySupportedAgentsMatchesFactoryAgents(t *testing.T) {
 
 	want := []model.AgentID{
 		model.AgentAntigravity,
+		model.AgentAntigravityCLI,
 		model.AgentClaudeCode,
 		model.AgentCodex,
 		model.AgentCursor,
