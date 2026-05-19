@@ -361,7 +361,21 @@ func Inject(homeDir string, adapter agents.Adapter, sddMode model.SDDModeID, opt
 			overlayBytes := []byte(overlayContent)
 			// For multi-mode, write shared prompt files before inlining references.
 			if sddMode == model.SDDModeMulti {
-				promptsChanged, promptsErr := WriteSharedPromptFiles(homeDir)
+				// Build phase → capability map from model assignments.
+				phaseCapabilities := make(map[string]string)
+				for phase, assignment := range opts.OpenCodeModelAssignments {
+					phaseCapabilities[phase] = model.ModelCapability(assignment.ModelID)
+				}
+				// Also include phase assignments from named profiles so their
+				// prompt files are written with the correct section.
+				for _, profile := range opts.Profiles {
+					for phase, assignment := range profile.PhaseAssignments {
+						if assignment.ModelID != "" {
+							phaseCapabilities[phase] = model.ModelCapability(assignment.ModelID)
+						}
+					}
+				}
+				promptsChanged, promptsErr := WriteSharedPromptFiles(homeDir, phaseCapabilities)
 				if promptsErr != nil {
 					return InjectionResult{}, fmt.Errorf("write shared SDD prompt files: %w", promptsErr)
 				}

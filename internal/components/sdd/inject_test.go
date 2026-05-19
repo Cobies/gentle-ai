@@ -1475,17 +1475,23 @@ func TestInjectOpenCodeSubagentPromptsStayExecutorScoped(t *testing.T) {
 			t.Fatalf("%s prompt = %q, want {file:...} reference %q", phase, prompt, expectedRef)
 		}
 
-		// Also verify the prompt file itself contains the executor-scoped markers.
+		// Also verify the prompt file contains the executor-scoped content
+		// (skill content that makes clear this is the executor, not orchestrator).
 		promptFilePath := filepath.Join(promptDir, phase+".md")
 		promptFileData, readErr := os.ReadFile(promptFilePath)
 		if readErr != nil {
 			t.Fatalf("%s prompt file %q not readable: %v", phase, promptFilePath, readErr)
 		}
 		promptFileContent := string(promptFileData)
-		for _, want := range []string{"not the orchestrator", "Do NOT delegate", "Do NOT call task/delegate", "Do NOT launch sub-agents"} {
-			if !strings.Contains(promptFileContent, want) {
-				t.Fatalf("%s prompt file missing %q", phase, want)
-			}
+		// Each prompt file must have substantial content (skill file, not old one-liner).
+		if len(promptFileContent) < 200 {
+			t.Fatalf("%s prompt file content too short (%d bytes)", phase, len(promptFileContent))
+		}
+		// Check for executor-scoped markers present in skill files.
+		hasGate := strings.Contains(promptFileContent, "ORCHESTRATOR GATE") || strings.Contains(promptFileContent, "ORCHESTRATOR NOTE")
+		hasDoNotDelegate := strings.Contains(strings.ToLower(promptFileContent), "do not delegate")
+		if !hasGate && !hasDoNotDelegate {
+			t.Fatalf("%s prompt file missing expected skill content", phase)
 		}
 	}
 }
