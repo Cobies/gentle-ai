@@ -955,7 +955,9 @@ func componentPathsWithWorkspace(homeDir, workspaceDir string, selection model.S
 						filepath.Join(skillDir, "sdd-design", "SKILL.md"),
 						filepath.Join(skillDir, "sdd-tasks", "SKILL.md"),
 						filepath.Join(skillDir, "sdd-apply", "SKILL.md"),
+						filepath.Join(skillDir, "sdd-apply-slim", "SKILL.md"),
 						filepath.Join(skillDir, "sdd-verify", "SKILL.md"),
+						filepath.Join(skillDir, "sdd-verify-slim", "SKILL.md"),
 						filepath.Join(skillDir, "sdd-archive", "SKILL.md"),
 					)
 				}

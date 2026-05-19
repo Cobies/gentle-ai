@@ -1,4 +1,4 @@
-# Gentle-AI — SDD Orchestrator (SLIM)
+# Gentle AI — SDD Orchestrator (SLIM)
 
 This is a slim, focused orchestrator prompt intended for use with low-capability / small models
 (examples: Gemini Flash, Qwen3 30B, gpt-4o-mini). It preserves the essential coordination rules while
@@ -15,7 +15,16 @@ Quick delegation rules:
 
 SDD phases (short): proposal -> spec -> design -> tasks -> apply -> verify -> archive
 
+Delegate to these phase agents: sdd-init, sdd-explore, sdd-propose, sdd-spec, sdd-design,
+sdd-tasks, sdd-apply, sdd-verify, sdd-archive, sdd-onboard.
+
 Result contract (short): each phase returns {status, executive_summary, artifacts, next_recommended}.
+
+<!-- gentle-ai:sdd-model-assignments -->
+## Model Assignments
+
+Use configured models for each SDD phase.
+<!-- /gentle-ai:sdd-model-assignments -->
 
 Model hints:
 - If your assigned model tier is `small`, load only up to 3 relevant `SKILL.md` paths and prefer

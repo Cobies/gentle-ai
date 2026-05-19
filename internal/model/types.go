@@ -66,7 +66,9 @@ type SkillID string
 const (
 	SkillSDDInit         SkillID = "sdd-init"
 	SkillSDDApply        SkillID = "sdd-apply"
+	SkillSDDApplySlim    SkillID = "sdd-apply-slim"
 	SkillSDDVerify       SkillID = "sdd-verify"
+	SkillSDDVerifySlim   SkillID = "sdd-verify-slim"
 	SkillSDDExplore      SkillID = "sdd-explore"
 	SkillSDDPropose      SkillID = "sdd-propose"
 	SkillSDDSpec         SkillID = "sdd-spec"
@@ -176,4 +178,5 @@ type Profile struct {
 	Name              string                     // e.g. "cheap", "premium"; empty = default
 	OrchestratorModel ModelAssignment            // orchestrator model
 	PhaseAssignments  map[string]ModelAssignment // key = phase name (e.g. "sdd-apply")
+	Slim              bool                       // use slim SDD assets for small-model profiles
 }

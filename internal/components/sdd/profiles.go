@@ -289,6 +289,7 @@ func GenerateProfileOverlay(profile model.Profile, homeDir string) ([]byte, erro
 
 	// Sub-agent entries
 	promptDir := SharedPromptDir(homeDir)
+	useSlim := profileUsesSlimAssets(profile)
 	phaseDescriptions := map[string]string{
 		"sdd-init":    "Bootstrap SDD context and project configuration",
 		"sdd-explore": "Investigate codebase and think through ideas",
@@ -304,11 +305,15 @@ func GenerateProfileOverlay(profile model.Profile, homeDir string) ([]byte, erro
 
 	for _, phase := range profilePhaseOrder {
 		key := phase + suffix
+		prompt := "{file:" + filepath.Join(promptDir, phase+".md") + "}"
+		if useSlim && (phase == "sdd-apply" || phase == "sdd-verify") {
+			prompt = slimProfileSubAgentPrompt(phase)
+		}
 		entry := map[string]any{
 			"mode":        "subagent",
 			"hidden":      true,
 			"description": phaseDescriptions[phase],
-			"prompt":      "{file:" + filepath.Join(promptDir, phase+".md") + "}",
+			"prompt":      prompt,
 			"tools": map[string]any{
 				"read":  true,
 				"write": true,
@@ -347,7 +352,7 @@ func GenerateProfileOverlay(profile model.Profile, homeDir string) ([]byte, erro
 //  3. Replaces bare sub-agent references (e.g. sdd-init) with suffixed ones
 //     (e.g. sdd-init-{name}) in the prompt text
 func buildProfileOrchestratorPrompt(profile model.Profile) (string, error) {
-	base := assets.MustRead(sddOrchestratorAsset(model.AgentOpenCode))
+	base := assets.MustRead(sddOrchestratorAsset(model.AgentOpenCode, profileUsesSlimAssets(profile)))
 
 	// Inject model assignments table.
 	const openMarker = "<!-- gentle-ai:sdd-model-assignments -->"
@@ -374,6 +379,23 @@ func buildProfileOrchestratorPrompt(profile model.Profile) (string, error) {
 	base = replacePhaseRef(base, "sdd-orchestrator", "sdd-orchestrator"+suffix)
 
 	return base, nil
+}
+
+func profileUsesSlimAssets(profile model.Profile) bool {
+	name := strings.TrimSpace(strings.ToLower(profile.Name))
+	return profile.Slim || name == "cheap" || strings.Contains(name, "slim")
+}
+
+func slimProfileSubAgentPrompt(phase string) string {
+	skill := phase
+	switch phase {
+	case "sdd-apply":
+		skill = "sdd-apply-slim"
+	case "sdd-verify":
+		skill = "sdd-verify-slim"
+	}
+
+	return "You are an SDD executor for the " + strings.TrimPrefix(phase, "sdd-") + " phase, not the orchestrator. Do this phase's work yourself. Do NOT delegate, Do NOT call task/delegate, and Do NOT launch sub-agents. Read your skill file at ~/.config/opencode/skills/" + skill + "/SKILL.md and follow it exactly."
 }
 
 // replacePhaseRef replaces occurrences of 'from' with 'to' in content.
