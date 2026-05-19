@@ -787,7 +787,7 @@ func inlineOpenCodeSDDPrompts(overlayBytes []byte, homeDir, settingsPath string,
 			}
 			placeholder := "__PROMPT_FILE_" + phase + "__"
 			if prompt, _ := agentMap["prompt"].(string); prompt == placeholder {
-				agentMap["prompt"] = "{file:" + filepath.Join(promptDir, phase+".md") + "}"
+				agentMap["prompt"] = "{file:" + filepath.ToSlash(filepath.Join(promptDir, phase+".md")) + "}"
 			}
 		}
 	}
@@ -1384,6 +1384,8 @@ func sddOrchestratorAsset(agent model.AgentID) string {
 		return "codex/sdd-orchestrator.md"
 	case model.AgentAntigravity:
 		return "antigravity/sdd-orchestrator.md"
+	case model.AgentAntigravityCLI:
+		return "antigravitycli/sdd-orchestrator.md"
 	case model.AgentWindsurf:
 		return "windsurf/sdd-orchestrator.md"
 	case model.AgentCursor:

@@ -304,7 +304,7 @@ func GenerateProfileOverlay(profile model.Profile, homeDir string) ([]byte, erro
 
 	for _, phase := range profilePhaseOrder {
 		key := phase + suffix
-		prompt := "{file:" + filepath.Join(promptDir, phase+".md") + "}"
+		prompt := "{file:" + filepath.ToSlash(filepath.Join(promptDir, phase+".md")) + "}"
 		entry := map[string]any{
 			"mode":        "subagent",
 			"hidden":      true,

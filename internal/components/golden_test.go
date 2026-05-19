@@ -176,7 +176,10 @@ func TestGoldenSDD_OpenCode_Multi(t *testing.T) {
 	// Normalize the absolute home path in the settings JSON so the golden
 	// file remains stable across test runs (temp dirs change each run).
 	// Sub-agent prompts now use {file:/abs/path/...} references.
-	normalizedSettings := []byte(strings.ReplaceAll(string(settingsJSON), home, "{{HOME}}"))
+	jsonStr := string(settingsJSON)
+	jsonStr = strings.ReplaceAll(jsonStr, home, "{{HOME}}")
+	jsonStr = strings.ReplaceAll(jsonStr, filepath.ToSlash(home), "{{HOME}}")
+	normalizedSettings := []byte(jsonStr)
 	assertGolden(t, "sdd-opencode-multi-settings.golden", normalizedSettings)
 
 	pluginPath := filepath.Join(home, ".config", "opencode", "plugins", "background-agents.ts")
@@ -255,6 +258,7 @@ func TestGoldenSDD_Gemini(t *testing.T) {
 func TestGoldenSDD_VSCode(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
 
 	adapter := vscodeAdapter()
 

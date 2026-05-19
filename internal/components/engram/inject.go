@@ -393,9 +393,9 @@ func ensureAntigravitySettings(homeDir string, adapter agents.Adapter) (settings
 // writeCodexInstructionFiles writes the Engram memory protocol and compact prompt
 // files to ~/.codex/ and returns their paths.
 func writeCodexInstructionFiles(homeDir string) (instructionsPath, compactPath string, err error) {
-	codexDir := homeDir + "/.codex"
-	instructionsPath = codexDir + "/engram-instructions.md"
-	compactPath = codexDir + "/engram-compact-prompt.md"
+	codexDir := filepath.Join(homeDir, ".codex")
+	instructionsPath = filepath.Join(codexDir, "engram-instructions.md")
+	compactPath = filepath.Join(codexDir, "engram-compact-prompt.md")
 
 	instrContent := assets.MustRead("codex/engram-instructions.md")
 	instrWrite, err := filemerge.WriteFileAtomic(instructionsPath, []byte(instrContent), 0o644)

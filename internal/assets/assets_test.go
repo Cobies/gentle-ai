@@ -44,6 +44,9 @@ func TestAllEmbeddedAssetsAreReadable(t *testing.T) {
 		// Gemini agent files
 		"gemini/sdd-orchestrator.md",
 
+		// Antigravity CLI agent files
+		"antigravitycli/sdd-orchestrator.md",
+
 		// Codex agent files
 		"codex/sdd-orchestrator.md",
 
@@ -346,6 +349,7 @@ func TestNonClaudeSDDOrchestratorChainStrategyParity(t *testing.T) {
 		{path: "kiro/sdd-orchestrator.md", propagationScope: "Kiro phase context"},
 		{path: "windsurf/sdd-orchestrator.md", propagationScope: "inline phase context"},
 		{path: "antigravity/sdd-orchestrator.md", propagationScope: "inline phase context"},
+		{path: "antigravitycli/sdd-orchestrator.md", propagationScope: "inline phase context"},
 	}
 
 	for _, tc := range tests {
@@ -379,6 +383,7 @@ func TestPlatformNativeSDDOrchestratorsAvoidOpenCodePersistenceClaims(t *testing
 		{path: "kiro/sdd-orchestrator.md", required: []string{"Kiro phase context", "native Kiro subagent context", "approval"}},
 		{path: "windsurf/sdd-orchestrator.md", required: []string{"solo-agent", "inline phase context", "There are no sub-agents"}},
 		{path: "antigravity/sdd-orchestrator.md", required: []string{"inline phase context", "Phase Execution Protocol", "directly"}},
+		{path: "antigravitycli/sdd-orchestrator.md", required: []string{"inline phase context", "Phase Execution Protocol", "directly"}},
 	}
 
 	for _, tc := range tests {
@@ -725,6 +730,7 @@ func TestSDDOrchestratorAssetsScopedToDedicatedAgent(t *testing.T) {
 		"codex/sdd-orchestrator.md",
 		"cursor/sdd-orchestrator.md",
 		"kimi/sdd-orchestrator.md",
+		"antigravitycli/sdd-orchestrator.md",
 	} {
 		t.Run(assetPath, func(t *testing.T) {
 			content := MustRead(assetPath)

@@ -486,6 +486,7 @@ func TestInjectCursorWithMalformedMCPJsonRecovery(t *testing.T) {
 func TestInjectVSCodeMergesEngramToMCPConfigFile(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
 	adapter := vscode.NewAdapter()
 
 	result, err := Inject(home, adapter)
@@ -706,7 +707,9 @@ func TestInjectCodexInjectsTOMLKeys(t *testing.T) {
 	if !strings.Contains(text, `model_instructions_file`) {
 		t.Fatalf("config.toml missing model_instructions_file key; got:\n%s", text)
 	}
-	if !strings.Contains(text, instructionsPath) {
+	normText := strings.ReplaceAll(strings.ReplaceAll(text, "\\\\", "/"), "\\", "/")
+	normInstrPath := filepath.ToSlash(instructionsPath)
+	if !strings.Contains(normText, normInstrPath) {
 		t.Fatalf("config.toml model_instructions_file does not reference %q; got:\n%s", instructionsPath, text)
 	}
 
@@ -714,7 +717,8 @@ func TestInjectCodexInjectsTOMLKeys(t *testing.T) {
 	if !strings.Contains(text, `experimental_compact_prompt_file`) {
 		t.Fatalf("config.toml missing experimental_compact_prompt_file key; got:\n%s", text)
 	}
-	if !strings.Contains(text, compactPath) {
+	normCompactPath := filepath.ToSlash(compactPath)
+	if !strings.Contains(normText, normCompactPath) {
 		t.Fatalf("config.toml experimental_compact_prompt_file does not reference %q; got:\n%s", compactPath, text)
 	}
 }
