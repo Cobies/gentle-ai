@@ -10,6 +10,7 @@ import (
 
 	"github.com/gentleman-programming/gentle-ai/internal/agents"
 	"github.com/gentleman-programming/gentle-ai/internal/agents/antigravity"
+	"github.com/gentleman-programming/gentle-ai/internal/agents/antigravitycli"
 	"github.com/gentleman-programming/gentle-ai/internal/agents/claude"
 	codexagent "github.com/gentleman-programming/gentle-ai/internal/agents/codex"
 	"github.com/gentleman-programming/gentle-ai/internal/agents/cursor"
@@ -29,15 +30,16 @@ import (
 
 var update = flag.Bool("update", false, "update golden files")
 
-func claudeAdapter() agents.Adapter      { return claude.NewAdapter() }
-func opencodeAdapter() agents.Adapter    { return opencode.NewAdapter() }
-func cursorAdapter() agents.Adapter      { return cursor.NewAdapter() }
-func geminiAdapter() agents.Adapter      { return gemini.NewAdapter() }
-func vscodeAdapter() agents.Adapter      { return vscode.NewAdapter() }
-func codexAdapter() agents.Adapter       { return codexagent.NewAdapter() }
-func antigravityAdapter() agents.Adapter { return antigravity.NewAdapter() }
-func windsurfAdapter() agents.Adapter    { return windsurf.NewAdapter() }
-func kiroAdapter() agents.Adapter        { return kiro.NewAdapter() }
+func claudeAdapter() agents.Adapter         { return claude.NewAdapter() }
+func opencodeAdapter() agents.Adapter       { return opencode.NewAdapter() }
+func cursorAdapter() agents.Adapter         { return cursor.NewAdapter() }
+func geminiAdapter() agents.Adapter         { return gemini.NewAdapter() }
+func vscodeAdapter() agents.Adapter         { return vscode.NewAdapter() }
+func codexAdapter() agents.Adapter          { return codexagent.NewAdapter() }
+func antigravityAdapter() agents.Adapter    { return antigravity.NewAdapter() }
+func antigravityCLIAdapter() agents.Adapter { return antigravitycli.NewAdapter() }
+func windsurfAdapter() agents.Adapter       { return windsurf.NewAdapter() }
+func kiroAdapter() agents.Adapter           { return kiro.NewAdapter() }
 
 // ---------------------------------------------------------------------------
 // Existing golden tests (context7, presets, SDD command)
@@ -835,6 +837,21 @@ func TestGoldenPersona_Antigravity_Gentleman(t *testing.T) {
 
 	rulesFile := readTestFile(t, filepath.Join(home, ".gemini", "GEMINI.md"))
 	assertGolden(t, "persona-antigravity-gentleman.golden", rulesFile)
+}
+
+func TestGoldenPersona_AntigravityCLI_Gentleman(t *testing.T) {
+	home := t.TempDir()
+
+	result, err := persona.Inject(home, antigravityCLIAdapter(), model.PersonaGentleman)
+	if err != nil {
+		t.Fatalf("persona.Inject(antigravity-cli, gentleman) error = %v", err)
+	}
+	if !result.Changed {
+		t.Fatalf("persona.Inject(antigravity-cli, gentleman) changed = false")
+	}
+
+	rulesFile := readTestFile(t, filepath.Join(home, ".gemini", "GEMINI.md"))
+	assertGolden(t, "persona-antigravity-cli-gentleman.golden", rulesFile)
 }
 
 func TestGoldenEngram_Antigravity(t *testing.T) {
