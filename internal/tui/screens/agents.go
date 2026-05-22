@@ -12,6 +12,12 @@ func AgentOptions() []model.AgentID {
 	agents := catalog.AllAgents()
 	ids := make([]model.AgentID, 0, len(agents))
 	for _, agent := range agents {
+		if agent.ID == model.AgentAntigravity {
+			// Antigravity CLI supersedes the legacy desktop Antigravity option in
+			// the installer TUI. Keep the adapter addressable via CLI for existing
+			// users, but guide interactive installs to the CLI surface.
+			continue
+		}
 		ids = append(ids, agent.ID)
 	}
 	return ids
