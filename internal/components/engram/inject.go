@@ -129,11 +129,19 @@ func engramOverlayJSON(agentID model.AgentID, cmd string) []byte {
 			},
 		}
 	} else {
+		toolsArg := "--tools=agent"
+		if agentID == model.AgentAntigravityCLI {
+			// Antigravity CLI may report `mem_context` as disabled even when the
+			// agent profile is selected. Engram supports combining profiles with
+			// individual tools, so make the required recall tool explicit for this
+			// runtime while keeping the normal agent profile enabled.
+			toolsArg = "--tools=agent,mem_context"
+		}
 		cfg = map[string]any{
 			"mcpServers": map[string]any{
 				"engram": map[string]any{
 					"command": cmd,
-					"args":    []string{"mcp", "--tools=agent"},
+					"args":    []string{"mcp", toolsArg},
 				},
 			},
 		}

@@ -600,7 +600,14 @@ func TestInjectAntigravityCLIWritesMCPToCLIConfig(t *testing.T) {
 	}
 
 	cliMCPPath := filepath.Join(home, ".gemini", "antigravity-cli", "mcp_config.json")
-	assertArgsHaveToolsAgent(t, cliMCPPath)
+	content, err := os.ReadFile(cliMCPPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%q) error = %v", cliMCPPath, err)
+	}
+	text := string(content)
+	if !strings.Contains(text, `"--tools=agent,mem_context"`) {
+		t.Fatalf("Antigravity CLI MCP config must explicitly enable mem_context; got:\n%s", text)
+	}
 
 	desktopMCPPath := filepath.Join(home, ".gemini", "antigravity", "mcp_config.json")
 	if _, err := os.Stat(desktopMCPPath); !os.IsNotExist(err) {
