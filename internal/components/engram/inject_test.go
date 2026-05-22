@@ -609,7 +609,7 @@ func TestInjectAntigravityCLIWritesMCPToCLIConfig(t *testing.T) {
 		t.Fatalf("Antigravity CLI MCP config must launch Engram MCP; got:\n%s", text)
 	}
 	if strings.Contains(text, `--tools=`) {
-		t.Fatalf("Antigravity CLI should use Engram's generic MCP surface, not Pi/direct-tool profiles; got:\n%s", text)
+		t.Fatalf("Antigravity CLI should use Engram's default MCP invocation without tool-profile flags; got:\n%s", text)
 	}
 
 	desktopMCPPath := filepath.Join(home, ".gemini", "antigravity", "mcp_config.json")

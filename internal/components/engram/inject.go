@@ -131,9 +131,8 @@ func engramOverlayJSON(agentID model.AgentID, cmd string) []byte {
 	} else {
 		args := []string{"mcp", "--tools=agent"}
 		if agentID == model.AgentAntigravityCLI {
-			// Antigravity CLI uses Engram's generic MCP surface. Pi's compact
-			// direct tools come from gentle-engram, but MCP agents should receive
-			// the standard Engram MCP toolset documented in Engram's agent setup.
+			// Antigravity CLI should load Engram's default MCP toolset as documented
+			// by Engram's Antigravity setup instructions.
 			args = []string{"mcp"}
 		}
 		cfg = map[string]any{
