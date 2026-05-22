@@ -131,8 +131,8 @@ func engramOverlayJSON(agentID model.AgentID, cmd string) []byte {
 	} else {
 		args := []string{"mcp", "--tools=agent"}
 		if agentID == model.AgentAntigravityCLI {
-			// Antigravity CLI should load Engram's default MCP toolset as documented
-			// by Engram's Antigravity setup instructions.
+			// Antigravity CLI should launch the default Engram MCP server without
+			// narrowing the exposed tool set.
 			args = []string{"mcp"}
 		}
 		cfg = map[string]any{
