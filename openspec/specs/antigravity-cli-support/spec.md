@@ -32,7 +32,7 @@ The system MUST merge MCP server definitions (including Engram) into the Antigra
 - GIVEN the MCP injector runs for the `antigravity-cli` agent
 - WHEN Engram is enabled
 - THEN the Engram MCP configuration is merged into `~/.gemini/antigravity-cli/mcp_config.json`
-- AND the Engram server args explicitly include `--tools=agent,mem_context` so Antigravity CLI can call the required recall tool through MCP instead of falling back to the Engram CLI binary
+- AND the Engram server args use plain `engram mcp` so Antigravity CLI receives Engram's standard MCP toolset instead of Pi-specific direct-tool profiles
 
 ---
 
