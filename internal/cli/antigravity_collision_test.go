@@ -8,8 +8,8 @@ import (
 	"github.com/gentleman-programming/gentle-ai/internal/model"
 )
 
-func TestAntigravityCollisionCheckIncludesCLI(t *testing.T) {
-	checks := antigravityCollisionCheck([]model.AgentID{model.AgentGeminiCLI, model.AgentAntigravityCLI})
+func TestAntigravityCollisionCheckIncludesGeminiCLI(t *testing.T) {
+	checks := antigravityCollisionCheck([]model.AgentID{model.AgentGeminiCLI, model.AgentAntigravity})
 	if len(checks) != 1 {
 		t.Fatalf("antigravityCollisionCheck() len = %d, want 1", len(checks))
 	}
@@ -28,9 +28,9 @@ func TestAntigravityCollisionCheckIncludesCLI(t *testing.T) {
 	}
 	message := err.Error()
 	for _, want := range []string{
-		"Antigravity CLI intentionally uses the Gemini-compatible global prompt surface",
+		"Antigravity intentionally uses the Gemini-compatible global prompt surface",
 		"last synced SDD orchestrator owns the shared gentle-ai:sdd-orchestrator section",
-		"Prefer Antigravity CLI for new installs",
+		"Prefer Antigravity for new installs",
 	} {
 		if !strings.Contains(message, want) {
 			t.Fatalf("warning message missing %q; got:\n%s", want, message)
@@ -39,7 +39,7 @@ func TestAntigravityCollisionCheckIncludesCLI(t *testing.T) {
 }
 
 func TestAntigravityCollisionCheckNoWarningWithoutGemini(t *testing.T) {
-	checks := antigravityCollisionCheck([]model.AgentID{model.AgentAntigravityCLI})
+	checks := antigravityCollisionCheck([]model.AgentID{model.AgentAntigravity})
 	if len(checks) != 0 {
 		t.Fatalf("antigravityCollisionCheck() len = %d, want 0", len(checks))
 	}

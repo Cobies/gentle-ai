@@ -1,63 +1,33 @@
-# Design: Antigravity 2.0 and CLI Compatibility
+# Unified Antigravity support design
 
-## Technical Approach
-Add a dedicated `AgentAntigravityCLI` agent to `gentle-ai` with configuration paths mapping to `~/.gemini/antigravity-cli/`. Introduce a new asset `internal/assets/antigravitycli/sdd-orchestrator.md` specifying dynamic subagent execution using `define_subagent` and `invoke_subagent`.
+## Decision
 
-## Architecture Decisions
+Use the existing public `antigravity` agent ID for the new Antigravity implementation. Remove the standalone `antigravity-cli` option.
 
-| Option | Tradeoffs | Decision |
-|--------|-----------|----------|
-| **Dedicated Agent ID** | + Clean separation of paths and TUI installation screens.<br>- Adds a new type/constant. | **Go with dedicated ID (`antigravity-cli`)** |
-| **Dynamic Subagents via Skills** | + No file duplication on disk. Runs natively on CLI session.<br>- Requires LLM to read skill file dynamically. | **Instruct LLM to read and define subagents dynamically** |
+## File layout
 
-## Data Flow
-```
-[User Command] ──→ [gentle-ai Installer] ──→ Writes config to ~/.gemini/antigravity-cli/settings.json
-                                         ──→ Merges MCP to ~/.gemini/antigravity-cli/mcp_config.json
-                                         ──→ Copies skills to ~/.gemini/antigravity-cli/skills/
+| Purpose | Path |
+|---------|------|
+| Agent ID | `antigravity` |
+| Config root | `~/.gemini/antigravity-cli/` |
+| Settings | `~/.gemini/antigravity-cli/settings.json` |
+| MCP config | `~/.gemini/antigravity-cli/mcp_config.json` |
+| Skills | `~/.gemini/antigravity-cli/skills/` |
+| Shared prompt/persona | `~/.gemini/GEMINI.md` |
+| Engram plugin | `~/.gemini/antigravity-cli/plugins/gentle-ai-engram/` |
 
-[Antigravity CLI Session] ──→ Reads ~/.gemini/antigravity-cli/skills/{phase}/SKILL.md
-                         ──→ Calls define_subagent(prompt=SKILL)
-                         ──→ Calls invoke_subagent(prompt=task)
-```
+## Runtime model
 
-## File Changes
+The Go adapter does not install static subagent files. Instead, the SDD orchestrator asset tells Antigravity to define phase subagents dynamically at runtime with `define_subagent`, then execute them with `invoke_subagent`.
 
-| File | Action | Description |
-|------|--------|-------------|
-| `internal/model/types.go` | Modify | Define `AgentAntigravityCLI` constant. |
-| `internal/catalog/agents.go` | Modify | Add `AgentAntigravityCLI` to agent catalog. |
-| `internal/agents/factory.go` | Modify | Register new agent and switch cases. |
-| `internal/agents/antigravitycli/adapter.go` | Create | Create adapter for `antigravity-cli`. |
-| `internal/components/sdd/inject.go` | Modify | Map `AgentAntigravityCLI` to its orchestrator asset. |
-| `internal/assets/antigravitycli/sdd-orchestrator.md` | Create | Dynamic delegation instructions for Antigravity CLI. |
-| `internal/cli/install_test.go` | Modify | Update install CLI tests to cover new agent. |
-| `internal/cli/run.go` / `validate.go` | Modify | Add compatibility logic. |
-| `internal/tui/model.go` | Modify | Map selected agent strings in TUI. |
+## Implementation notes
 
-## Interfaces / Contracts
+- `internal/agents/antigravity` owns the unified adapter.
+- `internal/assets/antigravity/sdd-orchestrator.md` owns the dynamic subagent prompt.
+- `internal/model/types.go` keeps only `AgentAntigravity` for this surface.
+- CLI and TUI validation accept `antigravity`; they do not expose `antigravity-cli`.
+- Engram MCP uses the default `engram mcp` invocation and adds an Antigravity plugin hook for tool-hint injection.
 
-```go
-package model
+## Compatibility
 
-const (
-	AgentAntigravityCLI AgentID = "antigravity-cli"
-)
-```
-
-For `antigravitycli.Adapter`:
-- `GlobalConfigDir` returns `~/.gemini/antigravity-cli`
-- `MCPConfigPath` returns `~/.gemini/antigravity-cli/mcp_config.json`
-- `SupportsSubAgents()` returns `false` (dynamic definition only)
-- `SupportsSkills()` returns `true`
-- `MCPStrategy()` returns `model.StrategyMCPConfigFile`
-
-## Testing Strategy
-
-| Layer | What to Test | Approach |
-|-------|-------------|----------|
-| Unit | Adapter methods, factory registration, injection mapping. | Standard Go unit tests (`adapter_test.go`, `factory_test.go`). |
-| Unit | Integration of MCP configurations and settings overlays. | Validate settings JSON structure merge results. |
-
-## Migration / Rollout
-No migration required.
+Existing `antigravity` users keep the same installer agent name. The backing config path changes to the supported Antigravity Desktop-compatible surface.

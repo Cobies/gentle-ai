@@ -1206,15 +1206,15 @@ func engramHealthChecks() []verify.Check {
 }
 
 // antigravityCollisionCheck returns a soft verify check that warns the user
-// when Antigravity/Antigravity CLI and Gemini CLI are selected together. These
-// agents intentionally share ~/.gemini/GEMINI.md because Antigravity CLI is a
-// Gemini-compatible successor surface; the last synced SDD orchestrator owns the
+// when Antigravity and Gemini CLI are selected together. These agents
+// intentionally share ~/.gemini/GEMINI.md because Antigravity uses a
+// Gemini-compatible prompt surface; the last synced SDD orchestrator owns the
 // shared gentle-ai:sdd-orchestrator section.
 func antigravityCollisionCheck(agents []model.AgentID) []verify.Check {
 	hasAntigravitySurface := false
 	hasGemini := false
 	for _, id := range agents {
-		if id == model.AgentAntigravity || id == model.AgentAntigravityCLI {
+		if id == model.AgentAntigravity {
 			hasAntigravitySurface = true
 		}
 		if id == model.AgentGeminiCLI {
@@ -1231,9 +1231,9 @@ func antigravityCollisionCheck(agents []model.AgentID) []verify.Check {
 			Soft:        true,
 			Run: func(context.Context) error {
 				return fmt.Errorf(
-					"Antigravity/Antigravity CLI and Gemini CLI write rules to ~/.gemini/GEMINI.md\n" +
-						"Antigravity CLI intentionally uses the Gemini-compatible global prompt surface; the last synced SDD orchestrator owns the shared gentle-ai:sdd-orchestrator section.\n" +
-						"Prefer Antigravity CLI for new installs; keep Gemini CLI selected only when you intentionally want that legacy prompt to be the active one.",
+					"Antigravity and Gemini CLI write rules to ~/.gemini/GEMINI.md\n" +
+						"Antigravity intentionally uses the Gemini-compatible global prompt surface; the last synced SDD orchestrator owns the shared gentle-ai:sdd-orchestrator section.\n" +
+						"Prefer Antigravity for new installs; keep Gemini CLI selected only when you intentionally want that legacy prompt to be the active one.",
 				)
 			},
 		},

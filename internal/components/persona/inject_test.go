@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/gentleman-programming/gentle-ai/internal/agents"
-	"github.com/gentleman-programming/gentle-ai/internal/agents/antigravitycli"
+	"github.com/gentleman-programming/gentle-ai/internal/agents/antigravity"
 	"github.com/gentleman-programming/gentle-ai/internal/agents/claude"
 	"github.com/gentleman-programming/gentle-ai/internal/agents/kilocode"
 	"github.com/gentleman-programming/gentle-ai/internal/agents/kimi"
@@ -18,12 +18,12 @@ import (
 	"github.com/gentleman-programming/gentle-ai/internal/model"
 )
 
-func antigravityCLIAdapter() agents.Adapter { return antigravitycli.NewAdapter() }
-func claudeAdapter() agents.Adapter         { return claude.NewAdapter() }
-func kimiAdapter() agents.Adapter           { return kimi.NewAdapter() }
-func kilocodeAdapter() agents.Adapter       { return kilocode.NewAdapter() }
-func openclawAdapter() agents.Adapter       { return openclaw.NewAdapter() }
-func opencodeAdapter() agents.Adapter       { return opencode.NewAdapter() }
+func antigravityAdapter() agents.Adapter { return antigravity.NewAdapter() }
+func claudeAdapter() agents.Adapter      { return claude.NewAdapter() }
+func kimiAdapter() agents.Adapter        { return kimi.NewAdapter() }
+func kilocodeAdapter() agents.Adapter    { return kilocode.NewAdapter() }
+func openclawAdapter() agents.Adapter    { return openclaw.NewAdapter() }
+func opencodeAdapter() agents.Adapter    { return opencode.NewAdapter() }
 
 func assertGentlemanLanguageGuardrails(t *testing.T, text string, required []string, banned []string) {
 	t.Helper()
@@ -373,7 +373,7 @@ func TestInjectOpenCodeGentlemanWritesAgentsFile(t *testing.T) {
 	}
 }
 
-func TestInjectAntigravityCLIGentlemanWritesMarkedPersonaSection(t *testing.T) {
+func TestInjectAntigravityGentlemanWritesMarkedPersonaSection(t *testing.T) {
 	home := t.TempDir()
 	promptPath := filepath.Join(home, ".gemini", "GEMINI.md")
 	if err := os.MkdirAll(filepath.Dir(promptPath), 0o755); err != nil {
@@ -383,7 +383,7 @@ func TestInjectAntigravityCLIGentlemanWritesMarkedPersonaSection(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	result, err := Inject(home, antigravityCLIAdapter(), model.PersonaGentleman)
+	result, err := Inject(home, antigravityAdapter(), model.PersonaGentleman)
 	if err != nil {
 		t.Fatalf("Inject() error = %v", err)
 	}
@@ -407,7 +407,7 @@ func TestInjectAntigravityCLIGentlemanWritesMarkedPersonaSection(t *testing.T) {
 		}
 	}
 
-	second, err := Inject(home, antigravityCLIAdapter(), model.PersonaGentleman)
+	second, err := Inject(home, antigravityAdapter(), model.PersonaGentleman)
 	if err != nil {
 		t.Fatalf("Inject() second error = %v", err)
 	}

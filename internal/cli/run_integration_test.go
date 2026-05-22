@@ -1058,7 +1058,7 @@ func TestRunInstallEngramDefaultModeAttemptsClaudeSetup(t *testing.T) {
 	}
 }
 
-func TestRunInstallAntigravityCopiesGeminiSettingsAfterEngramSetup(t *testing.T) {
+func TestRunInstallAntigravityInitializesCLISettingsAfterEngramSetup(t *testing.T) {
 	home := t.TempDir()
 	restoreHome := osUserHomeDir
 	restoreCommand := runCommand
@@ -1095,13 +1095,13 @@ func TestRunInstallAntigravityCopiesGeminiSettingsAfterEngramSetup(t *testing.T)
 		t.Fatalf("verification ready = false")
 	}
 
-	settingsPath := filepath.Join(home, ".gemini", "antigravity", "settings.json")
+	settingsPath := filepath.Join(home, ".gemini", "antigravity-cli", "settings.json")
 	got, err := os.ReadFile(settingsPath)
 	if err != nil {
 		t.Fatalf("ReadFile(%q) error = %v", settingsPath, err)
 	}
-	if string(got) != "{\"theme\":\"dark\"}\n" {
-		t.Fatalf("antigravity settings = %q, want copied Gemini settings", got)
+	if string(got) != "{}\n" {
+		t.Fatalf("antigravity settings = %q, want initialized empty settings", got)
 	}
 }
 

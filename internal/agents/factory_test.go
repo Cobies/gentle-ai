@@ -35,30 +35,30 @@ func TestDefaultRegistryIncludesPi(t *testing.T) {
 	}
 }
 
-func TestFactoryResolvesAntigravityCLIAdapter(t *testing.T) {
-	adapter, err := NewAdapter(model.AgentAntigravityCLI)
+func TestFactoryResolvesAntigravityAdapter(t *testing.T) {
+	adapter, err := NewAdapter(model.AgentAntigravity)
 	if err != nil {
-		t.Fatalf("NewAdapter(%q) returned error: %v", model.AgentAntigravityCLI, err)
+		t.Fatalf("NewAdapter(%q) returned error: %v", model.AgentAntigravity, err)
 	}
 
-	if got := adapter.Agent(); got != model.AgentAntigravityCLI {
-		t.Fatalf("adapter.Agent() = %q, want %q", got, model.AgentAntigravityCLI)
+	if got := adapter.Agent(); got != model.AgentAntigravity {
+		t.Fatalf("adapter.Agent() = %q, want %q", got, model.AgentAntigravity)
 	}
 }
 
-func TestDefaultRegistryIncludesAntigravityCLI(t *testing.T) {
+func TestDefaultRegistryIncludesAntigravity(t *testing.T) {
 	registry, err := NewDefaultRegistry()
 	if err != nil {
 		t.Fatalf("NewDefaultRegistry() returned error: %v", err)
 	}
 
-	adapter, ok := registry.Get(model.AgentAntigravityCLI)
+	adapter, ok := registry.Get(model.AgentAntigravity)
 	if !ok {
-		t.Fatalf("registry missing %s adapter", model.AgentAntigravityCLI)
+		t.Fatalf("registry missing %s adapter", model.AgentAntigravity)
 	}
 
-	if got := adapter.Agent(); got != model.AgentAntigravityCLI {
-		t.Fatalf("registry adapter.Agent() = %q, want %q", got, model.AgentAntigravityCLI)
+	if got := adapter.Agent(); got != model.AgentAntigravity {
+		t.Fatalf("registry adapter.Agent() = %q, want %q", got, model.AgentAntigravity)
 	}
 }
 
@@ -70,7 +70,6 @@ func TestDefaultRegistrySupportedAgentsMatchesFactoryAgents(t *testing.T) {
 
 	want := []model.AgentID{
 		model.AgentAntigravity,
-		model.AgentAntigravityCLI,
 		model.AgentClaudeCode,
 		model.AgentCodex,
 		model.AgentCursor,

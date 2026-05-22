@@ -1,52 +1,25 @@
-# Proposal: Antigravity 2.0 and CLI Compatibility
+# Replace legacy Antigravity with unified support
 
-## Intent
-Add native support for the newly released **Google Antigravity CLI** (`antigravity-cli`) agent in `gentle-ai`. This allows CLI users to run SDD workflows using dynamic subagent delegation (via `define_subagent` and `invoke_subagent` tools) and Engram persistent memory.
+## Summary
 
-## Scope
+Replace the existing public `antigravity` installer target with the new Antigravity implementation that uses the Gemini-compatible CLI/Desktop configuration surface. Do not expose a separate public `antigravity-cli` agent ID.
 
-### In Scope
-- Define `AgentAntigravityCLI` in `internal/model/types.go`.
-- Implement `internal/agents/antigravitycli/adapter.go` for the CLI settings (`~/.gemini/antigravity-cli/`) and MCP servers.
-- Map the new agent to a dedicated dynamic SDD orchestrator asset.
-- Add `internal/assets/antigravitycli/sdd-orchestrator.md` containing dynamic subagent definition and invocation instructions.
-- Ensure all test suites pass.
+## Motivation
 
-### Out of Scope
-- Modifying legacy `AgentAntigravity` (Desktop IDE) behavior.
-- Implementing automatic installation of the CLI executable (`agy`) itself.
+The new Antigravity implementation works for the desktop product as well as the CLI. Keeping both `antigravity` and `antigravity-cli` would create a confusing installer choice and preserve legacy behavior that no longer matches the supported surface.
 
-## Capabilities
+## Proposed changes
 
-### New Capabilities
-- `antigravity-cli-support`: Full support for Google Antigravity CLI with dynamic subagents and Engram.
+- Keep `antigravity` as the public agent ID.
+- Remove the separate `antigravity-cli` public agent ID and adapter.
+- Make `antigravity` write to `~/.gemini/antigravity-cli/` for settings, MCP config, plugins, and global skills.
+- Keep global prompt/persona content in `~/.gemini/GEMINI.md`.
+- Use dynamic subagent orchestration through `define_subagent` and `invoke_subagent`.
+- Install the Engram MCP configuration and Antigravity plugin hook for the unified `antigravity` agent.
 
-### Modified Capabilities
-- `sdd-orchestrator-assets`: Add `antigravitycli/sdd-orchestrator.md` orchestrator asset.
+## Acceptance criteria
 
-## Approach
-Create a new agent adapter for the CLI (`antigravity-cli`). It will return `SupportsSubAgents() = false` in Go (as it doesn't use static files in a home folder), but its specific prompt `sdd-orchestrator.md` will instruct the LLM to dynamically call `define_subagent` and `invoke_subagent` at runtime by reading the skills installed under `~/.gemini/antigravity-cli/skills/`.
-
-## Affected Areas
-
-| Area | Impact | Description |
-|------|--------|-------------|
-| `internal/model/types.go` | Modified | Add `AgentAntigravityCLI` constant. |
-| `internal/agents/antigravitycli/adapter.go` | New | CLI agent adapter implementation. |
-| `internal/agents/factory.go` | Modified | Register the new CLI agent. |
-| `internal/components/sdd/inject.go` | Modified | Map new agent to its orchestrator. |
-| `internal/assets/antigravitycli/sdd-orchestrator.md` | New | Dynamic subagent orchestrator prompt. |
-
-## Risks
-
-| Risk | Likelihood | Mitigation |
-|------|------------|------------|
-| Dynamic delegation failure | Low | Provide clear errors/fallbacks in orchestrator prompt. |
-| Configuration path conflict | Low | Explicitly isolate paths using `antigravity-cli` subdirectory. |
-
-## Rollback Plan
-Revert changes using `git checkout` and delete the new `antigravitycli/` directories.
-
-## Success Criteria
-- [ ] `go test ./...` passes.
-- [ ] Orchestrator template successfully generated.
+- `gentle-ai install --agent antigravity ...` uses the unified Antigravity behavior.
+- `antigravity-cli` is not available as a separate catalog, CLI, or TUI agent option.
+- Legacy Antigravity config under `~/.gemini/antigravity/` is no longer written by this support path.
+- Tests and golden files cover the unified `antigravity` behavior.
