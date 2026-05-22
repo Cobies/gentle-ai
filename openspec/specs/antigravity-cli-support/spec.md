@@ -56,3 +56,16 @@ The agent adapter for `antigravity-cli` MUST report that it does not support sta
 - GIVEN the `antigravity-cli` agent adapter is queried
 - WHEN `SupportsSubAgents()` is called
 - THEN it returns `false`
+
+---
+
+### Requirement: Gemini-Compatible Prompt Surface
+
+The system MUST treat `antigravity-cli` as a Gemini-compatible successor surface that intentionally writes global rules to `~/.gemini/GEMINI.md`. When `gemini-cli` and `antigravity-cli` are selected together, the installer MUST warn that the last synced SDD orchestrator owns the shared `gentle-ai:sdd-orchestrator` section.
+
+#### Scenario: Antigravity CLI and Gemini CLI are selected together
+
+- GIVEN both `gemini-cli` and `antigravity-cli` are selected
+- WHEN verification checks run
+- THEN the user receives a soft warning that Antigravity CLI shares the Gemini-compatible global prompt surface
+- AND the warning recommends preferring Antigravity CLI for new installs
