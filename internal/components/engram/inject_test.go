@@ -612,6 +612,33 @@ func TestInjectAntigravityCLIWritesMCPToCLIConfig(t *testing.T) {
 		t.Fatalf("Antigravity CLI should use Engram's default MCP invocation without tool-profile flags; got:\n%s", text)
 	}
 
+	pluginPath := filepath.Join(home, ".gemini", "antigravity-cli", "plugins", "gentle-ai-engram", "plugin.json")
+	if _, err := os.Stat(pluginPath); err != nil {
+		t.Fatalf("Antigravity CLI Engram plugin manifest missing: %v", err)
+	}
+
+	hooksPath := filepath.Join(home, ".gemini", "antigravity-cli", "plugins", "gentle-ai-engram", "hooks.json")
+	hooksContent, err := os.ReadFile(hooksPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%q) error = %v", hooksPath, err)
+	}
+	hooksText := string(hooksContent)
+	for _, want := range []string{
+		"PreInvocation",
+		"injectSteps",
+		"mem_save",
+		"mem_search",
+		"mem_context",
+		"mem_session_summary",
+		"mem_get_observation",
+		"mem_current_project",
+		"mem_judge",
+	} {
+		if !strings.Contains(hooksText, want) {
+			t.Fatalf("Antigravity CLI Engram hook missing %q; got:\n%s", want, hooksText)
+		}
+	}
+
 	desktopMCPPath := filepath.Join(home, ".gemini", "antigravity", "mcp_config.json")
 	if _, err := os.Stat(desktopMCPPath); !os.IsNotExist(err) {
 		t.Fatalf("desktop MCP path %q should not be written for antigravity-cli; stat err = %v", desktopMCPPath, err)

@@ -33,6 +33,7 @@ The system MUST merge MCP server definitions (including Engram) into the Antigra
 - WHEN Engram is enabled
 - THEN the Engram MCP configuration is merged into `~/.gemini/antigravity-cli/mcp_config.json`
 - AND the Engram server args use plain `engram mcp` so Antigravity CLI receives Engram's default MCP toolset
+- AND the installer stages a `gentle-ai-engram` Antigravity CLI plugin hook that injects the minimum Engram MCP tool names before model invocation
 
 ---
 
