@@ -10,6 +10,7 @@ import (
 
 	"github.com/gentleman-programming/gentle-ai/internal/agents"
 	"github.com/gentleman-programming/gentle-ai/internal/agents/antigravity"
+	"github.com/gentleman-programming/gentle-ai/internal/agents/antigravitycli"
 	"github.com/gentleman-programming/gentle-ai/internal/agents/claude"
 	"github.com/gentleman-programming/gentle-ai/internal/agents/codex"
 	"github.com/gentleman-programming/gentle-ai/internal/agents/gemini"
@@ -28,6 +29,10 @@ func qwenAdapter() agents.Adapter     { return qwen.NewAdapter() }
 func openclawAdapter() agents.Adapter { return openclaw.NewAdapter() }
 func antigravityAdapter() agents.Adapter {
 	return antigravity.NewAdapter()
+}
+
+func antigravityCLIAdapter() agents.Adapter {
+	return antigravitycli.NewAdapter()
 }
 
 func piAdapter() agents.Adapter { return pi.NewAdapter() }
@@ -581,6 +586,26 @@ func TestInjectAntigravityCopiesGeminiSettingsAfterEngramSetup(t *testing.T) {
 
 	mcpPath := filepath.Join(home, ".gemini", "antigravity", "mcp_config.json")
 	assertArgsHaveToolsAgent(t, mcpPath)
+}
+
+func TestInjectAntigravityCLIWritesMCPToCLIConfig(t *testing.T) {
+	home := t.TempDir()
+
+	result, err := Inject(home, antigravityCLIAdapter())
+	if err != nil {
+		t.Fatalf("Inject(antigravity-cli) error = %v", err)
+	}
+	if !result.Changed {
+		t.Fatalf("Inject(antigravity-cli) changed = false")
+	}
+
+	cliMCPPath := filepath.Join(home, ".gemini", "antigravity-cli", "mcp_config.json")
+	assertArgsHaveToolsAgent(t, cliMCPPath)
+
+	desktopMCPPath := filepath.Join(home, ".gemini", "antigravity", "mcp_config.json")
+	if _, err := os.Stat(desktopMCPPath); !os.IsNotExist(err) {
+		t.Fatalf("desktop MCP path %q should not be written for antigravity-cli; stat err = %v", desktopMCPPath, err)
+	}
 }
 
 func TestInjectAntigravityInitializesEmptySettingsWhenGeminiMissing(t *testing.T) {

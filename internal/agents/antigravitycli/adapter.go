@@ -95,8 +95,7 @@ func (a *Adapter) MCPStrategy() model.MCPStrategy {
 // --- MCP ---
 
 func (a *Adapter) MCPConfigPath(homeDir string, _ string) string {
-	// Share the MCP configuration with the desktop agent
-	return filepath.Join(homeDir, ".gemini", "antigravity", "mcp_config.json")
+	return filepath.Join(homeDir, ".gemini", "antigravity-cli", "mcp_config.json")
 }
 
 // --- Optional capabilities ---

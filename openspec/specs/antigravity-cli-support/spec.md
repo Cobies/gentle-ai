@@ -25,13 +25,13 @@ The system MUST manage configurations and install the settings JSON file specifi
 
 ### Requirement: MCP Server Configuration Path
 
-The system MUST merge MCP server definitions (including Engram) into the shared Antigravity MCP configuration file at `~/.gemini/antigravity/mcp_config.json`.
+The system MUST merge MCP server definitions (including Engram) into the Antigravity CLI MCP configuration file at `~/.gemini/antigravity-cli/mcp_config.json`.
 
-#### Scenario: MCP servers are merged into the shared mcp_config.json
+#### Scenario: MCP servers are merged into the CLI mcp_config.json
 
 - GIVEN the MCP injector runs for the `antigravity-cli` agent
 - WHEN Engram is enabled
-- THEN the Engram MCP configuration is merged into `~/.gemini/antigravity/mcp_config.json`
+- THEN the Engram MCP configuration is merged into `~/.gemini/antigravity-cli/mcp_config.json`
 
 ---
 

@@ -13,7 +13,7 @@ Add a dedicated `AgentAntigravityCLI` agent to `gentle-ai` with configuration pa
 ## Data Flow
 ```
 [User Command] ──→ [gentle-ai Installer] ──→ Writes config to ~/.gemini/antigravity-cli/settings.json
-                                         ──→ Merges MCP to ~/.gemini/antigravity/mcp_config.json
+                                         ──→ Merges MCP to ~/.gemini/antigravity-cli/mcp_config.json
                                          ──→ Copies skills to ~/.gemini/antigravity-cli/skills/
 
 [Antigravity CLI Session] ──→ Reads ~/.gemini/antigravity-cli/skills/{phase}/SKILL.md
@@ -47,7 +47,7 @@ const (
 
 For `antigravitycli.Adapter`:
 - `GlobalConfigDir` returns `~/.gemini/antigravity-cli`
-- `MCPConfigPath` returns `~/.gemini/antigravity/mcp_config.json`
+- `MCPConfigPath` returns `~/.gemini/antigravity-cli/mcp_config.json`
 - `SupportsSubAgents()` returns `false` (dynamic definition only)
 - `SupportsSkills()` returns `true`
 - `MCPStrategy()` returns `model.StrategyMCPConfigFile`

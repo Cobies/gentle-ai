@@ -6,7 +6,7 @@ Currently, `gentle-ai` only supports the desktop-only "Google Antigravity" IDE (
 With Google's release of **Antigravity 2.0** and the **Antigravity CLI**, the platform now supports:
 1. A terminal-first CLI (`agy`) with settings in `~/.gemini/antigravity-cli/settings.json` and skills in `~/.gemini/antigravity-cli/skills/`.
 2. Dynamic subagent orchestration via native `/agents` command and LLM tools (`define_subagent` and `invoke_subagent`).
-3. Persisted memory across sessions using the **Engram MCP server** configured in `~/.gemini/antigravity/mcp_config.json`.
+3. Persisted memory across sessions using the **Engram MCP server** configured in `~/.gemini/antigravity-cli/mcp_config.json`.
 
 ### Affected Areas
 - `internal/model/types.go` — Add `AgentAntigravityCLI` (`antigravity-cli`) agent ID.

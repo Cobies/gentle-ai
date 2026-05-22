@@ -25,7 +25,7 @@ Add native support for the newly released **Google Antigravity CLI** (`antigravi
 - `sdd-orchestrator-assets`: Add `antigravitycli/sdd-orchestrator.md` orchestrator asset.
 
 ## Approach
-Create a new agent adapter for the CLI (`antigravity-cli`). It will return `SupportsSubAgents() = false` in Go (as it doesn't use static files in a home folder), but its specific prompt `sdd-orchestrator.md` will instruct the LLM to dynamically call `define_subagent` and `invoke_subagent` in caliente by reading the skills installed under `~/.gemini/antigravity-cli/skills/`.
+Create a new agent adapter for the CLI (`antigravity-cli`). It will return `SupportsSubAgents() = false` in Go (as it doesn't use static files in a home folder), but its specific prompt `sdd-orchestrator.md` will instruct the LLM to dynamically call `define_subagent` and `invoke_subagent` at runtime by reading the skills installed under `~/.gemini/antigravity-cli/skills/`.
 
 ## Affected Areas
 
