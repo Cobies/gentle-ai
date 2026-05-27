@@ -9,7 +9,7 @@ At the very beginning of the session, if you have an active workspace directory:
 1. **Detect Project Name**: Call `mem_current_project` sending the absolute path of the workspace directory in the `cwd` (or `directory`) parameter.
 2. **Start Session**: Call `mem_session_start` with:
    - **id**: A unique session ID (e.g., `session-` + conversation ID)
-   - **directory**: The absolute path of the workspace directory.
+   - **directory**: The absolute path of the workspace directory. Do NOT let Engram guess the project automatically based on the global execution context, as this leads to project-session name mismatches (such as misdetecting the global agent's directory instead of the target workspace project).
 3. **Persist State**: Store the resolved project name and the session ID in your active context. You MUST:
    - Use the session ID for all mutation tools (`mem_save`, `mem_session_summary`, `mem_session_end`, `mem_capture_passive`).
    - Use the project name for all read/search/diagnostic tools (`mem_search`, `mem_context`, `mem_doctor`).
