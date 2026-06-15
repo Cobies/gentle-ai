@@ -18,6 +18,7 @@ GITHUB_OWNER="Gentleman-Programming"
 GITHUB_REPO="gentle-ai"
 BINARY_NAME="gentle-ai"
 BREW_TAP="Gentleman-Programming/homebrew-tap"
+BREW_FORMULA_REF="gentleman-programming/tap/${BINARY_NAME}"
 
 # ============================================================================
 # Color support
@@ -49,6 +50,38 @@ error()   { echo -e "${RED}[error]${NC}   $*" >&2; }
 fatal()   { error "$@"; exit 1; }
 step()    { echo -e "\n${CYAN}${BOLD}==>${NC} ${BOLD}$*${NC}"; }
 
+homebrew_trust_gentle_ai_formula() {
+    if brew help trust &>/dev/null; then
+        info "Trusting ${BREW_FORMULA_REF} for Homebrew tap-trust enforcement"
+        brew trust --formula "$BREW_FORMULA_REF" &>/dev/null || true
+    fi
+}
+
+print_homebrew_failure_help() {
+    local output="$1"
+    local lower
+    lower="$(printf '%s' "$output" | tr '[:upper:]' '[:lower:]')"
+
+    if [[ "$lower" == *"untrusted tap"* || "$lower" == *"tap trust is required"* || "$lower" == *"homebrew_require_tap_trust"* ]]; then
+        warn "Homebrew requires explicit trust for external taps."
+        echo "Trust only the Gentle AI formula, then retry:" >&2
+        echo "  brew trust --formula ${BREW_FORMULA_REF}" >&2
+        echo "  brew upgrade ${BINARY_NAME}" >&2
+    fi
+
+    if [[ "$lower" == *"bubblewrap is installed but cannot create a rootless sandbox"* || "$lower" == *"rootless sandbox"* || "$lower" == *"homebrew_no_sandbox_linux"* ]]; then
+        warn "Homebrew on Linux could not create its Bubblewrap rootless sandbox."
+        echo "This requires an explicit admin/security decision: enabling unprivileged user namespaces lets Homebrew use its sandbox but changes host kernel/AppArmor policy." >&2
+        echo "If acceptable, run:" >&2
+        echo "  sudo sysctl -w kernel.unprivileged_userns_clone=1" >&2
+        echo "  sudo sysctl -w user.max_user_namespaces=28633" >&2
+        echo "  sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true" >&2
+        echo >&2
+        echo "Final workaround if your distro policy forbids this sandbox:" >&2
+        echo "  HOMEBREW_NO_SANDBOX_LINUX=1 brew upgrade ${BINARY_NAME}" >&2
+    fi
+}
+
 # ============================================================================
 # Help
 # ============================================================================
@@ -61,6 +94,7 @@ Usage: install.sh [OPTIONS]
 
 Options:
   --method METHOD   Force install method: brew, go, binary (default: auto-detect)
+  --channel CHANNEL Gentle AI channel: stable (default), beta, or nightly (env: GENTLE_AI_CHANNEL)
   --dir DIR         Custom install directory for binary method
   --insecure        Skip checksum verification (not recommended)
   -h, --help        Show this help
@@ -73,6 +107,7 @@ Install methods (auto-detected in priority order):
 Examples:
   curl -sL https://raw.githubusercontent.com/${GITHUB_OWNER}/${GITHUB_REPO}/main/scripts/install.sh | bash
   ./install.sh --method binary
+  ./install.sh --channel beta
   ./install.sh --method binary --dir \$HOME/.local/bin
   ./install.sh --method binary --insecure   # skip checksum (not recommended)
 
@@ -151,6 +186,15 @@ check_prerequisites() {
 # ============================================================================
 
 detect_install_method() {
+    if [ "${CHANNEL}" = "beta" ]; then
+        if [ -n "${FORCE_METHOD:-}" ] && [ "${FORCE_METHOD}" != "go" ]; then
+            fatal "--channel beta installs Gentle AI from main and only supports --method go"
+        fi
+        INSTALL_METHOD="go"
+        info "Using beta channel — will install ${BINARY_NAME} from main via go install"
+        return
+    fi
+
     if [ -n "${FORCE_METHOD:-}" ]; then
         case "$FORCE_METHOD" in
             brew|go|binary) INSTALL_METHOD="$FORCE_METHOD" ;;
@@ -191,19 +235,28 @@ install_brew() {
         fatal "Failed to tap $BREW_TAP"
     fi
 
+    homebrew_trust_gentle_ai_formula
+
     if brew list "$BINARY_NAME" &>/dev/null; then
         info "Already installed, upgrading ${BINARY_NAME}..."
-        if brew upgrade "$BINARY_NAME" 2>/dev/null; then
+        local output
+        if output="$(brew upgrade "$BINARY_NAME" 2>&1)"; then
             success "Upgraded ${BINARY_NAME} via Homebrew"
-        else
-            # "already up-to-date" also exits non-zero on some brew versions
+        elif printf '%s' "$output" | grep -Eiq 'already.*(up-to-date|installed)|not outdated'; then
             success "${BINARY_NAME} is already at the latest version"
+        else
+            printf '%s\n' "$output" >&2
+            print_homebrew_failure_help "$output"
+            fatal "Failed to upgrade ${BINARY_NAME} via Homebrew"
         fi
     else
         info "Installing ${BINARY_NAME}..."
-        if brew install "$BINARY_NAME"; then
+        local output
+        if output="$(brew install "$BINARY_NAME" 2>&1)"; then
             success "Installed ${BINARY_NAME} via Homebrew"
         else
+            printf '%s\n' "$output" >&2
+            print_homebrew_failure_help "$output"
             fatal "Failed to install ${BINARY_NAME} via Homebrew"
         fi
     fi
@@ -216,10 +269,27 @@ install_brew() {
 install_go() {
     step "Installing via go install"
 
-    local go_package="github.com/${GITHUB_OWNER,,}/${GITHUB_REPO}/cmd/${BINARY_NAME}@latest"
+    local version="latest"
+    if [ "${CHANNEL}" = "beta" ]; then
+        version="main"
+    fi
+    # Lowercase the owner portably: ${var,,} needs bash 4+, but macOS ships
+    # bash 3.2, so piping `| bash` would fail with "bad substitution".
+    local owner_lc
+    owner_lc="$(printf '%s' "$GITHUB_OWNER" | tr '[:upper:]' '[:lower:]')"
+    local go_package="github.com/${owner_lc}/${GITHUB_REPO}/cmd/${BINARY_NAME}@${version}"
 
     info "Running: go install ${go_package}"
-    if ! go install "$go_package"; then
+    if [ "${CHANNEL}" = "beta" ]; then
+        prepend_go_env_pattern GONOSUMDB github.com/gentleman-programming/gentle-ai
+        prepend_go_env_pattern GOPRIVATE github.com/gentleman-programming/gentle-ai
+        prepend_go_env_pattern GONOPROXY github.com/gentleman-programming/gentle-ai
+        export GONOSUMDB GOPRIVATE GONOPROXY
+
+        if ! go install "$go_package"; then
+            fatal "Failed to install via go install. Make sure Go is properly configured."
+        fi
+    elif ! go install "$go_package"; then
         fatal "Failed to install via go install. Make sure Go is properly configured."
     fi
 
@@ -236,6 +306,22 @@ install_go() {
     fi
 
     success "Installed ${BINARY_NAME} via go install"
+}
+
+prepend_go_env_pattern() {
+    local name="$1"
+    local pattern="$2"
+    local current="${!name:-}"
+
+    if [ -z "$current" ]; then
+        printf -v "$name" '%s' "$pattern"
+        return
+    fi
+
+    case ",$current," in
+        *",$pattern,"*) return ;;
+        *) printf -v "$name" '%s,%s' "$pattern" "$current" ;;
+    esac
 }
 
 # ============================================================================
@@ -451,7 +537,11 @@ print_next_steps() {
     echo -e "${GREEN}${BOLD}Installation complete!${NC}"
     echo ""
     echo -e "${BOLD}Next steps:${NC}"
-    echo -e "  ${CYAN}1.${NC} Run ${BOLD}${BINARY_NAME}${NC} to start the TUI installer"
+    if [ "${CHANNEL}" = "beta" ]; then
+        echo -e "  ${CYAN}1.${NC} Run ${BOLD}GENTLE_AI_CHANNEL=beta ${BINARY_NAME} install${NC} to keep using the beta channel"
+    else
+        echo -e "  ${CYAN}1.${NC} Run ${BOLD}${BINARY_NAME}${NC} to start the TUI installer"
+    fi
     echo -e "  ${CYAN}2.${NC} Select your AI agent(s) and tools to configure"
     echo -e "  ${CYAN}3.${NC} Follow the interactive prompts"
     echo ""
@@ -471,12 +561,17 @@ main() {
     FORCE_METHOD=""
     INSTALL_DIR=""
     INSECURE="false"
+    CHANNEL="${GENTLE_AI_CHANNEL:-stable}"
 
     while [ $# -gt 0 ]; do
         case "$1" in
             --method)
                 [ $# -lt 2 ] && fatal "--method requires an argument"
                 FORCE_METHOD="$2"; shift 2
+                ;;
+            --channel)
+                [ $# -lt 2 ] && fatal "--channel requires an argument"
+                CHANNEL="$2"; shift 2
                 ;;
             --dir)
                 [ $# -lt 2 ] && fatal "--dir requires an argument"
@@ -495,6 +590,14 @@ main() {
                 ;;
         esac
     done
+
+    case "${CHANNEL}" in
+        stable|beta|nightly) ;;
+        *) fatal "Unknown channel: ${CHANNEL}. Use: stable, beta, or nightly" ;;
+    esac
+    if [ "${CHANNEL}" = "nightly" ]; then
+        CHANNEL="beta"
+    fi
 
     print_banner
 

@@ -12,6 +12,7 @@ import (
 	"github.com/gentleman-programming/gentle-ai/internal/backup"
 	"github.com/gentleman-programming/gentle-ai/internal/model"
 	"github.com/gentleman-programming/gentle-ai/internal/state"
+	"github.com/gentleman-programming/gentle-ai/internal/verify"
 )
 
 // ─── Phase 1: ParseSyncFlags ───────────────────────────────────────────────
@@ -588,6 +589,15 @@ func TestComponentSyncStepRunsGGAInjectWithoutBinaryInstall(t *testing.T) {
 
 func TestRunSyncAppliesManagedFilesystemChanges(t *testing.T) {
 	home := t.TempDir()
+	pluginsDir := filepath.Join(home, ".config", "opencode", "plugins")
+	if err := os.MkdirAll(pluginsDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(plugins) error = %v", err)
+	}
+	legacyPluginPath := filepath.Join(pluginsDir, "background-agents.ts")
+	if err := os.WriteFile(legacyPluginPath, []byte("legacy background agents plugin"), 0o644); err != nil {
+		t.Fatalf("WriteFile(background-agents.ts) error = %v", err)
+	}
+
 	restoreHome := osUserHomeDir
 	restoreBackupHome := backup.UserHomeDirFn
 	restoreCommand := runCommand
@@ -617,6 +627,15 @@ func TestRunSyncAppliesManagedFilesystemChanges(t *testing.T) {
 	settingsPath := filepath.Join(home, ".config", "opencode", "opencode.json")
 	if _, err := os.Stat(settingsPath); err != nil {
 		t.Errorf("expected SDD inject to create %q: %v", settingsPath, err)
+	}
+	if _, err := os.Stat(legacyPluginPath); !os.IsNotExist(err) {
+		t.Errorf("expected sync to remove legacy OpenCode plugin %q; stat err = %v", legacyPluginPath, err)
+	}
+	for _, plugin := range []string{"model-variants.ts", "skill-registry.ts"} {
+		pluginPath := filepath.Join(pluginsDir, plugin)
+		if _, err := os.Stat(pluginPath); err != nil {
+			t.Errorf("expected sync to keep OpenCode support plugin %q: %v", pluginPath, err)
+		}
 	}
 }
 
@@ -1331,11 +1350,6 @@ func TestRunSyncExternalSingleActiveSkipsDetectAndPreservesOrchestratorPrompt(t 
 	runCommand = func(string, ...string) error { return nil }
 	cmdLookPath = func(name string) (string, error) { return "/usr/local/bin/" + name, nil }
 
-	// Pre-create package directory to avoid npm/bun install attempts in tests.
-	if err := os.MkdirAll(filepath.Join(home, ".config", "opencode", "node_modules", "unique-names-generator"), 0o755); err != nil {
-		t.Fatalf("MkdirAll(node_modules): %v", err)
-	}
-
 	// External profile marker to mirror real integrations.
 	profilesDir := filepath.Join(home, ".config", "opencode", "profiles")
 	if err := os.MkdirAll(profilesDir, 0o755); err != nil {
@@ -1483,9 +1497,16 @@ func TestRunSyncWithSelection_WritesExpectedFiles(t *testing.T) {
 		filepath.Join(home, ".config", "opencode", "opencode.json"),
 		filepath.Join(home, ".config", "opencode", "plugins", "background-agents.ts"),
 		filepath.Join(home, ".config", "opencode", "plugins", "model-variants.ts"),
+		filepath.Join(home, ".config", "opencode", "plugins", "skill-registry.ts"),
 	} {
 		if !containsPath(managedPaths, want) {
 			t.Fatalf("managed SDD paths missing %q\npaths=%v", want, managedPaths)
+		}
+		if filepath.Base(want) == "background-agents.ts" {
+			if _, err := os.Stat(want); !os.IsNotExist(err) {
+				t.Errorf("legacy SDD sync target %q should be removed or absent; stat err = %v", want, err)
+			}
+			continue
 		}
 		if _, err := os.Stat(want); err != nil {
 			t.Errorf("expected SDD sync to create %q: %v", want, err)
@@ -2020,6 +2041,10 @@ func TestRunSyncLoadsPersistedModelAssignments(t *testing.T) {
 			"orchestrator": "opus",
 			"sdd-apply":    "sonnet",
 		},
+		KiroModelAssignments: map[string]string{
+			"sdd-design": "glm",
+			"default":    "auto",
+		},
 		ModelAssignments: map[string]state.ModelAssignmentState{
 			"sdd-init": {ProviderID: "anthropic", ModelID: "claude-sonnet-4"},
 		},
@@ -2042,6 +2067,12 @@ func TestRunSyncLoadsPersistedModelAssignments(t *testing.T) {
 	}
 	if got := result.Selection.ClaudeModelAssignments["sdd-apply"]; got != "sonnet" {
 		t.Errorf("ClaudeModelAssignments[sdd-apply] = %q, want %q", got, "sonnet")
+	}
+	if got := result.Selection.KiroModelAssignments["sdd-design"]; got != model.KiroModelGLM {
+		t.Errorf("KiroModelAssignments[sdd-design] = %q, want %q", got, model.KiroModelGLM)
+	}
+	if got := result.Selection.KiroModelAssignments["default"]; got != model.KiroModelAuto {
+		t.Errorf("KiroModelAssignments[default] = %q, want %q", got, model.KiroModelAuto)
 	}
 
 	// OpenCode assignments must be loaded.
@@ -2237,6 +2268,51 @@ func TestSyncPersonaPathsExcludeOpenCodeAgentJson(t *testing.T) {
 	}
 }
 
+func TestSyncPersonaPathsDeclareManagedClaudeOutputStyle(t *testing.T) {
+	home := t.TempDir()
+	reg, _ := agents.NewDefaultRegistry()
+	a, _ := reg.Get(model.AgentClaudeCode)
+
+	tests := []struct {
+		name       string
+		persona    model.PersonaID
+		wantStyle  string
+		unwanted   string
+		wantConfig string
+	}{
+		{
+			name:       "gentleman",
+			persona:    model.PersonaGentleman,
+			wantStyle:  filepath.Join(home, ".claude", "output-styles", "gentleman.md"),
+			unwanted:   filepath.Join(home, ".claude", "output-styles", "neutral.md"),
+			wantConfig: filepath.Join(home, ".claude", "settings.json"),
+		},
+		{
+			name:       "neutral",
+			persona:    model.PersonaNeutral,
+			wantStyle:  filepath.Join(home, ".claude", "output-styles", "neutral.md"),
+			unwanted:   filepath.Join(home, ".claude", "output-styles", "gentleman.md"),
+			wantConfig: filepath.Join(home, ".claude", "settings.json"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			paths := syncPersonaPaths(home, model.Selection{Persona: tt.persona}, []agents.Adapter{a})
+
+			if !containsPath(paths, tt.wantStyle) {
+				t.Fatalf("syncPersonaPaths(%q) missing managed style %q; got %v", tt.persona, tt.wantStyle, paths)
+			}
+			if !containsPath(paths, tt.wantConfig) {
+				t.Fatalf("syncPersonaPaths(%q) missing settings path %q; got %v", tt.persona, tt.wantConfig, paths)
+			}
+			if containsPath(paths, tt.unwanted) {
+				t.Fatalf("syncPersonaPaths(%q) included wrong managed style %q; got %v", tt.persona, tt.unwanted, paths)
+			}
+		})
+	}
+}
+
 // TestRunSyncRegeneratesPersonaBlockBetweenMarkers verifies the core fix:
 // when an old persona block lives between markers, sync replaces it with the
 // embedded asset for the current version.
@@ -2309,10 +2385,10 @@ func TestRunSyncReadsPersonaFromState(t *testing.T) {
 	}
 }
 
-// TestRunSyncFallsBackToGentlemanWhenStateLacksPersona verifies the backward
-// compatibility path: state files written before persona persistence still
-// produce a working sync.
-func TestRunSyncFallsBackToGentlemanWhenStateLacksPersona(t *testing.T) {
+// TestRunSyncFallsBackToNeutralWhenStateLacksPersona verifies missing persona
+// state resolves to neutral/default-safe behavior instead of reactivating
+// Gentleman regional voice.
+func TestRunSyncFallsBackToNeutralWhenStateLacksPersona(t *testing.T) {
 	home := t.TempDir()
 	setSyncTestHome(t, home)
 
@@ -2330,7 +2406,541 @@ func TestRunSyncFallsBackToGentlemanWhenStateLacksPersona(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunSync() error = %v", err)
 	}
-	if got, want := res.Selection.Persona, model.PersonaGentleman; got != want {
-		t.Errorf("Selection.Persona = %q, want %q (fallback for pre-feature state)", got, want)
+	if got, want := res.Selection.Persona, model.PersonaNeutral; got != want {
+		t.Errorf("Selection.Persona = %q, want %q (safe fallback for missing state persona)", got, want)
+	}
+}
+
+// ─── TUI path: RunSyncWithSelection persona resolution from state ───────────
+
+// TestRunSyncWithSelection_PersonaResolvesFromStateNeutral verifies that when
+// the TUI calls RunSyncWithSelection with an empty persona, the persisted
+// persona from state.json is used — not the Gentleman default.
+func TestRunSyncWithSelection_PersonaResolvesFromStateNeutral(t *testing.T) {
+	home := t.TempDir()
+	setSyncTestHome(t, home)
+
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := state.Write(home, state.InstallState{
+		InstalledAgents: []string{"claude-code"},
+		Persona:         "neutral",
+	}); err != nil {
+		t.Fatalf("state.Write: %v", err)
+	}
+
+	// TUI path: empty persona — must be resolved from state.
+	sel := model.Selection{
+		Agents:     []model.AgentID{model.AgentClaudeCode},
+		Components: []model.ComponentID{model.ComponentPersona},
+		Persona:    "", // empty — the bug scenario
+	}
+
+	result, err := RunSyncWithSelection(home, sel)
+	if err != nil {
+		t.Fatalf("RunSyncWithSelection() error = %v", err)
+	}
+
+	if got, want := result.Selection.Persona, model.PersonaNeutral; got != want {
+		t.Errorf("result.Selection.Persona = %q, want %q (should be resolved from state.json)", got, want)
+	}
+}
+
+// TestRunSyncWithSelection_PersonaResolvesFromStateCustom verifies that a
+// "custom" persona persisted in state is restored on the TUI sync path.
+func TestRunSyncWithSelection_PersonaResolvesFromStateCustom(t *testing.T) {
+	home := t.TempDir()
+	setSyncTestHome(t, home)
+
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := state.Write(home, state.InstallState{
+		InstalledAgents: []string{"claude-code"},
+		Persona:         "custom",
+	}); err != nil {
+		t.Fatalf("state.Write: %v", err)
+	}
+
+	sel := model.Selection{
+		Agents:     []model.AgentID{model.AgentClaudeCode},
+		Components: []model.ComponentID{model.ComponentPersona},
+		Persona:    "",
+	}
+
+	result, err := RunSyncWithSelection(home, sel)
+	if err != nil {
+		t.Fatalf("RunSyncWithSelection() error = %v", err)
+	}
+
+	if got, want := result.Selection.Persona, model.PersonaCustom; got != want {
+		t.Errorf("result.Selection.Persona = %q, want %q (should be resolved from state.json)", got, want)
+	}
+}
+
+// TestRunSyncWithSelection_PersonaFallsBackToNeutralWhenStateHasNone verifies
+// missing state persona resolves to neutral/default-safe behavior.
+func TestRunSyncWithSelection_PersonaFallsBackToNeutralWhenStateHasNone(t *testing.T) {
+	home := t.TempDir()
+	setSyncTestHome(t, home)
+
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	// State with no Persona field — old install before persona persistence.
+	if err := state.Write(home, state.InstallState{
+		InstalledAgents: []string{"claude-code"},
+	}); err != nil {
+		t.Fatalf("state.Write: %v", err)
+	}
+
+	sel := model.Selection{
+		Agents:     []model.AgentID{model.AgentClaudeCode},
+		Components: []model.ComponentID{model.ComponentPersona},
+		Persona:    "",
+	}
+
+	result, err := RunSyncWithSelection(home, sel)
+	if err != nil {
+		t.Fatalf("RunSyncWithSelection() error = %v", err)
+	}
+
+	if got, want := result.Selection.Persona, model.PersonaNeutral; got != want {
+		t.Errorf("result.Selection.Persona = %q, want %q (safe fallback for missing state persona)", got, want)
+	}
+}
+
+// TestRunSyncWithSelection_ExplicitPersonaWinsOverState verifies that when the
+// caller provides a non-empty persona (e.g. the user just picked one in the
+// ModelConfig TUI step), that explicit choice is preserved even if state says
+// something different.
+func TestRunSyncWithSelection_ExplicitPersonaWinsOverState(t *testing.T) {
+	home := t.TempDir()
+	setSyncTestHome(t, home)
+
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	// State says "gentleman" but the caller explicitly chose "neutral".
+	if err := state.Write(home, state.InstallState{
+		InstalledAgents: []string{"claude-code"},
+		Persona:         "gentleman",
+	}); err != nil {
+		t.Fatalf("state.Write: %v", err)
+	}
+
+	sel := model.Selection{
+		Agents:     []model.AgentID{model.AgentClaudeCode},
+		Components: []model.ComponentID{model.ComponentPersona},
+		Persona:    model.PersonaNeutral, // explicit — must not be overridden by state
+	}
+
+	result, err := RunSyncWithSelection(home, sel)
+	if err != nil {
+		t.Fatalf("RunSyncWithSelection() error = %v", err)
+	}
+
+	if got, want := result.Selection.Persona, model.PersonaNeutral; got != want {
+		t.Errorf("result.Selection.Persona = %q, want %q (explicit selection must win over state)", got, want)
+	}
+}
+
+// TestRunSyncWithSelection_UnknownPersistedPersonaFallsBackToNeutral documents
+// the normalizePersona contract for unrecognized persisted values: an unknown or
+// misspelled persona string must NOT silently propagate or reactivate Gentleman.
+func TestRunSyncWithSelection_UnknownPersistedPersonaFallsBackToNeutral(t *testing.T) {
+	home := t.TempDir()
+	setSyncTestHome(t, home)
+
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	// Write a state with an unrecognized persona value (wrong capitalization).
+	// normalizePersona does a case-sensitive switch, so "Gentleman" != "gentleman"
+	// and must return an error, triggering the neutral fallback.
+	if err := state.Write(home, state.InstallState{
+		InstalledAgents: []string{"claude-code"},
+		Persona:         "Gentleman", // capitalized — not a valid PersonaID
+	}); err != nil {
+		t.Fatalf("state.Write: %v", err)
+	}
+
+	sel := model.Selection{
+		Agents:     []model.AgentID{model.AgentClaudeCode},
+		Components: []model.ComponentID{model.ComponentPersona},
+		Persona:    "", // empty — resolution from state must happen
+	}
+
+	result, err := RunSyncWithSelection(home, sel)
+	if err != nil {
+		t.Fatalf("RunSyncWithSelection() error = %v", err)
+	}
+
+	if got, want := result.Selection.Persona, model.PersonaNeutral; got != want {
+		t.Errorf("result.Selection.Persona = %q, want %q (unknown persisted value must fall back to neutral)", got, want)
+	}
+}
+
+// ─── Changed file path reporting ────────────────────────────────────────────
+
+// TestRenderSyncReportIncludesChangedFilePaths verifies that RenderSyncReport
+// lists individual file paths when ChangedFiles is populated.
+func TestRenderSyncReportIncludesChangedFilePaths(t *testing.T) {
+	result := SyncResult{
+		NoOp:         false,
+		Agents:       []model.AgentID{model.AgentOpenCode},
+		FilesChanged: 3,
+		ChangedFiles: []string{
+			"~/.config/opencode/AGENTS.md",
+			"~/.config/opencode/skills/sdd-apply/SKILL.md",
+			"~/.config/opencode/sdd-overlay-single.json",
+		},
+		Selection: model.Selection{
+			Components: []model.ComponentID{model.ComponentSDD},
+		},
+		Verify: verify.Report{Ready: true},
+	}
+
+	report := RenderSyncReport(result)
+
+	for _, path := range result.ChangedFiles {
+		if !strings.Contains(report, path) {
+			t.Errorf("RenderSyncReport() should include changed file path %q; got:\n%s", path, report)
+		}
+	}
+
+	if !strings.Contains(report, "3 files changed") {
+		t.Errorf("RenderSyncReport() should mention file count; got:\n%s", report)
+	}
+}
+
+// TestRenderSyncReportNoOpOmitsChangedFilePaths verifies that RenderSyncReport
+// does not list individual file path bullets in the no-op case.
+func TestRenderSyncReportNoOpOmitsChangedFilePaths(t *testing.T) {
+	result := SyncResult{
+		NoOp:         true,
+		Agents:       []model.AgentID{model.AgentOpenCode},
+		FilesChanged: 0,
+		ChangedFiles: nil,
+	}
+
+	report := RenderSyncReport(result)
+
+	// The no-op path says "No files changed." but must not render bullet paths.
+	if strings.Contains(report, "  - ") {
+		t.Errorf("RenderSyncReport() should not render file path bullets on no-op; got:\n%s", report)
+	}
+
+	if strings.Contains(report, "Sync actions executed") {
+		t.Errorf("RenderSyncReport() should not mention 'Sync actions executed' on no-op; got:\n%s", report)
+	}
+}
+
+// ─── Deduplication ──────────────────────────────────────────────────────────
+
+func TestDedupPathsRemovesDuplicates(t *testing.T) {
+	input := []string{
+		"/home/user/.config/opencode/AGENTS.md",
+		"/home/user/.config/opencode/settings.json",
+		"/home/user/.config/opencode/AGENTS.md", // duplicate
+		"/home/user/.config/opencode/mcp.json",
+		"/home/user/.config/opencode/settings.json", // duplicate
+	}
+	got := dedupPaths(input)
+	want := []string{
+		"/home/user/.config/opencode/AGENTS.md",
+		"/home/user/.config/opencode/settings.json",
+		"/home/user/.config/opencode/mcp.json",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("dedupPaths: got %d paths, want %d", len(got), len(want))
+	}
+	for i, p := range got {
+		if p != want[i] {
+			t.Errorf("dedupPaths[%d] = %q, want %q", i, p, want[i])
+		}
+	}
+}
+
+func TestDedupPathsNilOnEmpty(t *testing.T) {
+	got := dedupPaths(nil)
+	if got != nil {
+		t.Errorf("dedupPaths(nil) = %v, want nil", got)
+	}
+	got = dedupPaths([]string{})
+	if got != nil {
+		t.Errorf("dedupPaths([]) = %v, want nil", got)
+	}
+}
+
+// ─── Dry-run persona resolution ───────────────────────────────────────────────
+
+// TestRunSyncDryRunResolvesPersonaFromState verifies that --dry-run mode
+// resolves the persona from state.json instead of leaving it empty.
+// This is a regression test: the dry-run branch returns early and never calls
+// RunSyncWithSelection, so without an explicit resolvePersonaFromState call the
+// persona is never populated.
+func TestRunSyncDryRunResolvesPersonaFromState(t *testing.T) {
+	home := t.TempDir()
+	setSyncTestHome(t, home)
+
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	// Write state with persona "neutral" and the model-assignment maps populated
+	// to exercise a realistic dry-run scenario. RunSync reads state once
+	// unconditionally and resolves persona before the dry-run early return, so
+	// result.Selection.Persona must reflect the persisted value regardless of
+	// whether the model-assignment maps are empty or full.
+	if err := state.Write(home, state.InstallState{
+		InstalledAgents: []string{"claude-code"},
+		Persona:         "neutral",
+		ClaudeModelAssignments: map[string]string{
+			"sdd-apply": "sonnet",
+		},
+		KiroModelAssignments: map[string]string{
+			"default": "auto",
+		},
+		ModelAssignments: map[string]state.ModelAssignmentState{
+			"sdd-init": {ProviderID: "anthropic", ModelID: "claude-sonnet-4"},
+		},
+	}); err != nil {
+		t.Fatalf("state.Write: %v", err)
+	}
+
+	result, err := RunSync([]string{"--agents", "claude-code", "--dry-run"})
+	if err != nil {
+		t.Fatalf("RunSync() --dry-run error = %v", err)
+	}
+	if !result.DryRun {
+		t.Fatalf("DryRun = false, want true")
+	}
+	if got, want := result.Selection.Persona, model.PersonaNeutral; got != want {
+		t.Errorf("dry-run: Selection.Persona = %q, want %q (should be resolved from state.json)", got, want)
+	}
+}
+
+// TestRunSyncDryRunFallsBackToNeutralWhenStateLacksPersona verifies that
+// --dry-run mode falls back to neutral/default-safe behavior when state has no
+// recorded persona.
+func TestRunSyncDryRunFallsBackToNeutralWhenStateLacksPersona(t *testing.T) {
+	home := t.TempDir()
+	setSyncTestHome(t, home)
+
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	// State with all model maps populated but no Persona field (old install).
+	if err := state.Write(home, state.InstallState{
+		InstalledAgents: []string{"claude-code"},
+		// No Persona field — pre-persona-persistence install.
+		ClaudeModelAssignments: map[string]string{
+			"sdd-apply": "sonnet",
+		},
+		KiroModelAssignments: map[string]string{
+			"default": "auto",
+		},
+		ModelAssignments: map[string]state.ModelAssignmentState{
+			"sdd-init": {ProviderID: "anthropic", ModelID: "claude-sonnet-4"},
+		},
+	}); err != nil {
+		t.Fatalf("state.Write: %v", err)
+	}
+
+	result, err := RunSync([]string{"--agents", "claude-code", "--dry-run"})
+	if err != nil {
+		t.Fatalf("RunSync() --dry-run error = %v", err)
+	}
+	if !result.DryRun {
+		t.Fatalf("DryRun = false, want true")
+	}
+	if got, want := result.Selection.Persona, model.PersonaNeutral; got != want {
+		t.Errorf("dry-run fallback: Selection.Persona = %q, want %q (safe fallback for missing state persona)", got, want)
+	}
+}
+
+func TestDedupPathsFiltersEmptyStrings(t *testing.T) {
+	input := []string{
+		"/home/user/.config/opencode/AGENTS.md",
+		"",
+		"/home/user/.config/opencode/settings.json",
+		"   ",
+		"",
+	}
+	got := dedupPaths(input)
+	want := []string{
+		"/home/user/.config/opencode/AGENTS.md",
+		"/home/user/.config/opencode/settings.json",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("dedupPaths: got %d paths, want %d", len(got), len(want))
+	}
+	for i, p := range got {
+		if p != want[i] {
+			t.Errorf("dedupPaths[%d] = %q, want %q", i, p, want[i])
+		}
+	}
+}
+
+// ─── WU-3 RED: RunSync restores CodexCarrilModelAssignments ──────────────────
+
+// setupCodexSyncHome creates a temp home with a state.json containing the codex
+// agent and the provided carril model map, returning the home directory.
+func setupCodexSyncHome(t *testing.T, carrilModels map[string]string, effortAssignments map[string]string) string {
+	return setupCodexSyncHomeWithPhaseModels(t, carrilModels, effortAssignments, nil)
+}
+
+func setupCodexSyncHomeWithPhaseModels(t *testing.T, carrilModels map[string]string, effortAssignments map[string]string, phaseModels map[string]string) string {
+	t.Helper()
+	home := t.TempDir()
+	s := state.InstallState{
+		InstalledAgents:             []string{"codex"},
+		CodexModelAssignments:       effortAssignments,
+		CodexCarrilModelAssignments: carrilModels,
+		CodexPhaseModelAssignments:  phaseModels,
+	}
+	if err := state.Write(home, s); err != nil {
+		t.Fatalf("state.Write() error = %v", err)
+	}
+	return home
+}
+
+// TestRunSync_RestoresCodexCarrilAssignments verifies that RunSync reads
+// CodexCarrilModelAssignments from state.json and uses them when writing
+// Codex profile files (model key present).
+func TestRunSync_RestoresCodexCarrilAssignments(t *testing.T) {
+	home := setupCodexSyncHome(t,
+		map[string]string{"sdd-strong": "gpt-5.5", "sdd-mid": "gpt-5.5", "sdd-cheap": "gpt-5.4-mini"},
+		nil,
+	)
+
+	restoreHome := osUserHomeDir
+	restoreCommand := runCommand
+	restoreLookPath := cmdLookPath
+	t.Cleanup(func() {
+		osUserHomeDir = restoreHome
+		runCommand = restoreCommand
+		cmdLookPath = restoreLookPath
+	})
+
+	osUserHomeDir = func() (string, error) { return home, nil }
+	runCommand = func(string, ...string) error { return nil }
+	cmdLookPath = func(name string) (string, error) { return "/usr/local/bin/" + name, nil }
+
+	_, err := RunSync([]string{"--agents", "codex"})
+	if err != nil {
+		t.Fatalf("RunSync() error = %v", err)
+	}
+
+	// The sdd-strong.config.toml profile must have both model and model_reasoning_effort.
+	strongProfile := filepath.Join(home, ".codex", "sdd-strong.config.toml")
+	content, readErr := os.ReadFile(strongProfile)
+	if readErr != nil {
+		t.Fatalf("ReadFile(%q) error = %v", strongProfile, readErr)
+	}
+	if !strings.Contains(string(content), `model`) {
+		t.Errorf("sdd-strong.config.toml missing model key; got:\n%s", content)
+	}
+	if !strings.Contains(string(content), "gpt-5.5") {
+		t.Errorf("sdd-strong.config.toml: expected gpt-5.5; got:\n%s", content)
+	}
+}
+
+// TestRunSync_RestoresCodexEffortAssignments verifies that RunSync reads
+// CodexModelAssignments (phase→effort) from state.json and writes them to
+// profile files.
+func TestRunSync_RestoresCodexEffortAssignments(t *testing.T) {
+	efforts := map[string]string{
+		"sdd-propose": "xhigh", "sdd-design": "xhigh", "sdd-verify": "xhigh",
+		"jd-judge-a": "xhigh", "jd-judge-b": "xhigh", "default": "xhigh",
+		"sdd-apply": "high", "jd-fix-agent": "high",
+		"sdd-explore": "low", "sdd-spec": "low", "sdd-tasks": "low",
+		"sdd-archive": "low", "sdd-onboard": "low",
+	}
+	home := setupCodexSyncHome(t, nil, efforts)
+
+	restoreHome := osUserHomeDir
+	restoreCommand := runCommand
+	restoreLookPath := cmdLookPath
+	t.Cleanup(func() {
+		osUserHomeDir = restoreHome
+		runCommand = restoreCommand
+		cmdLookPath = restoreLookPath
+	})
+
+	osUserHomeDir = func() (string, error) { return home, nil }
+	runCommand = func(string, ...string) error { return nil }
+	cmdLookPath = func(name string) (string, error) { return "/usr/local/bin/" + name, nil }
+
+	_, err := RunSync([]string{"--agents", "codex"})
+	if err != nil {
+		t.Fatalf("RunSync() error = %v", err)
+	}
+
+	// sdd-strong profile should have xhigh.
+	strongProfile := filepath.Join(home, ".codex", "sdd-strong.config.toml")
+	content, readErr := os.ReadFile(strongProfile)
+	if readErr != nil {
+		t.Fatalf("ReadFile(%q) error = %v", strongProfile, readErr)
+	}
+	if !strings.Contains(string(content), "xhigh") {
+		t.Errorf("sdd-strong.config.toml: expected xhigh effort; got:\n%s", content)
+	}
+}
+
+// TestRunSync_RestoresCodexPhaseModelAssignments verifies that plain
+// `gentle-ai sync` preserves Custom per-phase Codex model assignments from
+// state.json and renders the per-phase model table into AGENTS.md.
+func TestRunSync_RestoresCodexPhaseModelAssignments(t *testing.T) {
+	efforts := map[string]string{
+		"sdd-propose": "xhigh", "sdd-design": "xhigh", "sdd-verify": "xhigh",
+		"jd-judge-a": "xhigh", "jd-judge-b": "xhigh", "default": "xhigh",
+		"sdd-apply": "high", "jd-fix-agent": "high",
+		"sdd-explore": "low", "sdd-spec": "low", "sdd-tasks": "low",
+		"sdd-archive": "low", "sdd-onboard": "low",
+	}
+	phaseModels := map[string]string{
+		"default":     "gpt-5.4-mini",
+		"sdd-propose": "gpt-5.5",
+		"sdd-apply":   "o3",
+	}
+	home := setupCodexSyncHomeWithPhaseModels(t, nil, efforts, phaseModels)
+
+	restoreHome := osUserHomeDir
+	restoreCommand := runCommand
+	restoreLookPath := cmdLookPath
+	t.Cleanup(func() {
+		osUserHomeDir = restoreHome
+		runCommand = restoreCommand
+		cmdLookPath = restoreLookPath
+	})
+
+	osUserHomeDir = func() (string, error) { return home, nil }
+	runCommand = func(string, ...string) error { return nil }
+	cmdLookPath = func(name string) (string, error) { return "/usr/local/bin/" + name, nil }
+
+	_, err := RunSync([]string{"--agents", "codex"})
+	if err != nil {
+		t.Fatalf("RunSync() error = %v", err)
+	}
+
+	agentsMD := filepath.Join(home, ".codex", "AGENTS.md")
+	content, readErr := os.ReadFile(agentsMD)
+	if readErr != nil {
+		t.Fatalf("ReadFile(%q) error = %v", agentsMD, readErr)
+	}
+	text := string(content)
+	if !strings.Contains(text, "| Phase | Model |") {
+		t.Fatalf("AGENTS.md missing per-phase Model table header; got:\n%s", text)
+	}
+	if !strings.Contains(text, "| `sdd-propose` | `gpt-5.5` | `xhigh` |") {
+		t.Fatalf("AGENTS.md missing custom sdd-propose model row; got:\n%s", text)
+	}
+	if !strings.Contains(text, "| `sdd-apply` | `o3` | `high` |") {
+		t.Fatalf("AGENTS.md missing custom sdd-apply model row; got:\n%s", text)
+	}
+	if strings.Contains(text, "| `sdd-strong` |") {
+		t.Fatalf("AGENTS.md rendered carril table instead of Custom per-phase table; got:\n%s", text)
 	}
 }

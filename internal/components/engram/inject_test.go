@@ -13,17 +13,20 @@ import (
 	"github.com/gentleman-programming/gentle-ai/internal/agents/claude"
 	"github.com/gentleman-programming/gentle-ai/internal/agents/codex"
 	"github.com/gentleman-programming/gentle-ai/internal/agents/gemini"
+	"github.com/gentleman-programming/gentle-ai/internal/agents/hermes"
 	"github.com/gentleman-programming/gentle-ai/internal/agents/openclaw"
 	"github.com/gentleman-programming/gentle-ai/internal/agents/opencode"
 	"github.com/gentleman-programming/gentle-ai/internal/agents/pi"
 	"github.com/gentleman-programming/gentle-ai/internal/agents/qwen"
 	"github.com/gentleman-programming/gentle-ai/internal/agents/vscode"
+	"github.com/gentleman-programming/gentle-ai/internal/model"
 )
 
 func claudeAdapter() agents.Adapter   { return claude.NewAdapter() }
 func opencodeAdapter() agents.Adapter { return opencode.NewAdapter() }
 func codexAdapter() agents.Adapter    { return codex.NewAdapter() }
 func geminiAdapter() agents.Adapter   { return gemini.NewAdapter() }
+func hermesAdapter() agents.Adapter   { return hermes.NewAdapter() }
 func qwenAdapter() agents.Adapter     { return qwen.NewAdapter() }
 func openclawAdapter() agents.Adapter { return openclaw.NewAdapter() }
 func antigravityAdapter() agents.Adapter {
@@ -111,6 +114,9 @@ func TestInjectClaudeWritesProtocolSection(t *testing.T) {
 	// Real content check.
 	if !strings.Contains(text, "mem_save") {
 		t.Fatal("CLAUDE.md missing real engram protocol content (expected 'mem_save')")
+	}
+	if !strings.Contains(text, "needs_review") {
+		t.Fatal("CLAUDE.md missing memory lifecycle stale-context rule (expected 'needs_review')")
 	}
 }
 
@@ -606,6 +612,8 @@ func TestInjectAntigravityWritesMCPToCLIConfig(t *testing.T) {
 		"mem_get_observation",
 		"mem_current_project",
 		"mem_judge",
+		"optional mem_review",
+		"if mem_review is unavailable",
 	} {
 		if !strings.Contains(hooksText, want) {
 			t.Fatalf("Antigravity Engram hook missing %q; got:\n%s", want, hooksText)
@@ -711,6 +719,9 @@ func TestInjectCodexWritesInstructionFiles(t *testing.T) {
 	}
 	if !strings.Contains(string(content), "mem_save") {
 		t.Fatal("engram-instructions.md missing expected content (mem_save)")
+	}
+	if !strings.Contains(string(content), "needs_review") {
+		t.Fatal("engram-instructions.md missing memory lifecycle stale-context rule (needs_review)")
 	}
 
 	compactPath := filepath.Join(home, ".codex", "engram-compact-prompt.md")
@@ -954,6 +965,245 @@ func TestInjectCodexIsIdempotent(t *testing.T) {
 	count := strings.Count(string(content), "[mcp_servers.engram]")
 	if count != 1 {
 		t.Fatalf("config.toml has %d [mcp_servers.engram] blocks, want exactly 1; got:\n%s", count, string(content))
+	}
+}
+
+// ─── Codex profile injection tests ───────────────────────────────────────────
+
+// TestInjectCodexWritesProfiles asserts that Inject for the Codex adapter
+// writes the three gentle-ai SDD profile files into ~/.codex/.
+func TestInjectCodexWritesProfiles(t *testing.T) {
+	home := t.TempDir()
+
+	_, err := Inject(home, codexAdapter())
+	if err != nil {
+		t.Fatalf("Inject(codex) error = %v", err)
+	}
+
+	profiles := []struct {
+		name            string
+		reasoningEffort string
+	}{
+		{"sdd-strong.config.toml", "high"},
+		{"sdd-mid.config.toml", "medium"},
+		{"sdd-cheap.config.toml", "low"},
+	}
+
+	for _, p := range profiles {
+		path := filepath.Join(home, ".codex", p.name)
+		content, readErr := os.ReadFile(path)
+		if readErr != nil {
+			t.Fatalf("profile %q not written by Inject: %v", p.name, readErr)
+		}
+		want := `"` + p.reasoningEffort + `"`
+		if !strings.Contains(string(content), want) {
+			t.Fatalf("profile %q: want model_reasoning_effort = %s; got:\n%s", p.name, want, string(content))
+		}
+	}
+}
+
+// TestInjectCodexProfilesIdempotent asserts that running Inject twice leaves
+// the profile files unchanged on the second run and does not duplicate keys.
+func TestInjectCodexProfilesIdempotent(t *testing.T) {
+	home := t.TempDir()
+
+	if _, err := Inject(home, codexAdapter()); err != nil {
+		t.Fatalf("first Inject(codex) error = %v", err)
+	}
+	second, err := Inject(home, codexAdapter())
+	if err != nil {
+		t.Fatalf("second Inject(codex) error = %v", err)
+	}
+	if second.Changed {
+		t.Fatal("second Inject(codex) changed = true, want false (profiles are idempotent)")
+	}
+
+	for _, name := range []string{"sdd-strong.config.toml", "sdd-mid.config.toml", "sdd-cheap.config.toml"} {
+		content, readErr := os.ReadFile(filepath.Join(home, ".codex", name))
+		if readErr != nil {
+			t.Fatalf("profile %q missing after second Inject: %v", name, readErr)
+		}
+		count := strings.Count(string(content), "model_reasoning_effort")
+		if count != 1 {
+			t.Fatalf("profile %q: expected 1 model_reasoning_effort key after second Inject, got %d; content:\n%s", name, count, string(content))
+		}
+	}
+}
+
+// TestProfileFallbackAgreesWithRenderFallback asserts that resolveProfileAssignments
+// with nil inputs produces the same per-carril effort as RenderCodexPhaseEfforts with
+// nil inputs (both must use the Recommended preset as the canonical nil fallback).
+func TestProfileFallbackAgreesWithRenderFallback(t *testing.T) {
+	// Profile fallback: nil carrilModels + nil phaseEfforts
+	assignments := resolveProfileAssignments(nil, nil)
+
+	// Build a quick carril→effort map from the profile assignments.
+	profileEffort := make(map[string]string, len(assignments))
+	for _, a := range assignments {
+		profileEffort[a.Profile] = a.ReasoningEffort
+	}
+
+	// Render fallback: nil inputs → CodexModelPresetRecommended
+	renderOut := model.RenderCodexPhaseEfforts(nil, nil)
+
+	// For each carril, the render table and the profile files must agree.
+	// The render check is per-row: we find the carril's row and assert the effort
+	// cell appears within that specific row (not just anywhere in the table).
+	cases := []struct {
+		carril     string
+		wantEffort string
+	}{
+		{"sdd-strong", "high"},
+		{"sdd-mid", "medium"},
+		{"sdd-cheap", "low"},
+	}
+	for _, tc := range cases {
+		got := profileEffort[tc.carril]
+		if got != tc.wantEffort {
+			t.Errorf("profile fallback for %q = %q, want %q", tc.carril, got, tc.wantEffort)
+		}
+		// Render-side: find the carril's row and check the effort cell is in THAT row.
+		needle := "| `" + tc.carril + "`"
+		rowStart := strings.Index(renderOut, needle)
+		if rowStart == -1 {
+			t.Errorf("render fallback table missing row for carril %q; table:\n%s", tc.carril, renderOut)
+			continue
+		}
+		rowEnd := len(renderOut)
+		for i := rowStart + 1; i < len(renderOut); i++ {
+			if renderOut[i] == '\n' {
+				rowEnd = i
+				break
+			}
+		}
+		row := renderOut[rowStart:rowEnd]
+		effortCell := "| `" + tc.wantEffort + "` |"
+		if !strings.Contains(row, effortCell) {
+			t.Errorf("render fallback carril %q row = %q: want effort cell %q", tc.carril, row, effortCell)
+		}
+	}
+}
+
+// ─── Codex multi-agent config injection tests ────────────────────────────────
+
+// TestInjectCodexMultiAgentDefaultOn asserts that after a plain Inject call,
+// config.toml contains [features] with multi_agent = true. Codex SDD enables
+// multi-agent delegation by default so the per-phase reasoning_effort table applies.
+func TestInjectCodexMultiAgentDefaultOn(t *testing.T) {
+	home := t.TempDir()
+
+	if _, err := Inject(home, codexAdapter()); err != nil {
+		t.Fatalf("Inject(codex) error = %v", err)
+	}
+
+	configPath := filepath.Join(home, ".codex", "config.toml")
+	content, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("ReadFile(config.toml) error = %v", err)
+	}
+	text := string(content)
+	if !strings.Contains(text, "[features]") {
+		t.Fatalf("config.toml missing [features] section; got:\n%s", text)
+	}
+	if !strings.Contains(text, "multi_agent = true") {
+		t.Fatalf("config.toml missing multi_agent = true (enabled by default); got:\n%s", text)
+	}
+	if strings.Contains(text, "multi_agent = false") {
+		t.Fatalf("config.toml must NOT have multi_agent = false by default; got:\n%s", text)
+	}
+}
+
+// TestInjectCodexMultiAgentOptIn asserts that InjectWithOptions with
+// CodexMultiAgent=true writes multi_agent = true in [features].
+func TestInjectCodexMultiAgentOptIn(t *testing.T) {
+	home := t.TempDir()
+
+	opts := InjectOptions{CodexMultiAgent: true}
+	if _, err := InjectWithOptions(home, codexAdapter(), opts); err != nil {
+		t.Fatalf("InjectWithOptions(codex, multiAgent=true) error = %v", err)
+	}
+
+	configPath := filepath.Join(home, ".codex", "config.toml")
+	content, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("ReadFile(config.toml) error = %v", err)
+	}
+	text := string(content)
+	if !strings.Contains(text, "multi_agent = true") {
+		t.Fatalf("config.toml missing multi_agent = true after opt-in; got:\n%s", text)
+	}
+}
+
+// TestInjectCodexMultiAgentDefaults asserts that the [agents] section is always
+// written with max_threads = 4 and max_depth = 2 regardless of the opt-in flag.
+func TestInjectCodexMultiAgentDefaults(t *testing.T) {
+	home := t.TempDir()
+
+	if _, err := Inject(home, codexAdapter()); err != nil {
+		t.Fatalf("Inject(codex) error = %v", err)
+	}
+
+	configPath := filepath.Join(home, ".codex", "config.toml")
+	content, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("ReadFile(config.toml) error = %v", err)
+	}
+	text := string(content)
+	if !strings.Contains(text, "[agents]") {
+		t.Fatalf("config.toml missing [agents] section; got:\n%s", text)
+	}
+	if !strings.Contains(text, "max_threads = 4") {
+		t.Fatalf("config.toml missing max_threads = 4; got:\n%s", text)
+	}
+	if !strings.Contains(text, "max_depth = 2") {
+		t.Fatalf("config.toml missing max_depth = 2; got:\n%s", text)
+	}
+}
+
+// TestInjectCodexMultiAgentIdempotent asserts that running Inject twice
+// produces exactly one [features] section and one [agents] section with no
+// duplicate keys, and that the engram and context7 blocks are not disturbed.
+func TestInjectCodexMultiAgentIdempotent(t *testing.T) {
+	home := t.TempDir()
+
+	if _, err := Inject(home, codexAdapter()); err != nil {
+		t.Fatalf("first Inject(codex) error = %v", err)
+	}
+	second, err := Inject(home, codexAdapter())
+	if err != nil {
+		t.Fatalf("second Inject(codex) error = %v", err)
+	}
+	if second.Changed {
+		// Read content for diagnostics.
+		content, _ := os.ReadFile(filepath.Join(home, ".codex", "config.toml"))
+		t.Fatalf("second Inject(codex) changed = true, want false (multi-agent keys are idempotent); config.toml:\n%s", string(content))
+	}
+
+	configPath := filepath.Join(home, ".codex", "config.toml")
+	content, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("ReadFile(config.toml) error = %v", err)
+	}
+	text := string(content)
+
+	if count := strings.Count(text, "[features]"); count != 1 {
+		t.Fatalf("expected 1 [features] section, got %d; config.toml:\n%s", count, text)
+	}
+	if count := strings.Count(text, "[agents]"); count != 1 {
+		t.Fatalf("expected 1 [agents] section, got %d; config.toml:\n%s", count, text)
+	}
+	if count := strings.Count(text, "multi_agent"); count != 1 {
+		t.Fatalf("expected 1 multi_agent key, got %d; config.toml:\n%s", count, text)
+	}
+	if count := strings.Count(text, "max_threads"); count != 1 {
+		t.Fatalf("expected 1 max_threads key, got %d; config.toml:\n%s", count, text)
+	}
+	if count := strings.Count(text, "max_depth"); count != 1 {
+		t.Fatalf("expected 1 max_depth key, got %d; config.toml:\n%s", count, text)
+	}
+	// Engram MCP block must still be present.
+	if !strings.Contains(text, "[mcp_servers.engram]") {
+		t.Fatalf("config.toml missing [mcp_servers.engram] after idempotency run; got:\n%s", text)
 	}
 }
 
@@ -1596,4 +1846,173 @@ func objectAtForTest(t *testing.T, root map[string]any, key string) map[string]a
 		t.Fatalf("key %q has type %T, want object", key, value)
 	}
 	return object
+}
+
+// TestInjectEngramHermesYAMLOverlay verifies that Inject writes the engram MCP
+// server block under mcp_servers: in ~/.hermes/config.yaml (StrategyMergeIntoYAML),
+// and that a second call is idempotent (Changed=false).
+func TestInjectEngramHermesYAMLOverlay(t *testing.T) {
+	home := t.TempDir()
+	SetLookPathForTest(t, "engram", "")
+
+	result, err := Inject(home, hermesAdapter())
+	if err != nil {
+		t.Fatalf("Inject(hermes) error = %v", err)
+	}
+	if !result.Changed {
+		t.Fatal("Inject(hermes) first run: changed = false, want true")
+	}
+
+	configPath := filepath.Join(home, ".hermes", "config.yaml")
+	content, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("ReadFile(config.yaml) error = %v", err)
+	}
+	text := string(content)
+
+	if !strings.Contains(text, "mcp_servers:") {
+		t.Fatal("config.yaml missing mcp_servers: key")
+	}
+	if !strings.Contains(text, "  engram:") {
+		t.Fatal("config.yaml missing engram: entry under mcp_servers:")
+	}
+	if !strings.Contains(text, "--tools=agent") {
+		t.Fatal("config.yaml missing --tools=agent in engram args")
+	}
+
+	// Second call must be idempotent.
+	second, err := Inject(home, hermesAdapter())
+	if err != nil {
+		t.Fatalf("Inject(hermes) second error = %v", err)
+	}
+	if second.Changed {
+		t.Fatal("Inject(hermes) second run changed = true (not idempotent)")
+	}
+}
+
+// TestEngramYAMLCommandRecoveryCustomPath verifies that a custom absolute
+// engram command already in config.yaml is preserved (not clobbered) on re-run.
+func TestEngramYAMLCommandRecoveryCustomPath(t *testing.T) {
+	home := t.TempDir()
+	SetLookPathForTest(t, "engram", "")
+
+	configPath := filepath.Join(home, ".hermes", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	// Write a config.yaml with a custom absolute engram command.
+	prior := "mcp_servers:\n  engram:\n    command: /custom/path/engram\n    args:\n      - mcp\n      - --tools=agent\n"
+	if err := os.WriteFile(configPath, []byte(prior), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	_, err := Inject(home, hermesAdapter())
+	if err != nil {
+		t.Fatalf("Inject(hermes) error = %v", err)
+	}
+
+	content, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	text := string(content)
+	if !strings.Contains(text, "/custom/path/engram") {
+		t.Fatalf("config.yaml clobbered custom engram command; got:\n%s", text)
+	}
+}
+
+// TestEngramYAMLCommandRecoveryVersionedCellar verifies that a versioned Homebrew
+// cellar path is stabilized to the bare "engram" command on re-run.
+func TestEngramYAMLCommandRecoveryVersionedCellar(t *testing.T) {
+	home := t.TempDir()
+	SetLookPathForTest(t, "engram", "")
+
+	configPath := filepath.Join(home, ".hermes", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	// Write a config.yaml with a versioned Cellar engram path.
+	prior := "mcp_servers:\n  engram:\n    command: /opt/homebrew/Cellar/engram/1.2.3/bin/engram\n    args:\n      - mcp\n      - --tools=agent\n"
+	if err := os.WriteFile(configPath, []byte(prior), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	_, err := Inject(home, hermesAdapter())
+	if err != nil {
+		t.Fatalf("Inject(hermes) error = %v", err)
+	}
+
+	content, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	text := string(content)
+	// Versioned cellar path must be stabilized — the versioned path should not remain.
+	if strings.Contains(text, "/Cellar/engram/") {
+		t.Fatalf("config.yaml retained versioned Cellar path after stabilization; got:\n%s", text)
+	}
+	// And it must be stabilized to the bare "engram" command.
+	if !strings.Contains(text, "command: engram") {
+		t.Fatalf("config.yaml did not stabilize to bare \"engram\" command; got:\n%s", text)
+	}
+}
+
+// TestEngramYAMLCommandRecoveryAbsent verifies that when no prior engram entry
+// exists in config.yaml, the stable "engram" fallback is written.
+func TestEngramYAMLCommandRecoveryAbsent(t *testing.T) {
+	home := t.TempDir()
+	SetLookPathForTest(t, "engram", "")
+
+	result, err := Inject(home, hermesAdapter())
+	if err != nil {
+		t.Fatalf("Inject(hermes) error = %v", err)
+	}
+	if !result.Changed {
+		t.Fatal("Inject(hermes) changed = false")
+	}
+
+	configPath := filepath.Join(home, ".hermes", "config.yaml")
+	content, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	text := string(content)
+	if !strings.Contains(text, "command: engram") {
+		t.Fatalf("expected 'command: engram' fallback when no prior entry; got:\n%s", text)
+	}
+}
+
+// TestEngramYAMLCommandRecoveryListShape verifies that a YAML list-shaped command
+// (command: - /path/engram) has its first element recovered correctly.
+func TestEngramYAMLCommandRecoveryListShape(t *testing.T) {
+	home := t.TempDir()
+	SetLookPathForTest(t, "engram", "")
+
+	configPath := filepath.Join(home, ".hermes", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	// Write a config.yaml with command as a YAML list.
+	prior := "mcp_servers:\n  engram:\n    command:\n      - /absolute/path/engram\n    args:\n      - mcp\n      - --tools=agent\n"
+	if err := os.WriteFile(configPath, []byte(prior), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	_, err := Inject(home, hermesAdapter())
+	if err != nil {
+		t.Fatalf("Inject(hermes) error = %v", err)
+	}
+
+	content, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	text := string(content)
+	// The list first element (/absolute/path/engram) should be recovered and preserved.
+	if !strings.Contains(text, "/absolute/path/engram") {
+		t.Fatalf("list-shaped command first element not recovered; got:\n%s", text)
+	}
 }

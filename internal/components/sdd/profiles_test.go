@@ -10,6 +10,7 @@ import (
 
 	"github.com/gentleman-programming/gentle-ai/internal/assets"
 	"github.com/gentleman-programming/gentle-ai/internal/model"
+	"github.com/gentleman-programming/gentle-ai/internal/opencode"
 )
 
 func TestResolveProfileStrategy_ExplicitWins(t *testing.T) {
@@ -468,13 +469,50 @@ func TestGenerateProfileOverlay_PermissionScoped(t *testing.T) {
 	assertExactTaskPermissions(t, taskMap, expected)
 }
 
+func TestGenerateProfileOverlay_ToolsUseReplaceSentinel(t *testing.T) {
+	home := t.TempDir()
+
+	overlay, err := GenerateProfileOverlay(makeHaikuProfile(), home)
+	if err != nil {
+		t.Fatalf("GenerateProfileOverlay() error = %v", err)
+	}
+
+	var root map[string]any
+	if err := json.Unmarshal(overlay, &root); err != nil {
+		t.Fatalf("overlay is not valid JSON: %v", err)
+	}
+
+	agentMap := root["agent"].(map[string]any)
+	orch := agentMap["sdd-orchestrator-cheap"].(map[string]any)
+	toolsWrapper, ok := orch["tools"].(map[string]any)
+	if !ok {
+		t.Fatal("sdd-orchestrator-cheap tools is not an object")
+	}
+	tools, hasSentinel := toolsWrapper["__replace__"].(map[string]any)
+	if !hasSentinel {
+		t.Fatal("tools block must use __replace__ sentinel to discard legacy delegate tools on sync")
+	}
+
+	for _, required := range []string{"read", "write", "edit", "bash", "task"} {
+		if enabled, _ := tools[required].(bool); !enabled {
+			t.Fatalf("required tool %q missing or disabled: %#v", required, tools)
+		}
+	}
+	for _, legacyTool := range []string{"delegate", "delegation_read", "delegation_list"} {
+		if _, exists := tools[legacyTool]; exists {
+			t.Fatalf("legacy OpenCode tool %q must not be present: %#v", legacyTool, tools)
+		}
+	}
+}
+
 func TestDefaultOverlayTaskPermissions_ExplicitAllowlist(t *testing.T) {
 	tests := []struct {
 		name      string
 		assetPath string
+		includeJD bool // multi overlay includes JD agents; single does not
 	}{
-		{name: "single", assetPath: "opencode/sdd-overlay-single.json"},
-		{name: "multi", assetPath: "opencode/sdd-overlay-multi.json"},
+		{name: "single", assetPath: "opencode/sdd-overlay-single.json", includeJD: false},
+		{name: "multi", assetPath: "opencode/sdd-overlay-multi.json", includeJD: true},
 	}
 
 	for _, tt := range tests {
@@ -494,7 +532,47 @@ func TestDefaultOverlayTaskPermissions_ExplicitAllowlist(t *testing.T) {
 				t.Fatal("task block must use __replace__ sentinel to discard stale wildcards on sync")
 			}
 
-			assertExactTaskPermissions(t, taskMap, expectedTaskPermissions(""))
+			expected := expectedTaskPermissions("")
+			if !tt.includeJD {
+				// Single overlay does not include JD agent permissions.
+				for _, jd := range opencode.JDPhases() {
+					delete(expected, jd)
+				}
+			}
+			assertExactTaskPermissions(t, taskMap, expected)
+		})
+	}
+}
+
+func TestDefaultOverlayToolsUseReplaceSentinel(t *testing.T) {
+	for _, assetPath := range []string{
+		"opencode/sdd-overlay-single.json",
+		"opencode/sdd-overlay-multi.json",
+	} {
+		t.Run(assetPath, func(t *testing.T) {
+			var root map[string]any
+			if err := json.Unmarshal([]byte(assets.MustRead(assetPath)), &root); err != nil {
+				t.Fatalf("unmarshal %s: %v", assetPath, err)
+			}
+
+			agentMap := root["agent"].(map[string]any)
+			orch := agentMap["gentle-orchestrator"].(map[string]any)
+			toolsWrapper := orch["tools"].(map[string]any)
+			tools, hasSentinel := toolsWrapper["__replace__"].(map[string]any)
+			if !hasSentinel {
+				t.Fatal("tools block must use __replace__ sentinel to discard legacy delegate tools on sync")
+			}
+
+			for _, required := range []string{"read", "write", "edit", "bash", "task"} {
+				if enabled, _ := tools[required].(bool); !enabled {
+					t.Fatalf("required tool %q missing or disabled: %#v", required, tools)
+				}
+			}
+			for _, legacyTool := range []string{"delegate", "delegation_read", "delegation_list"} {
+				if _, exists := tools[legacyTool]; exists {
+					t.Fatalf("legacy OpenCode tool %q must not be present: %#v", legacyTool, tools)
+				}
+			}
 		})
 	}
 }
@@ -741,6 +819,15 @@ func expectedTaskPermissions(suffix string) map[string]any {
 	}
 	for _, phase := range profilePhaseOrder {
 		permissions[phase+suffix] = "allow"
+	}
+	// Review agents are global (not profile-scoped), so named profile
+	// orchestrators also need unsuffixed permissions to delegate to them.
+	for _, reviewAgent := range reviewAgentNames {
+		permissions[reviewAgent] = "allow"
+	}
+	// JD agents are global (not profile-scoped) — always unsuffixed.
+	for _, jd := range opencode.JDPhases() {
+		permissions[jd] = "allow"
 	}
 	return permissions
 }

@@ -98,8 +98,9 @@ var (
 		model.ComponentClaudeTheme,
 		model.ComponentOpenCodeGentleLogo,
 	}
-	sddPhaseAgents = []string{
-		"sdd-orchestrator",
+	configuredAgents = []string{
+		"gentle-orchestrator",
+		"sdd-orchestrator", // legacy key — kept for backward-compat cleanup
 		"sdd-init",
 		"sdd-explore",
 		"sdd-propose",
@@ -110,8 +111,23 @@ var (
 		"sdd-verify",
 		"sdd-archive",
 		"sdd-onboard",
+		"jd-judge-a",
+		"jd-judge-b",
+		"jd-fix-agent",
 	}
-	sddSkillPhaseIDs = sddPhaseAgents[1:]
+	// sddSkillPhaseIDs contains SDD skill phase IDs only (used for skill dir cleanup).
+	// Derived from configuredAgents: excludes the orchestrator (not a skill) and any
+	// non-skill agents (e.g. jd-*). When new phases or agents are added to
+	// configuredAgents, this list stays in sync automatically.
+	sddSkillPhaseIDs func() []string = func() []string {
+		skills := make([]string, 0, len(configuredAgents))
+		for _, id := range configuredAgents {
+			if strings.HasPrefix(id, "sdd-") && id != "sdd-orchestrator" {
+				skills = append(skills, id)
+			}
+		}
+		return skills
+	}
 )
 
 type operation struct {
@@ -546,12 +562,17 @@ func (s *Service) componentOperations(adapter agents.Adapter, componentID model.
 		}
 		if path := adapter.SettingsPath(homeDir); path != "" && adapter.Agent() == model.AgentClaudeCode {
 			targets = append(targets, path)
-			ops = append(ops, rewriteClaudeSkillRegistryHook(path))
+			ops = append(ops, rewriteSkillRegistryHook(path))
+		}
+		if adapter.Agent() == model.AgentCodex {
+			path := filepath.Join(adapter.GlobalConfigDir(homeDir), "hooks.json")
+			targets = append(targets, path)
+			ops = append(ops, rewriteSkillRegistryHook(path))
 		}
 		if path := adapter.SettingsPath(homeDir); path != "" && adapter.Agent() == model.AgentOpenCode {
 			targets = append(targets, path)
-			paths := make([]jsonPath, 0, len(sddPhaseAgents))
-			for _, agentKey := range sddPhaseAgents {
+			paths := make([]jsonPath, 0, len(configuredAgents))
+			for _, agentKey := range configuredAgents {
 				paths = append(paths, jsonPath{"agent", agentKey})
 			}
 
@@ -578,6 +599,7 @@ func (s *Service) componentOperations(adapter agents.Adapter, componentID model.
 			for _, pluginPath := range []string{
 				filepath.Join(pluginDir, "background-agents.ts"),
 				filepath.Join(pluginDir, "model-variants.ts"),
+				filepath.Join(pluginDir, "skill-registry.ts"),
 			} {
 				targets = append(targets, pluginPath)
 				ops = append(ops, removeFile(pluginPath))
@@ -585,10 +607,7 @@ func (s *Service) componentOperations(adapter agents.Adapter, componentID model.
 			ops = append(ops, removeDirIfEmpty(pluginDir))
 
 			modelVariantsCacheDir := filepath.Join(homeDir, ".gentle-ai", "cache")
-			for _, cachePath := range []string{
-				filepath.Join(modelVariantsCacheDir, "model-variants.json"),
-				filepath.Join(modelVariantsCacheDir, "model-variants.json.tmp"),
-			} {
+			for _, cachePath := range modelVariantsCachePaths(modelVariantsCacheDir) {
 				targets = append(targets, cachePath)
 				ops = append(ops, removeFile(cachePath))
 			}
@@ -806,7 +825,7 @@ func rewriteJSONFile(path string, jsonPaths ...jsonPath) operation {
 	}
 }
 
-func rewriteClaudeSkillRegistryHook(path string) operation {
+func rewriteSkillRegistryHook(path string) operation {
 	return operation{
 		typeID: opRewriteFile,
 		path:   path,
@@ -816,11 +835,11 @@ func rewriteClaudeSkillRegistryHook(path string) operation {
 				if os.IsNotExist(err) {
 					return false, false, nil
 				}
-				return false, false, fmt.Errorf("read Claude settings %q: %w", path, err)
+				return false, false, fmt.Errorf("read skill-registry hook config %q: %w", path, err)
 			}
-			updated, changed, err := removeClaudeSkillRegistryHook(raw)
+			updated, changed, err := removeSkillRegistryHook(raw)
 			if err != nil {
-				return false, false, fmt.Errorf("clean Claude skill-registry hook %q: %w", path, err)
+				return false, false, fmt.Errorf("clean skill-registry hook %q: %w", path, err)
 			}
 			if !changed {
 				return false, false, nil
@@ -840,7 +859,7 @@ func rewriteClaudeSkillRegistryHook(path string) operation {
 	}
 }
 
-func removeClaudeSkillRegistryHook(raw []byte) ([]byte, bool, error) {
+func removeSkillRegistryHook(raw []byte) ([]byte, bool, error) {
 	root := map[string]any{}
 	if err := json.Unmarshal(raw, &root); err != nil {
 		return nil, false, err
@@ -931,6 +950,46 @@ func rewriteTOMLFile(path string, mutate func(content string) (string, bool)) op
 			return true, false, nil
 		},
 	}
+}
+
+func modelVariantsCachePaths(cacheDir string) []string {
+	paths := []string{
+		filepath.Join(cacheDir, "model-variants.json"),
+		filepath.Join(cacheDir, "model-variants.json.tmp"),
+	}
+	matches, err := filepath.Glob(filepath.Join(cacheDir, "model-variants.json.*.tmp"))
+	if err != nil {
+		return paths
+	}
+	for _, path := range matches {
+		if !isModelVariantsRandomTempName(filepath.Base(path)) {
+			continue
+		}
+		info, err := os.Stat(path)
+		if err != nil || info.IsDir() {
+			continue
+		}
+		paths = append(paths, path)
+	}
+	return paths
+}
+
+func isModelVariantsRandomTempName(name string) bool {
+	const prefix = "model-variants.json."
+	const suffix = ".tmp"
+	if !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, suffix) {
+		return false
+	}
+	token := strings.TrimSuffix(strings.TrimPrefix(name, prefix), suffix)
+	if len(token) != 6 {
+		return false
+	}
+	for _, char := range token {
+		if !((char >= '0' && char <= '9') || (char >= 'a' && char <= 'f')) {
+			return false
+		}
+	}
+	return true
 }
 
 func removeFile(path string) operation {
@@ -1098,7 +1157,7 @@ func compareOperations(a, b operation) int {
 }
 
 func managedSDDSkillIDs() []string {
-	ids := append([]string(nil), sddSkillPhaseIDs...)
+	ids := append([]string(nil), sddSkillPhaseIDs()...)
 	return append(ids, "judgment-day")
 }
 

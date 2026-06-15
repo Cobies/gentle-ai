@@ -86,7 +86,7 @@ func (a *Adapter) SystemPromptDir(homeDir string) string {
 }
 
 func (a *Adapter) SystemPromptFile(homeDir string) string {
-	return filepath.Join(homeDir, ".codex", "agents.md")
+	return filepath.Join(homeDir, ".codex", "AGENTS.md")
 }
 
 func (a *Adapter) SkillsDir(homeDir string) string {
@@ -157,6 +157,13 @@ func (a *Adapter) SupportsSystemPrompt() bool {
 // SupportsMCP returns true — Codex supports MCP via ~/.codex/config.toml.
 func (a *Adapter) SupportsMCP() bool {
 	return true
+}
+
+// RenderCodexPhaseEfforts implements codexModelResolver. It delegates to
+// model.RenderCodexPhaseEfforts so that inject.go can substitute the
+// {{CODEX_PHASE_EFFORTS}} placeholder in the Codex orchestrator asset.
+func (a *Adapter) RenderCodexPhaseEfforts(assignments map[string]model.CodexEffort, carrilModels map[string]string) string {
+	return model.RenderCodexPhaseEfforts(assignments, carrilModels)
 }
 
 func defaultStat(path string) statResult {

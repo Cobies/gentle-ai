@@ -312,8 +312,9 @@ func TestComponentOperationsSDD_OpenCodeRemovesManagedPluginSourcesAndModelVaria
 	}
 	backgroundAgentsPath := filepath.Join(pluginDir, "background-agents.ts")
 	modelVariantsPluginPath := filepath.Join(pluginDir, "model-variants.ts")
+	skillRegistryPluginPath := filepath.Join(pluginDir, "skill-registry.ts")
 	thirdPartyPluginPath := filepath.Join(pluginDir, "third-party.ts")
-	for _, path := range []string{backgroundAgentsPath, modelVariantsPluginPath} {
+	for _, path := range []string{backgroundAgentsPath, modelVariantsPluginPath, skillRegistryPluginPath} {
 		if err := os.WriteFile(path, []byte("managed"), 0o644); err != nil {
 			t.Fatalf("WriteFile(%q) error = %v", path, err)
 		}
@@ -328,8 +329,15 @@ func TestComponentOperationsSDD_OpenCodeRemovesManagedPluginSourcesAndModelVaria
 	}
 	modelVariantsCachePath := filepath.Join(cacheDir, "model-variants.json")
 	modelVariantsTempPath := filepath.Join(cacheDir, "model-variants.json.tmp")
+	modelVariantsRandomTempPath := filepath.Join(cacheDir, "model-variants.json.a1b2c3.tmp")
 	unrelatedCachePath := filepath.Join(cacheDir, "keep.txt")
-	for _, path := range []string{modelVariantsCachePath, modelVariantsTempPath, unrelatedCachePath} {
+	unrelatedTempPaths := []string{
+		filepath.Join(cacheDir, "model-variants.json.abc12.tmp"),
+		filepath.Join(cacheDir, "model-variants.json.abc1234.tmp"),
+		filepath.Join(cacheDir, "model-variants.json.ABC123.tmp"),
+		filepath.Join(cacheDir, "model-variants.json.notes.tmp"),
+	}
+	for _, path := range append([]string{modelVariantsCachePath, modelVariantsTempPath, modelVariantsRandomTempPath, unrelatedCachePath}, unrelatedTempPaths...) {
 		if err := os.WriteFile(path, []byte("cache"), 0o644); err != nil {
 			t.Fatalf("WriteFile(%q) error = %v", path, err)
 		}
@@ -337,7 +345,7 @@ func TestComponentOperationsSDD_OpenCodeRemovesManagedPluginSourcesAndModelVaria
 
 	applySDDOpenCodeOperations(t, svc, adapter)
 
-	for _, path := range []string{backgroundAgentsPath, modelVariantsPluginPath, modelVariantsCachePath, modelVariantsTempPath} {
+	for _, path := range []string{backgroundAgentsPath, modelVariantsPluginPath, skillRegistryPluginPath, modelVariantsCachePath, modelVariantsTempPath, modelVariantsRandomTempPath} {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Fatalf("managed file %q should be removed; stat err = %v", path, err)
 		}
@@ -347,6 +355,11 @@ func TestComponentOperationsSDD_OpenCodeRemovesManagedPluginSourcesAndModelVaria
 	}
 	if _, err := os.Stat(unrelatedCachePath); err != nil {
 		t.Fatalf("unrelated cache file should be preserved, stat err = %v", err)
+	}
+	for _, path := range unrelatedTempPaths {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("unrelated model variants temp-like file should be preserved, stat err = %v", err)
+		}
 	}
 	if _, err := os.Stat(thirdPartyPluginPath); err != nil {
 		t.Fatalf("third-party plugin should be preserved, stat err = %v", err)
@@ -371,7 +384,7 @@ func TestComponentOperationsSDD_OpenCodePreservesEmptyModelVariantsCacheDirector
 	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll(cacheDir) error = %v", err)
 	}
-	for _, name := range []string{"model-variants.json", "model-variants.json.tmp"} {
+	for _, name := range []string{"model-variants.json", "model-variants.json.tmp", "model-variants.json.d4e5f6.tmp"} {
 		path := filepath.Join(cacheDir, name)
 		if err := os.WriteFile(path, []byte("cache"), 0o644); err != nil {
 			t.Fatalf("WriteFile(%q) error = %v", path, err)
@@ -588,6 +601,69 @@ func TestComponentOperationsSDD_ClaudeRemovesSkillRegistryHook(t *testing.T) {
 		}
 	}
 	raw, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	if strings.Contains(text, "gentle-ai skill-registry refresh") {
+		t.Fatalf("managed hook should be removed:\n%s", text)
+	}
+	if !strings.Contains(text, "echo keep") || !strings.Contains(text, "echo pre") {
+		t.Fatalf("unrelated hooks should be preserved:\n%s", text)
+	}
+}
+
+func TestComponentOperationsSDD_CodexRemovesSkillRegistryHook(t *testing.T) {
+	homeDir := t.TempDir()
+	workspaceDir := t.TempDir()
+
+	svc, err := NewService(homeDir, workspaceDir, "dev")
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	adapter, ok := svc.registry.Get(model.AgentCodex)
+	if !ok {
+		t.Fatal("codex adapter not found in registry")
+	}
+	hooksPath := filepath.Join(adapter.GlobalConfigDir(homeDir), "hooks.json")
+	if err := os.MkdirAll(filepath.Dir(hooksPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	initial := `{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {"type": "command", "command": "gentle-ai skill-registry refresh --quiet --no-gitignore --cwd \"$PWD\" || true"},
+          {"type": "command", "command": "echo keep"}
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [{"type": "command", "command": "echo pre"}]
+      }
+    ]
+  }
+}`
+	if err := os.WriteFile(hooksPath, []byte(initial), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ops, _, err := svc.componentOperations(adapter, model.ComponentSDD)
+	if err != nil {
+		t.Fatalf("componentOperations() error = %v", err)
+	}
+	for _, op := range ops {
+		if op.typeID == opRewriteFile && op.path == hooksPath {
+			if _, _, err := op.apply(op.path); err != nil {
+				t.Fatalf("Codex hooks rewrite op.apply() error = %v", err)
+			}
+		}
+	}
+	raw, err := os.ReadFile(hooksPath)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -12,6 +12,7 @@ import (
 	"github.com/gentleman-programming/gentle-ai/internal/assets"
 	"github.com/gentleman-programming/gentle-ai/internal/components/filemerge"
 	"github.com/gentleman-programming/gentle-ai/internal/model"
+	"github.com/gentleman-programming/gentle-ai/internal/opencode"
 )
 
 // profileNameRegex matches valid profile name slugs: lowercase alphanumeric + hyphens,
@@ -19,10 +20,18 @@ import (
 var profileNameRegex = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
 
 // reservedProfileNames are names that may not be used as profile names.
-var reservedProfileNames = map[string]bool{
-	"default":          true,
-	"sdd-orchestrator": true,
-}
+// JD agent names are derived from opencode.JDPhases() to avoid drift
+// when agents are renamed or added.
+var reservedProfileNames = func() map[string]bool {
+	names := map[string]bool{
+		"default":          true,
+		"sdd-orchestrator": true,
+	}
+	for _, name := range opencode.JDPhases() {
+		names[name] = true
+	}
+	return names
+}()
 
 // ValidateProfileName returns an error if the profile name is not a valid
 // slug (lowercase alphanumeric + hyphens, no underscores, no spaces, non-empty,
@@ -55,6 +64,13 @@ var profilePhaseOrder = []string{
 	"sdd-verify",
 	"sdd-archive",
 	"sdd-onboard",
+}
+
+var reviewAgentNames = []string{
+	"review-risk",
+	"review-readability",
+	"review-reliability",
+	"review-resilience",
 }
 
 // ProfilePhaseOrder returns the ordered list of SDD sub-agent phase names.
@@ -255,24 +271,37 @@ func GenerateProfileOverlay(profile model.Profile, homeDir string) ([]byte, erro
 	for _, phase := range profilePhaseOrder {
 		taskPerms[phase+suffix] = "allow"
 	}
+	// Add JD agent permissions (global, not profile-scoped).
+	// JD agents are workflow-level and shared across profiles.
+	for _, jd := range opencode.JDPhases() {
+		taskPerms[jd] = "allow"
+	}
+	// Add 4R review agent permissions (global, not profile-scoped).
+	// The base overlays define these shared review agents; named profiles only
+	// need permission to delegate to the unsuffixed global agent keys.
+	for _, reviewAgent := range reviewAgentNames {
+		taskPerms[reviewAgent] = "allow"
+	}
 
 	orchEntry := map[string]any{
 		"mode":        "primary",
 		"description": "SDD Orchestrator (" + profile.Name + " profile) - coordinates sub-agents, never does work inline",
 		"prompt":      orchestratorPrompt,
 		"permission": map[string]any{
+			"question": "allow",
 			"task": map[string]any{
 				"__replace__": taskPerms,
 			},
 		},
 		"tools": map[string]any{
-			"read":            true,
-			"write":           true,
-			"edit":            true,
-			"bash":            true,
-			"delegate":        true,
-			"delegation_read": true,
-			"delegation_list": true,
+			"__replace__": map[string]any{
+				"read":  true,
+				"write": true,
+				"edit":  true,
+				"bash":  true,
+				"question": true,
+				"task":  true,
+			},
 		},
 	}
 	if profile.OrchestratorModel.ProviderID != "" && profile.OrchestratorModel.ModelID != "" {

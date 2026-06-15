@@ -6,14 +6,28 @@
 
 You configured your SDD models once, and now every task -- cheap or expensive, experimental or battle-tested -- runs through the same orchestrator. Profiles fix that: **create named model configurations and switch between them with Tab inside OpenCode.**
 
-Gentle AI supports **two ways** of working with OpenCode profiles:
+Gentle AI supports **two ways** of working with OpenCode profiles. Profiles cover SDD phase agents; Judgment Day agents (`jd-judge-a`, `jd-judge-b`, `jd-fix-agent`) are workflow-level slots with independent model assignments.
 
-1. **Generated multi-profile mode** -- the classic Gentle AI flow. The base SDD conductor is `gentle-orchestrator`. Each named profile generates its own `sdd-orchestrator-{name}` plus 10 suffixed sub-agents in `opencode.json`, and you switch between them with **Tab**.
+1. **Generated multi-profile mode** -- the classic Gentle AI flow. The base SDD conductor is `gentle-orchestrator`. Each named profile generates its own `sdd-orchestrator-{name}` plus 10 suffixed SDD phase sub-agents in `opencode.json`, and you switch between them with **Tab**.
 2. **External single-active mode** -- for community tools that keep profile files outside `opencode.json` and activate one runtime profile at a time.
 
 That means you can stay with the built-in multi-profile overlay, or plug Gentle AI into an external profile manager without the two systems fighting each other.
 
 ---
+
+
+## Native background subagents
+
+OpenCode SDD uses native OpenCode subagents through the `task` permission. Gentle AI no longer installs the legacy `background-agents.ts` plugin by default.
+
+To opt into OpenCode's experimental background subagent execution, start OpenCode with:
+
+```sh
+export OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS=true
+opencode
+```
+
+Gentle AI does not currently write process environment variables into `opencode.json`; keep the flag in your shell, terminal profile, or launcher until OpenCode provides a stable config-level switch.
 
 ## Quick Start (TUI)
 
@@ -158,7 +172,7 @@ The `default` profile (`gentle-orchestrator`) can be edited but not deleted -- i
 <details>
 <summary><strong>How It Works</strong></summary>
 
-In generated multi-profile mode, each named profile generates 11 agent entries in `opencode.json`: one orchestrator (`sdd-orchestrator-{name}`, mode `primary`) and 10 sub-agents (`sdd-{phase}-{name}`, mode `subagent`, hidden). The base/default conductor remains `gentle-orchestrator`. Each named profile orchestrator's permissions are scoped so it can only delegate to its own suffixed sub-agents.
+In generated multi-profile mode, each named profile generates 11 agent entries in `opencode.json`: one orchestrator (`sdd-orchestrator-{name}`, mode `primary`) and 10 SDD phase sub-agents (`sdd-{phase}-{name}`, mode `subagent`, hidden). The base/default conductor remains `gentle-orchestrator`. Each named profile orchestrator's permissions are scoped so it can only delegate to its own suffixed sub-agents.
 
 Sub-agent prompts are shared across all profiles as files under `~/.config/opencode/prompts/sdd/` (e.g., `sdd-apply.md`). Each agent entry references the shared file via `{file:~/.config/opencode/prompts/sdd/sdd-apply.md}` -- only the `model` field differs between profiles. Orchestrator prompts are inlined per-profile because they contain profile-specific model assignment tables and sub-agent references.
 

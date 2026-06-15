@@ -3,6 +3,7 @@ package upgrade
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,14 +14,25 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gentleman-programming/gentle-ai/internal/cli"
 	"github.com/gentleman-programming/gentle-ai/internal/components/engram"
 	"github.com/gentleman-programming/gentle-ai/internal/system"
 	"github.com/gentleman-programming/gentle-ai/internal/update"
 )
 
-// engramDownloadFn is the function used to download the engram binary.
+// engramDownloadFn is the function used to download the engram binary on the stable channel.
 // Package-level var for testability — swapped in tests to avoid real network calls.
-var engramDownloadFn = engram.DownloadLatestBinary
+var engramDownloadFn = func(profile system.PlatformProfile) (string, error) {
+	return engram.DownloadLatestBinary(profile, false)
+}
+
+// engramBetaInstallFn installs engram from HEAD via `go install @main` (beta channel).
+// It delegates to engram.DownloadLatestBinary(profile, true), which is the single
+// canonical beta path shared with the install-time flow. Package-level var for
+// testability — swapped in tests to avoid real go install/network calls.
+var engramBetaInstallFn = func(profile system.PlatformProfile) (string, error) {
+	return engram.DownloadLatestBinary(profile, true)
+}
 
 // execCommand is a package-level var declared in executor.go (same package).
 
@@ -46,22 +58,28 @@ const maxScriptSize = 1 * 1024 * 1024 // 1 MB
 //   - brew profile → brewUpgrade (regardless of tool's declared method)
 //   - go-install method + apt/pacman/other → goInstallUpgrade
 //   - binary method + linux/darwin → binaryUpgrade
-//   - binary method + windows → manualFallback (Phase 1: self-replace deferred)
+//   - binary method + windows → manualFallback (gentle-ai on Windows uses installerUpgrade instead)
 //   - script method + linux/darwin + gga → ggaScriptUpgrade (git clone approach)
 //   - script method + linux/darwin + other → scriptUpgrade (curl | bash install.sh)
 //   - script method + windows → manualFallback
 //   - OpenCode plugin method → update materialized package in ~/.config/opencode when possible
 //   - unknown method → manualFallback with explicit message
-func runStrategy(ctx context.Context, r update.UpdateResult, profile system.PlatformProfile) error {
+func runStrategy(ctx context.Context, r update.UpdateResult, profile system.PlatformProfile) (bool, error) {
+	if isBetaGentleAIUpgrade(r) && profile.OS != "windows" {
+		return false, goInstallMainUpgrade(r.Tool)
+	}
+
 	method := effectiveMethod(r.Tool, profile)
 
 	switch method {
 	case update.InstallBrew:
-		return brewUpgrade(ctx, r.Tool.Name)
+		return false, brewUpgrade(ctx, r.Tool.Name)
 	case update.InstallGoInstall:
-		return goInstallUpgrade(ctx, r.Tool, r.LatestVersion)
+		return false, goInstallUpgrade(ctx, r.Tool, r.LatestVersion)
 	case update.InstallBinary:
-		return binaryUpgrade(ctx, r, profile)
+		return false, binaryUpgrade(ctx, r, profile)
+	case update.InstallInstaller:
+		return installerUpgrade(ctx, r.Tool, r.ReleaseURL)
 	case update.InstallScript:
 		// GGA's install.sh expects to run from within a cloned repo — it references
 		// $SCRIPT_DIR/bin/gga and $SCRIPT_DIR/lib/*.sh. The generic scriptUpgrade
@@ -69,13 +87,13 @@ func runStrategy(ctx context.Context, r update.UpdateResult, profile system.Plat
 		// breaks because those relative paths don't exist. Use the git clone approach
 		// (same as the initial install resolver) for GGA specifically.
 		if r.Tool.Name == "gga" {
-			return ggaScriptUpgrade(ctx, r)
+			return false, ggaScriptUpgrade(ctx, r)
 		}
-		return scriptUpgrade(ctx, r, profile)
+		return false, scriptUpgrade(ctx, r, profile)
 	case update.InstallOpenCodePlugin:
-		return opencodePluginUpgrade(ctx, r)
+		return false, opencodePluginUpgrade(ctx, r)
 	default:
-		return &ManualFallbackError{
+		return false, &ManualFallbackError{
 			Hint: fmt.Sprintf("upgrade %q: unsupported install method %q — please update manually. See: https://github.com/Gentleman-Programming/%s",
 				r.Tool.Name, method, r.Tool.Repo),
 		}
@@ -300,6 +318,15 @@ func brewUpgrade(ctx context.Context, toolName string) error {
 	tapCmd.Stdin = nil
 	_ = tapCmd.Run()
 
+	// Trust only the Gentleman Programming artifact being upgraded. Homebrew 6 can
+	// require explicit trust for non-official taps; this is intentionally scoped to
+	// our formula/cask, not the whole tap or third-party taps. Older Homebrew versions
+	// may not support `brew trust`, so this is non-fatal and the upgrade output
+	// below remains the source of truth.
+	trustCmd := execCommand("brew", "trust", homebrewTrustFlag(toolName), gentlemanProgrammingTapRef(toolName))
+	trustCmd.Stdin = nil
+	_ = trustCmd.Run()
+
 	// Update Homebrew formula cache before upgrading.
 	// Non-fatal: if update fails (e.g. no network), attempt upgrade with existing cache.
 	updateCmd := execCommand("brew", "update")
@@ -309,9 +336,54 @@ func brewUpgrade(ctx context.Context, toolName string) error {
 	upgradeCmd := execCommand("brew", "upgrade", toolName)
 	upgradeCmd.Stdin = nil
 	if out, err := upgradeCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("brew upgrade %s: %w (output: %s)", toolName, err, string(out))
+		return formatBrewUpgradeError(toolName, err, string(out))
 	}
 	return nil
+}
+
+func gentlemanProgrammingTapRef(toolName string) string {
+	return "gentleman-programming/tap/" + strings.TrimSpace(toolName)
+}
+
+func homebrewTrustFlag(toolName string) string {
+	if strings.TrimSpace(toolName) == "engram" {
+		return "--cask"
+	}
+	return "--formula"
+}
+
+func formatBrewUpgradeError(toolName string, err error, output string) error {
+	message := fmt.Sprintf("brew upgrade %s: %v (output: %s)", toolName, err, output)
+	if advice := homebrewFailureAdvice(toolName, output); advice != "" {
+		message += "\n\n" + advice
+	}
+	return errors.New(message)
+}
+
+func homebrewFailureAdvice(toolName string, output string) string {
+	lower := strings.ToLower(output)
+	ref := gentlemanProgrammingTapRef(toolName)
+
+	if strings.Contains(lower, "untrusted tap") || strings.Contains(lower, "tap trust is required") || strings.Contains(lower, "homebrew_require_tap_trust") {
+		flag := homebrewTrustFlag(toolName)
+		artifact := strings.TrimPrefix(flag, "--")
+		if strings.Contains(lower, "--cask") || strings.Contains(lower, "load cask") {
+			flag = "--cask"
+			artifact = "cask"
+		} else if strings.Contains(lower, "--formula") || strings.Contains(lower, "load formula") {
+			flag = "--formula"
+			artifact = "formula"
+		}
+		return fmt.Sprintf("Homebrew requires explicit trust for external taps. Trust only this Gentle AI %s, then retry:\n  brew trust %s %s\n  brew upgrade %s", artifact, flag, ref, toolName)
+	}
+
+	if strings.Contains(lower, "bubblewrap is installed but cannot create a rootless sandbox") ||
+		strings.Contains(lower, "rootless sandbox") ||
+		strings.Contains(lower, "homebrew_no_sandbox_linux") {
+		return "Homebrew on Linux could not create its Bubblewrap rootless sandbox. This requires an explicit admin/security decision: enabling unprivileged user namespaces lets Homebrew use its sandbox but changes host kernel/AppArmor policy. If acceptable, run:\n  sudo sysctl -w kernel.unprivileged_userns_clone=1\n  sudo sysctl -w user.max_user_namespaces=28633\n  sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true\n\nFinal workaround if your distro policy forbids this sandbox:\n  HOMEBREW_NO_SANDBOX_LINUX=1 brew upgrade " + toolName
+	}
+
+	return ""
 }
 
 // goInstallUpgrade runs `go install <importPath>@v<version>`.
@@ -330,12 +402,83 @@ func goInstallUpgrade(ctx context.Context, tool update.ToolInfo, latestVersion s
 	return nil
 }
 
+func isBetaGentleAIUpgrade(r update.UpdateResult) bool {
+	return r.Tool.Name == "gentle-ai" &&
+		strings.EqualFold(r.Tool.Owner, "Gentleman-Programming") &&
+		r.Tool.Repo == "gentle-ai" &&
+		strings.HasPrefix(strings.TrimSpace(r.LatestVersion), "main@")
+}
+
+func goInstallMainUpgrade(tool update.ToolInfo) error {
+	module := strings.ToLower(fmt.Sprintf("github.com/%s/%s", strings.TrimSpace(tool.Owner), strings.TrimSpace(tool.Repo)))
+	if module == "github.com//" {
+		module = "github.com/gentleman-programming/gentle-ai"
+	}
+	target := module + "/cmd/gentle-ai@main"
+	cmd := execCommand("go", "install", target)
+	cmd.Stdin = nil
+	cmd.Env = goProxyBypassEnv(cmd.Env, module)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("go install %s: %w (output: %s)", target, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func goProxyBypassEnv(base []string, module string) []string {
+	if base == nil {
+		base = os.Environ()
+	}
+	env := append([]string{}, base...)
+	for _, key := range []string{"GONOSUMDB", "GOPRIVATE", "GONOPROXY"} {
+		env = setEnvValue(env, key, prependGoPattern(getEnvValue(env, key), module))
+	}
+	return env
+}
+
+func getEnvValue(env []string, key string) string {
+	prefix := key + "="
+	for i := len(env) - 1; i >= 0; i-- {
+		if strings.HasPrefix(env[i], prefix) {
+			return strings.TrimPrefix(env[i], prefix)
+		}
+	}
+	return ""
+}
+
+func setEnvValue(env []string, key, value string) []string {
+	prefix := key + "="
+	for i := len(env) - 1; i >= 0; i-- {
+		if strings.HasPrefix(env[i], prefix) {
+			env[i] = prefix + value
+			return env
+		}
+	}
+	return append(env, prefix+value)
+}
+
+func prependGoPattern(existing, pattern string) string {
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "" {
+		return existing
+	}
+	parts := strings.Split(existing, ",")
+	for _, part := range parts {
+		if strings.TrimSpace(part) == pattern {
+			return existing
+		}
+	}
+	if strings.TrimSpace(existing) == "" {
+		return pattern
+	}
+	return pattern + "," + existing
+}
+
 // binaryUpgrade handles binary-release upgrades via GitHub Releases asset download.
 //
 // engram has its own cross-platform binary downloader (DownloadLatestBinary) that
-// works on all platforms including Windows. For all other tools on Windows,
-// self-replace of a running binary is deferred (Phase 1) — a ManualFallbackError
-// is returned so the executor surfaces it as UpgradeSkipped with an actionable hint.
+// works on all platforms including Windows. For tools besides engram and gentle-ai
+// on Windows, a ManualFallbackError is returned so the executor surfaces it as
+// UpgradeSkipped with an actionable hint. (gentle-ai uses InstallInstaller).
 func binaryUpgrade(ctx context.Context, r update.UpdateResult, profile system.PlatformProfile) error {
 	// engram: always use its dedicated binary downloader regardless of platform
 	// (except brew, which is handled by effectiveMethod before we get here).
@@ -344,7 +487,7 @@ func binaryUpgrade(ctx context.Context, r update.UpdateResult, profile system.Pl
 	}
 
 	if profile.OS == "windows" {
-		// Phase 1: Windows binary self-replace is deferred for non-engram tools.
+		// Windows binary auto-upgrade is not supported for generic tools yet.
 		// Return a ManualFallbackError so the executor surfaces this as UpgradeSkipped
 		// with an actionable hint — NOT as UpgradeFailed.
 		hint := r.UpdateHint
@@ -360,18 +503,114 @@ func binaryUpgrade(ctx context.Context, r update.UpdateResult, profile system.Pl
 	return downloadAndReplace(ctx, r, profile)
 }
 
-// engramBinaryUpgrade downloads the latest engram binary using its dedicated
-// cross-platform downloader and adds the install directory to PATH.
-// On Windows the PATH change is also persisted to the user registry via PowerShell.
-func engramBinaryUpgrade(profile system.PlatformProfile) error {
-	binaryPath, err := engramDownloadFn(profile)
-	if err != nil {
-		return fmt.Errorf("download engram binary: %w", err)
+// installerUpgrade launches the PowerShell installer (install.ps1) for gentle-ai on Windows.
+// This is used for the Windows self-replace workaround — the running process
+// exits immediately after launching the installer, which then replaces the binary.
+func installerUpgrade(ctx context.Context, tool update.ToolInfo, releaseURL string) (bool, error) {
+	if runtime.GOOS != "windows" {
+		return false, fmt.Errorf("installer upgrade is only supported on Windows")
 	}
+
+	scriptURL := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/main/scripts/install.ps1", tool.Owner, tool.Repo)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, scriptURL, nil)
+	if err != nil {
+		return false, fmt.Errorf("download install.ps1: build request: %w", err)
+	}
+
+	resp, err := scriptHTTPClient.Do(req)
+	if err != nil {
+		return false, fmt.Errorf("download install.ps1: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("download install.ps1: HTTP %d from %s", resp.StatusCode, scriptURL)
+	}
+
+	scriptBody, err := io.ReadAll(io.LimitReader(resp.Body, maxScriptSize+1))
+	if err != nil {
+		return false, fmt.Errorf("download install.ps1: read body: %w", err)
+	}
+	if int64(len(scriptBody)) > maxScriptSize {
+		return false, fmt.Errorf("download install.ps1: response body exceeds %d bytes limit", maxScriptSize)
+	}
+
+	// Write to a temporary file instead of passing it to iex directly
+	tmpFile, err := os.CreateTemp("", "gentle-ai-install-*.ps1")
+	if err != nil {
+		return false, fmt.Errorf("create temp script: %w", err)
+	}
+	if _, err := tmpFile.Write(scriptBody); err != nil {
+		tmpFile.Close()
+		return false, fmt.Errorf("write temp script: %w", err)
+	}
+	tmpFile.Close()
+
+	cmd := execCommand(
+		"cmd",
+		"/C",
+		"start",
+		"",
+		"powershell",
+		"-NoProfile",
+		"-NoExit",
+		"-ExecutionPolicy", "Bypass",
+		"-File", tmpFile.Name(),
+	)
+
+	fmt.Printf("\nLaunching installer for %s...\n", tool.Name)
+	fmt.Println("gentle-ai will now exit so the installer can replace the binary.")
+
+	if err := cmd.Start(); err != nil {
+		return false, fmt.Errorf("failed to start installer: %w", err)
+	}
+
+	// Mark that we need to exit after the spinner is handled by the caller.
+	// This allows the executor to call sp.Finish(true) before we actually exit.
+	return true, nil
+}
+
+// engramBinaryUpgrade downloads or installs the latest engram binary.
+// It honors GENTLE_AI_CHANNEL: when the channel is beta, engram is installed
+// from source via `go install @main`. For stable (the default when the env var
+// is unset or unknown), the pre-built release binary is downloaded via
+// engramDownloadFn. On Windows, PATH changes are persisted to the user registry
+// via PowerShell.
+func engramBinaryUpgrade(profile system.PlatformProfile) error {
+	// Resolve the install channel from the environment. Unknown values fall back
+	// to stable (ResolveInstallChannel returns an error for truly unrecognized
+	// values; we treat those as stable and emit a warning so users are not silently
+	// misrouted).
+	channel, err := cli.ResolveInstallChannel("")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "WARNING: unrecognized GENTLE_AI_CHANNEL value (%v); defaulting to stable\n", err)
+		channel = cli.ChannelStable
+	}
+
+	var binaryPath string
+	if channel.IsBeta() {
+		// Beta channel: install engram from HEAD via engramBetaInstallFn, which
+		// delegates to engram.DownloadLatestBinary(profile, true). This is the
+		// single canonical beta path shared with the install-time flow in
+		// internal/cli/run.go (installBetaEngramFromMain). The previous inline
+		// `go install` block is removed — all beta logic lives in download.go.
+		binaryPath, err = engramBetaInstallFn(profile)
+		if err != nil {
+			return fmt.Errorf("install engram from main (beta): %w", err)
+		}
+	} else {
+		// Stable channel (default): download the latest release binary.
+		binaryPath, err = engramDownloadFn(profile)
+		if err != nil {
+			return fmt.Errorf("download engram binary: %w", err)
+		}
+	}
+
 	// Add install dir to PATH. On Windows this also persists via PowerShell (user registry).
 	binDir := filepath.Dir(binaryPath)
 	if err := system.AddToUserPath(binDir); err != nil {
-		// Non-fatal: the binary was downloaded successfully. Warn and continue.
+		// Non-fatal: the binary was downloaded or installed successfully. Warn and continue.
 		fmt.Fprintf(os.Stderr, "WARNING: could not add %s to PATH: %v\n", binDir, err)
 	}
 	return nil
@@ -383,16 +622,21 @@ func downloadAndReplace(ctx context.Context, r update.UpdateResult, profile syst
 	return Download(ctx, r, profile)
 }
 
-// installScriptURLFn builds the raw GitHub URL for the project's install.sh.
+// installScriptURLFn builds the raw GitHub URL for the project's install.sh,
+// pinned to the given release tag (e.g. "1.31.0" → ref "v1.31.0").
 // Package-level var for testability.
-var installScriptURLFn = func(owner, repo string) string {
-	return fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/main/install.sh",
-		owner, repo)
+var installScriptURLFn = func(owner, repo, version string) (string, error) {
+	if strings.TrimSpace(version) == "" {
+		return "", fmt.Errorf("install script URL: target version must not be empty")
+	}
+	return fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/v%s/install.sh",
+		owner, repo, version), nil
 }
 
-// installScriptURL builds the raw GitHub URL for the project's install.sh.
-func installScriptURL(owner, repo string) string {
-	return installScriptURLFn(owner, repo)
+// installScriptURL builds the raw GitHub URL for the project's install.sh,
+// pinned to the given release tag so the upgrade path never pulls from main.
+func installScriptURL(owner, repo, version string) (string, error) {
+	return installScriptURLFn(owner, repo, version)
 }
 
 // scriptUpgrade downloads and executes the project's install.sh via curl | bash.
@@ -413,7 +657,11 @@ func scriptUpgrade(ctx context.Context, r update.UpdateResult, profile system.Pl
 		}
 	}
 
-	url := installScriptURL(r.Tool.Owner, r.Tool.Repo)
+	url, err := installScriptURL(r.Tool.Owner, r.Tool.Repo, r.LatestVersion)
+	if err != nil {
+		return fmt.Errorf("download install.sh: %w", err)
+	}
+	fmt.Fprintf(os.Stderr, "INFO: downloading install script from %s\n", url)
 
 	// Download install.sh content.
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -495,9 +743,13 @@ func ggaScriptUpgradeForOS(ctx context.Context, r update.UpdateResult, osName st
 	}
 	defer os.RemoveAll(tmpDir)
 
-	// Clone the full repository — install.sh needs the entire repo context.
+	// Clone the full repository at the target release tag so the install.sh
+	// executed here matches the version the user is upgrading TO, not whatever
+	// is on main at the moment of the upgrade. This prevents a race where a
+	// commit lands on main between the release and the user's upgrade run.
+	targetTag := "v" + r.LatestVersion
 	repoURL := fmt.Sprintf("https://github.com/%s/%s.git", r.Tool.Owner, r.Tool.Repo)
-	cloneCmd := execCommand("git", "clone", repoURL, tmpDir)
+	cloneCmd := execCommand("git", "clone", "--depth=1", "--branch", targetTag, repoURL, tmpDir)
 	cloneCmd.Stdin = nil
 	if out, err := cloneCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git clone %s: %w (output: %s)", r.Tool.Repo, err, strings.TrimSpace(string(out)))

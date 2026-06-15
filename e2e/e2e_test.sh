@@ -187,23 +187,41 @@ test_dry_run_preset_custom() {
 # --- Category 1e: Preset component order validation ---
 
 test_preset_minimal_components() {
-    log_test "Preset minimal produces only engram component"
+    log_test "Preset minimal with persona=custom produces only engram component"
 
-    output=$($BINARY install --preset minimal --agent claude-code --dry-run 2>&1) || true
+    # Use persona=custom to test the preset alone, since persona is now
+    # driven by Selection.Persona (decoupled from preset).
+    output=$($BINARY install --preset minimal --persona custom --agent claude-code --dry-run 2>&1) || true
 
     # The component list should contain engram
     assert_output_contains "$output" "engram" "Minimal preset includes engram"
     # Should NOT contain sdd, skills, persona, etc.
     assert_output_not_contains "$output" "Components order:.*sdd" "Minimal preset excludes sdd"
-    assert_output_not_contains "$output" "Components order:.*persona" "Minimal preset excludes persona"
+    assert_output_not_contains "$output" "Components order:.*persona" "Minimal + persona=custom excludes persona"
+}
+
+test_preset_minimal_with_default_persona_includes_persona() {
+    log_test "Preset minimal with default persona (gentleman) includes persona"
+
+    # Persona is now decoupled from preset — default Gentleman persona is
+    # installed regardless of which preset the user picks.
+    output=$($BINARY install --preset minimal --agent claude-code --dry-run 2>&1) || true
+
+    local components_line
+    components_line=$(echo "$output" | grep "Components order:")
+
+    assert_output_contains "$components_line" "engram" "Minimal includes engram"
+    assert_output_contains "$components_line" "persona" "Minimal + default Gentleman persona includes persona"
 }
 
 test_preset_ecosystem_components() {
-    log_test "Preset ecosystem-only produces 5 components"
+    log_test "Preset ecosystem-only with persona=custom produces 5 components"
 
-    output=$($BINARY install --preset ecosystem-only --agent claude-code --dry-run 2>&1) || true
+    # Use persona=custom to test the preset alone, since persona is now
+    # driven by Selection.Persona (decoupled from preset).
+    output=$($BINARY install --preset ecosystem-only --persona custom --agent claude-code --dry-run 2>&1) || true
 
-    # ecosystem-only = engram, sdd, skills, context7, gga
+    # ecosystem-only (without persona) = engram, sdd, skills, context7, gga
     local components_line
     components_line=$(echo "$output" | grep "Components order:")
 
@@ -212,8 +230,23 @@ test_preset_ecosystem_components() {
     assert_output_contains "$components_line" "skills" "Ecosystem includes skills"
     assert_output_contains "$components_line" "context7" "Ecosystem includes context7"
     assert_output_contains "$components_line" "gga" "Ecosystem includes gga"
-    assert_output_not_contains "$components_line" "persona" "Ecosystem excludes persona"
+    assert_output_not_contains "$components_line" "persona" "Ecosystem + persona=custom excludes persona"
     assert_output_not_contains "$components_line" "permissions" "Ecosystem excludes permissions"
+}
+
+test_preset_full_with_custom_persona_excludes_persona() {
+    log_test "Preset full-gentleman with persona=custom excludes persona"
+
+    # Persona is decoupled — picking persona=custom skips persona install
+    # even when the preset is full-gentleman.
+    output=$($BINARY install --preset full-gentleman --persona custom --agent claude-code --dry-run 2>&1) || true
+
+    local components_line
+    components_line=$(echo "$output" | grep "Components order:")
+
+    assert_output_contains "$components_line" "engram" "Full + persona=custom keeps engram"
+    assert_output_contains "$components_line" "permissions" "Full + persona=custom keeps permissions"
+    assert_output_not_contains "$components_line" "persona" "Full + persona=custom excludes persona"
 }
 
 test_preset_full_components() {
@@ -576,7 +609,7 @@ test_cc_skills_minimal() {
     log_test "Claude Code: skills injection (minimal preset = SDD skills only)"
     cleanup_test_env
 
-    if $BINARY install --agent claude-code --component skills --preset minimal --persona neutral 2>&1; then
+    if $BINARY install --agent claude-code --component skills --preset minimal --persona custom 2>&1; then
         local skills_dir="$HOME/.claude/skills"
         assert_dir_exists "$skills_dir" "Claude skills directory"
 
@@ -854,7 +887,7 @@ test_oc_skills_minimal() {
     log_test "OpenCode: skills injection (minimal)"
     cleanup_test_env
 
-    if $BINARY install --agent opencode --component skills --preset minimal --persona neutral 2>&1; then
+    if $BINARY install --agent opencode --component skills --preset minimal --persona custom 2>&1; then
         local skill_dir="$HOME/.config/opencode/skills"
         assert_dir_exists "$skill_dir" "OpenCode skill directory"
         assert_file_count "$skill_dir" "SKILL.md" 12 "Minimal preset: 12 skill files"
@@ -1066,7 +1099,7 @@ test_minimal_preset_opencode_only_engram_no_persona() {
     log_test "Minimal preset: OpenCode (engram only, no persona side effect)"
     cleanup_test_env
 
-    if $BINARY install --agent opencode --preset minimal --persona neutral 2>&1; then
+    if $BINARY install --agent opencode --preset minimal --persona custom 2>&1; then
         local settings="$HOME/.config/opencode/opencode.json"
         local agents_md="$HOME/.config/opencode/AGENTS.md"
 
@@ -1089,7 +1122,7 @@ test_minimal_preset_claude_only_engram() {
     log_test "Minimal preset: Claude Code (only engram, nothing else)"
     cleanup_test_env
 
-    if $BINARY install --agent claude-code --preset minimal --persona neutral 2>&1; then
+    if $BINARY install --agent claude-code --preset minimal --persona custom 2>&1; then
         # Engram should be installed (MCP + CLAUDE.md)
         assert_file_exists "$HOME/.claude/CLAUDE.md" "CLAUDE.md exists"
         assert_file_contains "$HOME/.claude/CLAUDE.md" "gentle-ai:engram-protocol" "Engram protocol section"
@@ -1395,12 +1428,12 @@ test_idempotent_skills_claude() {
     log_test "Idempotency: skills injection produces same files"
     cleanup_test_env
 
-    $BINARY install --agent claude-code --component skills --preset minimal --persona neutral 2>&1 || true
+    $BINARY install --agent claude-code --component skills --preset minimal --persona custom 2>&1 || true
     # Capture file hashes
     local first_hashes
     first_hashes=$(find "$HOME/.claude/skills" -name "SKILL.md" -exec md5sum {} \; 2>/dev/null | sort)
 
-    $BINARY install --agent claude-code --component skills --preset minimal --persona neutral 2>&1 || true
+    $BINARY install --agent claude-code --component skills --preset minimal --persona custom 2>&1 || true
     local second_hashes
     second_hashes=$(find "$HOME/.claude/skills" -name "SKILL.md" -exec md5sum {} \; 2>/dev/null | sort)
 
@@ -1734,25 +1767,28 @@ test_windsurf_persona_and_sdd_content() {
     fi
 }
 
-# --- Category 12: Codex context7 by-design skip ---
+# --- Category 12: Codex context7 TOML injection ---
 
-test_codex_context7_not_in_toml() {
-    log_test "Codex: context7 component does NOT write config.toml (TOML strategy is no-op by design)"
+test_codex_context7_in_toml() {
+    log_test "Codex: context7 component writes [mcp_servers.context7] into config.toml (TOML strategy)"
     cleanup_test_env
 
-    # Install engram first (creates config.toml) then try context7
-    $BINARY install --agent codex --component engram --persona neutral 2>&1 || true
+    $BINARY install --agent codex --component context7 --persona neutral 2>&1 || true
 
     local config_toml="$HOME/.codex/config.toml"
-    if [ -f "$config_toml" ]; then
-        # Engram created config.toml — now try context7 on top
-        $BINARY install --agent codex --component context7 --persona neutral 2>&1 || true
-        assert_file_not_contains "$config_toml" "context7" "Codex config.toml does NOT get context7 entry"
+    assert_file_exists "$config_toml" "Codex config.toml created by context7"
+    assert_file_contains "$config_toml" "[mcp_servers.context7]" "Codex config.toml has [mcp_servers.context7] block"
+    assert_file_contains "$config_toml" "https://mcp.context7.com/mcp" "Codex context7 block uses remote MCP URL"
+    assert_file_not_contains "$config_toml" "context7-mcp" "Codex context7 block does not use local npx package"
+
+    # Idempotent: re-running must not duplicate the block.
+    $BINARY install --agent codex --component context7 --persona neutral 2>&1 || true
+    local count
+    count=$(grep -c "\[mcp_servers.context7\]" "$config_toml" 2>/dev/null || echo 0)
+    if [ "$count" -eq 1 ]; then
+        log_pass "Codex context7 block is idempotent (exactly 1 entry)"
     else
-        # config.toml wasn't created by engram, so no context7 either
-        $BINARY install --agent codex --component context7 --persona neutral 2>&1 || true
-        assert_file_not_exists "$config_toml" "No config.toml created by context7 alone"
-        log_pass "Codex context7 is intentionally skipped (TOML strategy is no-op)"
+        log_fail "Codex context7 block duplicated ($count entries)"
     fi
 }
 
@@ -1926,7 +1962,8 @@ test_oc_sdd_multi_mode_injection() {
 
     if $BINARY install --agent opencode --component sdd --persona neutral --sdd-mode multi 2>&1; then
         local settings="$HOME/.config/opencode/opencode.json"
-        local plugin="$HOME/.config/opencode/plugins/background-agents.ts"
+        local legacy_plugin="$HOME/.config/opencode/plugins/background-agents.ts"
+        local model_variants_plugin="$HOME/.config/opencode/plugins/model-variants.ts"
         assert_file_exists "$settings" "opencode.json exists"
         assert_valid_json "$settings" "opencode.json is valid JSON"
         assert_file_contains "$settings" '"gentle-orchestrator"' "Has gentle-orchestrator agent"
@@ -1941,12 +1978,10 @@ test_oc_sdd_multi_mode_injection() {
         assert_file_contains "$settings" '"sdd-tasks"' "Has sdd-tasks sub-agent"
         assert_file_contains "$settings" '"sdd-archive"' "Has sdd-archive sub-agent"
         assert_file_contains "$settings" '"subagent"' "Sub-agents have mode subagent"
-        assert_file_contains "$settings" '"delegate"' "Has delegate tool"
-        assert_file_contains "$settings" '"delegation_read"' "Has delegation_read tool"
-        assert_file_contains "$settings" '"delegation_list"' "Has delegation_list tool"
-        assert_file_exists "$plugin" "background-agents plugin exists"
-        assert_file_contains "$plugin" 'background-agents' "Plugin has expected content marker"
-        assert_file_size_min "$plugin" 1000 "Plugin file has substantial content"
+        assert_file_contains "$settings" '"task"' "Has native task tool"
+        assert_file_not_exists "$legacy_plugin" "legacy background-agents plugin not installed by default"
+        assert_file_exists "$model_variants_plugin" "model-variants plugin exists"
+        assert_file_contains "$model_variants_plugin" 'model-variants' "Model variants plugin has expected content marker"
     else
         log_fail "OpenCode SDD multi-mode install command failed"
     fi
@@ -1964,8 +1999,8 @@ test_oc_sdd_single_mode_no_models() {
         assert_file_not_contains "$settings" '"sdd-orchestrator"' "Single mode: does not have legacy base sdd-orchestrator agent"
         assert_file_contains "$settings" '"sdd-apply"' "Single mode: has sdd-apply sub-agent"
         assert_file_not_contains "$settings" '"model"' "Single mode: no model overrides"
-        assert_file_exists "$HOME/.config/opencode/plugins/background-agents.ts" "Single mode: background-agents plugin present"
-        assert_file_contains "$HOME/.config/opencode/plugins/background-agents.ts" 'background-agents' "Single mode: plugin has expected content marker"
+        assert_file_not_exists "$HOME/.config/opencode/plugins/background-agents.ts" "Single mode: legacy background-agents plugin not installed"
+        assert_file_exists "$HOME/.config/opencode/plugins/model-variants.ts" "Single mode: model-variants plugin present"
     else
         log_fail "OpenCode SDD single-mode install command failed"
     fi
@@ -1982,8 +2017,8 @@ test_oc_sdd_default_mode_same_as_single() {
         assert_file_not_contains "$settings" '"sdd-orchestrator"' "Default mode: does not have legacy base sdd-orchestrator"
         assert_file_contains "$settings" '"sdd-apply"' "Default mode: has sdd-apply sub-agent"
         assert_file_not_contains "$settings" '"model"' "Default mode: no model overrides"
-        assert_file_exists "$HOME/.config/opencode/plugins/background-agents.ts" "Default mode: background-agents plugin present"
-        assert_file_contains "$HOME/.config/opencode/plugins/background-agents.ts" 'background-agents' "Default mode: plugin has expected content marker"
+        assert_file_not_exists "$HOME/.config/opencode/plugins/background-agents.ts" "Default mode: legacy background-agents plugin not installed"
+        assert_file_exists "$HOME/.config/opencode/plugins/model-variants.ts" "Default mode: model-variants plugin present"
     else
         log_fail "OpenCode SDD default mode install command failed"
     fi
@@ -2142,8 +2177,10 @@ test_dry_run_preset_custom
 
 # Category 1e: Preset component order validation
 test_preset_minimal_components
+test_preset_minimal_with_default_persona_includes_persona
 test_preset_ecosystem_components
 test_preset_full_components
+test_preset_full_with_custom_persona_excludes_persona
 test_dry_run_full_preset_persona_before_sdd
 test_preset_no_legacy_theme_in_any_preset
 test_preset_custom_no_components
@@ -2267,7 +2304,7 @@ if [ "${RUN_FULL_E2E:-0}" = "1" ]; then
     test_antigravity_sdd_skills_path
 
     # Category 12: Codex context7 by-design skip
-    test_codex_context7_not_in_toml
+    test_codex_context7_in_toml
 
     # Category 13: Qwen integration
     test_qwen_engram_injection
