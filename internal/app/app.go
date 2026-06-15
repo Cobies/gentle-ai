@@ -29,15 +29,24 @@ import (
 var Version = "dev"
 
 var (
-	updateCheckAll           = update.CheckAll
-	updateCheckFiltered      = update.CheckFiltered
-	upgradeExecute           = upgrade.Execute
-	selfUpdateFn             = selfUpdate
-	ensureCurrentOSSupported = system.EnsureCurrentOSSupported
-	detectSystem             = system.Detect
-	runTUI                   = func(m tea.Model, opts ...tea.ProgramOption) (tea.Model, error) {
+	updateCheckAll            = update.CheckAll
+	updateCheckFiltered       = update.CheckFiltered
+	upgradeExecute            = upgrade.Execute
+	upgradeExecuteWithOptions = upgrade.ExecuteWithOptions
+	selfUpdateFn              = selfUpdate
+	ensureCurrentOSSupported  = system.EnsureCurrentOSSupported
+	detectSystem              = system.Detect
+	runTUI                    = func(m tea.Model, opts ...tea.ProgramOption) (tea.Model, error) {
 		p := tea.NewProgram(m, opts...)
 		return p.Run()
+	}
+	// deferredSyncFn is the function called when PendingSync=true is found on
+	// launch. Swappable for tests; production value calls cli.RunSync directly.
+	// cli.RunSync is idempotent (re-reads state + re-applies configs each call),
+	// so retrying on failure (spec scenario "deferred sync fails → retry") is safe.
+	deferredSyncFn = func() error {
+		_, err := cli.RunSync(nil)
+		return err
 	}
 )
 
@@ -50,6 +59,9 @@ func RunArgs(args []string, stdout io.Writer) error {
 	// manifests record which version of gentle-ai created them.
 	cli.AppVersion = Version
 	upgrade.AppVersion = Version
+
+	// --yes as a global CLI flag for self-update is handled via GENTLE_AI_YES=1.
+	// Per-subcommand --yes flags (e.g. restore --yes) are parsed by each subcommand.
 
 	// Info commands: no system detection, no self-update, no platform validation.
 	if len(args) > 0 {
@@ -65,6 +77,15 @@ func RunArgs(args []string, stdout io.Writer) error {
 			return err
 		case "skill-registry":
 			return runSkillRegistry(args[1:], stdout)
+		case "sdd-status":
+			return cli.RunSDDStatus(args[1:], stdout)
+		case "sdd-continue":
+			return cli.RunSDDContinue(args[1:], stdout)
+		case "install":
+			if hasHelpFlag(args[1:]) {
+				cli.PrintInstallHelp(stdout)
+				return nil
+			}
 		}
 	}
 
@@ -95,7 +116,10 @@ func RunArgs(args []string, stdout io.Writer) error {
 
 	// Self-update: check for a newer gentle-ai release and apply it before
 	// CLI/TUI dispatch. Errors are non-fatal — logged and swallowed.
-	if !isExplicitUpdateFlow(args) {
+	// Skip auto-upgrade on TUI entry (len(args) == 0) to avoid silently
+	// replacing the binary while the user expects a clean TUI launch (#696).
+	isTUIFlow := len(args) == 0
+	if !isTUIFlow && !isExplicitUpdateFlow(args) {
 		if err := selfUpdateFn(context.Background(), Version, resolveProfile(), stdout); err != nil {
 			_, _ = fmt.Fprintf(stdout, "Warning: self-update failed: %v\n", err)
 		}
@@ -107,7 +131,32 @@ func RunArgs(args []string, stdout io.Writer) error {
 			return fmt.Errorf("resolve user home directory: %w", err)
 		}
 
-		m := tui.NewModel(result, Version)
+		// Load persisted state so the TUI pre-selects the agents the user
+		// previously chose instead of re-selecting every detected config dir.
+		// A missing or unreadable state file is not an error — NewModel falls
+		// back to filesystem detection for first-time installs.
+		installedState, _ := state.Read(homeDir)
+
+		// Deferred sync: if a previous gentle-ai self-upgrade set PendingSync=true,
+		// run sync now with the new binary before entering the TUI. On success,
+		// clear the flag. On failure, log and leave the flag set for idempotent
+		// retry on the next launch (per spec scenario "deferred sync fails → retry").
+		// This is non-fatal — a sync failure must never block the TUI from opening.
+		if installedState.PendingSync {
+			if err := deferredSyncFn(); err != nil {
+				_, _ = fmt.Fprintf(stdout, "Warning: deferred sync failed: %v\n", err)
+				// Leave PendingSync=true so the next launch retries.
+			} else {
+				installedState.PendingSync = false
+				if writeErr := state.Write(homeDir, installedState); writeErr != nil {
+					// Best-effort: surface the failure so it's not silently swallowed.
+					// Idempotent re-sync on the next launch is acceptable.
+					_, _ = fmt.Fprintf(stdout, "Warning: failed to clear PendingSync flag: %v\n", writeErr)
+				}
+			}
+		}
+
+		m := tui.NewModel(result, Version, installedState)
 		m.ExecuteFn = tuiExecute
 		m.RestoreFn = tuiRestore
 		m.DeleteBackupFn = func(manifest backup.Manifest) error {
@@ -125,8 +174,14 @@ func RunArgs(args []string, stdout io.Writer) error {
 		m.SyncFn = tuiSync(homeDir)
 		m.UninstallFn = tuiUninstall(homeDir)
 		m.UninstallWithProfilesFn = tuiUninstallWithProfiles(homeDir)
-		_, err = runTUI(m, tea.WithAltScreen())
-		return err
+		finalModel, err := runTUI(m, tea.WithAltScreen())
+		if err != nil {
+			return err
+		}
+		if latestVersion, ok := gentleAIUpgradeVersionFromTUI(finalModel); ok {
+			return restartAfterGentleAIUpgrade(latestVersion, stdout)
+		}
+		return nil
 	}
 
 	switch args[0] {
@@ -171,8 +226,34 @@ func RunArgs(args []string, stdout io.Writer) error {
 		return nil
 	case "restore":
 		return cli.RunRestore(args[1:], stdout)
+	case "doctor":
+		return cli.RunDoctor(context.Background(), stdout)
 	default:
 		return fmt.Errorf("unknown command %q — run 'gentle-ai help' for available commands", args[0])
+	}
+}
+
+func hasHelpFlag(args []string) bool {
+	for _, arg := range args {
+		if arg == "--help" || arg == "-h" {
+			return true
+		}
+	}
+
+	return false
+}
+
+func gentleAIUpgradeVersionFromTUI(finalModel tea.Model) (string, bool) {
+	switch m := finalModel.(type) {
+	case tui.Model:
+		return m.GentleAIUpgradeVersion()
+	case *tui.Model:
+		if m == nil {
+			return "", false
+		}
+		return m.GentleAIUpgradeVersion()
+	default:
+		return "", false
 	}
 }
 
@@ -280,11 +361,10 @@ func runUpgrade(ctx context.Context, args []string, detection system.DetectionRe
 		return checkErr
 	}
 
-	// Execute upgrades (no-op if nothing is UpdateAvailable).
-	// Use ExecuteWithOptions directly so CLI-only flags (e.g. --no-backup) can
-	// be wired through without expanding the upgradeExecute test seam used by
-	// the TUI dispatcher (see tuiUpgrade below).
-	report := upgrade.ExecuteWithOptions(ctx, checkResults, profile, homeDir, dryRun, upgrade.ExecuteOptions{
+	// Execute upgrades (no-op if nothing is UpdateAvailable). Use the options
+	// seam so CLI-only flags (e.g. --no-backup) remain testable without invoking
+	// real package-manager strategies.
+	report := upgradeExecuteWithOptions(ctx, checkResults, profile, homeDir, dryRun, upgrade.ExecuteOptions{
 		Progress:          stdout,
 		BackupDiagnostics: stdout,
 		SkipBackup:        noBackup,
@@ -300,7 +380,15 @@ func runUpgrade(ctx context.Context, args []string, detection system.DetectionRe
 		}
 	}
 
-	return errors.Join(errs...)
+	if err := errors.Join(errs...); err != nil {
+		return err
+	}
+	if !dryRun {
+		if latestVersion, ok := gentleAIUpgradeSucceeded(report); ok {
+			return restartAfterGentleAIUpgrade(latestVersion, stdout)
+		}
+	}
+	return nil
 }
 
 func updateCheckError(results []update.UpdateResult) error {
@@ -330,7 +418,7 @@ func tuiExecute(
 	profile := cli.ResolveInstallProfile(detection)
 	resolved.PlatformDecision = planner.PlatformDecisionFromProfile(profile)
 
-	stagePlan, err := cli.BuildRealStagePlan(homeDir, selection, resolved, profile)
+	stagePlan, err := cli.BuildRealStagePlan(homeDir, cli.ScopeGlobal, selection, resolved, profile)
 	if err != nil {
 		return pipeline.ExecutionResult{Err: fmt.Errorf("build stage plan: %w", err)}
 	}
@@ -350,11 +438,17 @@ func tuiExecute(
 			agentIDs = append(agentIDs, string(a))
 		}
 		// Non-fatal: a state write failure must not break an otherwise successful install.
+		claudePhaseState := claudePhaseAssignmentsToState(selection.ClaudePhaseAssignments)
 		_ = state.Write(homeDir, state.InstallState{
-			InstalledAgents:        agentIDs,
-			ClaudeModelAssignments: claudeAliasesToStrings(selection.ClaudeModelAssignments),
-			ModelAssignments:       modelAssignmentsToState(selection.ModelAssignments),
-			Persona:                string(selection.Persona),
+			InstalledAgents:             agentIDs,
+			ClaudeModelAssignments:      claudeLegacyAssignmentsForState(selection.ClaudeModelAssignments, claudePhaseState),
+			ClaudePhaseAssignments:      claudePhaseState,
+			KiroModelAssignments:        kiroAliasesToStrings(selection.KiroModelAssignments),
+			CodexModelAssignments:       codexEffortsToStrings(selection.CodexModelAssignments),
+			CodexCarrilModelAssignments: selection.CodexCarrilModelAssignments,
+			CodexPhaseModelAssignments:  selection.CodexPhaseModelAssignments,
+			ModelAssignments:            modelAssignmentsToState(selection.ModelAssignments),
+			Persona:                     string(selection.Persona),
 		})
 	}
 
@@ -383,7 +477,7 @@ func tuiUpgrade(profile system.PlatformProfile, homeDir string) tui.UpgradeFunc 
 // When overrides is non-nil, model assignments are merged into the selection
 // so that the "Configure Models" TUI flow persists its choices to disk.
 func tuiSync(homeDir string) tui.SyncFunc {
-	return func(overrides *model.SyncOverrides) (int, error) {
+	return func(overrides *model.SyncOverrides) ([]string, error) {
 		agentIDs := syncAgentIDs(homeDir, overrides)
 		selection := cli.BuildSyncSelection(cli.SyncFlags{}, agentIDs)
 
@@ -396,14 +490,14 @@ func tuiSync(homeDir string) tui.SyncFunc {
 
 		result, err := cli.RunSyncWithSelection(homeDir, selection)
 		if err != nil {
-			return 0, err
+			return nil, err
 		}
 
 		// Persist model assignments that were actually used (from overrides
 		// or loaded from state) so the next sync preserves them too.
 		persistAssignments(homeDir, selection)
 
-		return result.FilesChanged, nil
+		return result.ChangedFiles, nil
 	}
 }
 
@@ -458,11 +552,27 @@ func applyOverrides(selection *model.Selection, overrides *model.SyncOverrides) 
 	if overrides.ClaudeModelAssignments != nil {
 		selection.ClaudeModelAssignments = overrides.ClaudeModelAssignments
 	}
+	if overrides.ClaudePhaseAssignments != nil {
+		selection.ClaudePhaseAssignments = overrides.ClaudePhaseAssignments
+		selection.ClaudeModelAssignments = nil
+	}
 	if overrides.KiroModelAssignments != nil {
 		selection.KiroModelAssignments = overrides.KiroModelAssignments
 	}
+	if overrides.CodexModelAssignments != nil {
+		selection.CodexModelAssignments = overrides.CodexModelAssignments
+	}
+	if overrides.CodexCarrilModelAssignments != nil {
+		selection.CodexCarrilModelAssignments = overrides.CodexCarrilModelAssignments
+	}
+	if overrides.CodexPhaseModelAssignments != nil {
+		selection.CodexPhaseModelAssignments = overrides.CodexPhaseModelAssignments
+	}
 	if overrides.SDDMode != "" {
 		selection.SDDMode = overrides.SDDMode
+	}
+	if overrides.SDDProfileStrategy != "" {
+		selection.SDDProfileStrategy = overrides.SDDProfileStrategy
 	}
 	if overrides.StrictTDD != nil {
 		selection.StrictTDD = *overrides.StrictTDD
@@ -487,7 +597,20 @@ func loadPersistedAssignments(homeDir string, selection *model.Selection) {
 	if err != nil {
 		return
 	}
-	if len(selection.ClaudeModelAssignments) == 0 && len(s.ClaudeModelAssignments) > 0 {
+	if len(selection.ClaudePhaseAssignments) == 0 && len(s.ClaudePhaseAssignments) > 0 {
+		m := make(map[string]model.ClaudePhaseAssignment, len(s.ClaudePhaseAssignments))
+		for k, v := range s.ClaudePhaseAssignments {
+			if k == "orchestrator" {
+				continue
+			}
+			a := model.ClaudePhaseAssignment{Model: model.ClaudeModelAlias(v.Model), Effort: model.ClaudeEffort(v.Effort)}
+			if a.Valid() {
+				m[k] = a
+			}
+		}
+		selection.ClaudePhaseAssignments = m
+	}
+	if len(selection.ClaudeModelAssignments) == 0 && len(selection.ClaudePhaseAssignments) == 0 && len(s.ClaudeModelAssignments) > 0 {
 		m := make(map[string]model.ClaudeModelAlias, len(s.ClaudeModelAssignments))
 		for k, v := range s.ClaudeModelAssignments {
 			// Claude Code controls the main session/orchestrator model itself.
@@ -500,11 +623,32 @@ func loadPersistedAssignments(homeDir string, selection *model.Selection) {
 		selection.ClaudeModelAssignments = m
 	}
 	if len(selection.KiroModelAssignments) == 0 && len(s.KiroModelAssignments) > 0 {
-		m := make(map[string]model.ClaudeModelAlias, len(s.KiroModelAssignments))
+		m := make(map[string]model.KiroModelAlias, len(s.KiroModelAssignments))
 		for k, v := range s.KiroModelAssignments {
-			m[k] = model.ClaudeModelAlias(v)
+			m[k] = model.KiroModelAlias(v)
 		}
 		selection.KiroModelAssignments = m
+	}
+	if len(selection.CodexModelAssignments) == 0 && len(s.CodexModelAssignments) > 0 {
+		m := make(map[string]model.CodexEffort, len(s.CodexModelAssignments))
+		for k, v := range s.CodexModelAssignments {
+			m[k] = model.CodexEffort(v)
+		}
+		selection.CodexModelAssignments = m
+	}
+	if len(selection.CodexCarrilModelAssignments) == 0 && len(s.CodexCarrilModelAssignments) > 0 {
+		m := make(map[string]string, len(s.CodexCarrilModelAssignments))
+		for k, v := range s.CodexCarrilModelAssignments {
+			m[k] = v
+		}
+		selection.CodexCarrilModelAssignments = m
+	}
+	if len(selection.CodexPhaseModelAssignments) == 0 && len(s.CodexPhaseModelAssignments) > 0 {
+		m := make(map[string]string, len(s.CodexPhaseModelAssignments))
+		for k, v := range s.CodexPhaseModelAssignments {
+			m[k] = v
+		}
+		selection.CodexPhaseModelAssignments = m
 	}
 	if len(selection.ModelAssignments) == 0 && len(s.ModelAssignments) > 0 {
 		m := make(map[string]model.ModelAssignment, len(s.ModelAssignments))
@@ -518,23 +662,81 @@ func loadPersistedAssignments(homeDir string, selection *model.Selection) {
 // persistAssignments writes the model assignments from selection back to
 // state.json using a read-merge-write pattern so that other fields
 // (InstalledAgents) are not lost.
+//
+// For CodexPhaseModelAssignments the function distinguishes three states:
+//   - nil: not provided (partial sync) — leave the existing state value untouched.
+//   - non-nil, len > 0: new per-phase assignments — write them.
+//   - non-nil, len == 0: explicit clear signal (preset selected) — delete the key.
 func persistAssignments(homeDir string, selection model.Selection) {
-	if len(selection.ClaudeModelAssignments) == 0 && len(selection.KiroModelAssignments) == 0 && len(selection.ModelAssignments) == 0 {
+	hasAssignmentSignal := selection.ClaudeModelAssignments != nil ||
+		selection.ClaudePhaseAssignments != nil ||
+		selection.KiroModelAssignments != nil ||
+		selection.ModelAssignments != nil ||
+		selection.CodexModelAssignments != nil ||
+		selection.CodexCarrilModelAssignments != nil ||
+		selection.CodexPhaseModelAssignments != nil
+	if len(selection.ClaudeModelAssignments) == 0 && len(selection.ClaudePhaseAssignments) == 0 && len(selection.KiroModelAssignments) == 0 && len(selection.ModelAssignments) == 0 && len(selection.CodexModelAssignments) == 0 && len(selection.CodexCarrilModelAssignments) == 0 && len(selection.CodexPhaseModelAssignments) == 0 && !hasAssignmentSignal {
 		return
 	}
 	current, err := state.Read(homeDir)
 	if err != nil {
-		// State file may not exist yet (e.g. pre-state users).
+		// State file may not exist yet (e.g. pre-state users). Other read
+		// failures, such as invalid JSON, must not overwrite existing state.
+		if !errors.Is(err, os.ErrNotExist) {
+			return
+		}
 		current = state.InstallState{}
 	}
-	if len(selection.ClaudeModelAssignments) > 0 {
-		current.ClaudeModelAssignments = claudeAliasesToStrings(selection.ClaudeModelAssignments)
+	if selection.ClaudeModelAssignments != nil {
+		if len(selection.ClaudeModelAssignments) > 0 {
+			current.ClaudeModelAssignments = claudeAliasesToStrings(selection.ClaudeModelAssignments)
+		} else {
+			current.ClaudeModelAssignments = nil
+		}
 	}
-	if len(selection.KiroModelAssignments) > 0 {
-		current.KiroModelAssignments = claudeAliasesToStrings(selection.KiroModelAssignments)
+	if selection.ClaudePhaseAssignments != nil {
+		if len(selection.ClaudePhaseAssignments) > 0 {
+			current.ClaudePhaseAssignments = claudePhaseAssignmentsToState(selection.ClaudePhaseAssignments)
+		} else {
+			current.ClaudePhaseAssignments = nil
+		}
+		current.ClaudeModelAssignments = nil
 	}
-	if len(selection.ModelAssignments) > 0 {
-		current.ModelAssignments = modelAssignmentsToState(selection.ModelAssignments)
+	if selection.KiroModelAssignments != nil {
+		if len(selection.KiroModelAssignments) > 0 {
+			current.KiroModelAssignments = kiroAliasesToStrings(selection.KiroModelAssignments)
+		} else {
+			current.KiroModelAssignments = nil
+		}
+	}
+	if selection.CodexModelAssignments != nil {
+		if len(selection.CodexModelAssignments) > 0 {
+			current.CodexModelAssignments = codexEffortsToStrings(selection.CodexModelAssignments)
+		} else {
+			current.CodexModelAssignments = nil
+		}
+	}
+	if selection.CodexCarrilModelAssignments != nil {
+		if len(selection.CodexCarrilModelAssignments) > 0 {
+			current.CodexCarrilModelAssignments = selection.CodexCarrilModelAssignments
+		} else {
+			current.CodexCarrilModelAssignments = nil
+		}
+	}
+	// non-nil, len > 0 → write; non-nil, len == 0 → clear (explicit preset signal); nil → leave untouched.
+	if selection.CodexPhaseModelAssignments != nil {
+		if len(selection.CodexPhaseModelAssignments) > 0 {
+			current.CodexPhaseModelAssignments = selection.CodexPhaseModelAssignments
+		} else {
+			current.CodexPhaseModelAssignments = nil
+		}
+	}
+	if selection.ModelAssignments != nil {
+		if len(selection.ModelAssignments) > 0 {
+			current.ModelAssignments = modelAssignmentsToState(selection.ModelAssignments)
+		} else {
+			current.ModelAssignments = nil
+		}
 	}
 	_ = state.Write(homeDir, current)
 }
@@ -552,6 +754,54 @@ func claudeAliasesToStrings(m map[string]model.ClaudeModelAlias) map[string]stri
 		if k == "orchestrator" {
 			continue
 		}
+		out[k] = string(v)
+	}
+	return out
+}
+
+func claudeLegacyAssignmentsForState(
+	legacy map[string]model.ClaudeModelAlias,
+	phase map[string]state.ClaudePhaseAssignmentState,
+) map[string]string {
+	if len(phase) > 0 {
+		return nil
+	}
+	return claudeAliasesToStrings(legacy)
+}
+
+func claudePhaseAssignmentsToState(m map[string]model.ClaudePhaseAssignment) map[string]state.ClaudePhaseAssignmentState {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make(map[string]state.ClaudePhaseAssignmentState, len(m))
+	for k, v := range m {
+		if k == "orchestrator" || !v.Valid() {
+			continue
+		}
+		out[k] = state.ClaudePhaseAssignmentState{Model: string(v.Model), Effort: string(v.Effort)}
+	}
+	return out
+}
+
+func kiroAliasesToStrings(m map[string]model.KiroModelAlias) map[string]string {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[k] = string(v)
+	}
+	return out
+}
+
+// codexEffortsToStrings converts a typed CodexEffort map to plain strings
+// for JSON serialisation in state.json.
+func codexEffortsToStrings(m map[string]model.CodexEffort) map[string]string {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(m))
+	for k, v := range m {
 		out[k] = string(v)
 	}
 	return out

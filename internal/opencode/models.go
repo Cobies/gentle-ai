@@ -91,6 +91,68 @@ func LoadModels(cachePath string) (map[string]Provider, error) {
 		providers[id] = p
 	}
 
+	FixOpenRouterModels(providers)
+
+	return providers, nil
+}
+
+// FixOpenRouterModels remaps OpenRouter models that OpenCode incorrectly catalogs
+// under its own "opencode" provider back to the "openrouter" provider.
+func FixOpenRouterModels(providers map[string]Provider) {
+	opencodeProv, ok := providers["opencode"]
+	if !ok {
+		return
+	}
+
+	// Mappings: opencode model ID -> openrouter model ID
+	openRouterMappings := map[string]string{
+		"qwen3.6-plus-free": "qwen/qwen3.6-plus:free",
+	}
+
+	openrouterProv, ok := providers["openrouter"]
+	if !ok {
+		openrouterProv = Provider{
+			ID:     "openrouter",
+			Name:   "OpenRouter",
+			Models: make(map[string]Model),
+		}
+	} else if openrouterProv.Models == nil {
+		openrouterProv.Models = make(map[string]Model)
+	}
+
+	var hasMoves bool
+	for opencodeID, openRouterID := range openRouterMappings {
+		m, ok := opencodeProv.Models[opencodeID]
+		if !ok {
+			continue
+		}
+		if _, exists := openrouterProv.Models[openRouterID]; exists {
+			continue
+		}
+
+		hasMoves = true
+		delete(opencodeProv.Models, opencodeID)
+
+		m.ID = openRouterID
+		openrouterProv.Models[m.ID] = m
+	}
+
+	if hasMoves {
+		providers["opencode"] = opencodeProv
+		providers["openrouter"] = openrouterProv
+	}
+}
+
+// LoadModelsOrEmpty parses the OpenCode models cache when it exists and falls
+// back to an empty provider set when OpenCode has not populated the cache yet.
+func LoadModelsOrEmpty(cachePath string) (map[string]Provider, error) {
+	providers, err := LoadModels(cachePath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return map[string]Provider{}, nil
+		}
+		return nil, err
+	}
 	return providers, nil
 }
 
@@ -294,8 +356,9 @@ func LoadConfigProviders(path string) (map[string]ConfigProvider, error) {
 
 // MergeCustomProviders merges custom providers from opencode.json into the cache-loaded
 // providers map. Custom models use the tool_call value from opencode.json, defaulting to false
-// when omitted. Cache models win on ID collision. Returns the original providers map unchanged
-// when config is empty; otherwise returns a merged copy without mutating the input.
+// when omitted. Custom entries win on ID collision (user-managed beats cached catalog).
+// Returns the original providers map unchanged when config is empty; otherwise returns a
+// merged copy without mutating the input.
 func MergeCustomProviders(providers map[string]Provider, config map[string]ConfigProvider) map[string]Provider {
 	if len(config) == 0 {
 		return providers
@@ -312,7 +375,7 @@ func MergeCustomProviders(providers map[string]Provider, config map[string]Confi
 
 	for id, cp := range config {
 		// Provider-level collision: when a provider ID already exists in the cache,
-		// we keep the cache's Name/Env and only merge in the config's models below.
+		// we keep the cache's Name/Env and merge in the config's models below.
 		// The config's provider Name is silently ignored in that case.
 		existing, ok := merged[id]
 		if !ok {
@@ -322,13 +385,12 @@ func MergeCustomProviders(providers map[string]Provider, config map[string]Confi
 			existing.Models = make(map[string]Model, len(cp.Models))
 		}
 		for mid, cm := range cp.Models {
-			if _, exists := existing.Models[mid]; !exists {
-				name := cm.Name
-				if name == "" {
-					name = mid
-				}
-				existing.Models[mid] = Model{ID: mid, Name: name, ToolCall: cm.ToolCall}
+			// Custom entry wins on model ID collision (user-managed beats cached catalog).
+			name := cm.Name
+			if name == "" {
+				name = mid
 			}
+			existing.Models[mid] = Model{ID: mid, Name: name, ToolCall: cm.ToolCall}
 		}
 		merged[id] = existing
 	}
@@ -348,5 +410,29 @@ func SDDPhases() []string {
 		"sdd-apply",
 		"sdd-verify",
 		"sdd-archive",
+		"sdd-onboard",
 	}
+}
+
+// JDPhases returns the ordered list of judgment-day sub-agent names.
+// These are workflow-level agents (not SDD phases) used by the
+// judgment-day skill for parallel adversarial review.
+// They support independent model configuration for diversity of perspective.
+func JDPhases() []string {
+	return []string{
+		"jd-judge-a",
+		"jd-judge-b",
+		"jd-fix-agent",
+	}
+}
+
+// ConfigurableAgentPhases returns all agent names that support per-agent
+// model configuration. This includes SDD phases + JD agents.
+// Used by the inject model assignment table builder and the configurable agent set
+// in ReadCurrentModelAssignments. The TUI model picker uses SDDPhases() and
+// JDPhases() separately for row layout control.
+func ConfigurableAgentPhases() []string {
+	phases := SDDPhases()
+	phases = append(phases, JDPhases()...)
+	return phases
 }

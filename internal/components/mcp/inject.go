@@ -8,6 +8,7 @@ import (
 	"github.com/gentleman-programming/gentle-ai/internal/agents"
 	"github.com/gentleman-programming/gentle-ai/internal/components/filemerge"
 	"github.com/gentleman-programming/gentle-ai/internal/model"
+	"github.com/gentleman-programming/gentle-ai/internal/versions"
 )
 
 type InjectionResult struct {
@@ -28,12 +29,68 @@ func Inject(homeDir string, adapter agents.Adapter) (InjectionResult, error) {
 	case model.StrategyMCPConfigFile:
 		return injectMCPConfigFile(homeDir, adapter)
 	case model.StrategyTOMLFile:
-		// Context7 injection is not supported for TOML-based agents (Codex).
-		// Codex receives Context7 through its agents.md system prompt, not via MCP config.
-		return InjectionResult{}, nil
+		return injectTOMLFile(homeDir, adapter)
+	case model.StrategyMergeIntoYAML:
+		return injectYAMLFile(homeDir, adapter)
 	default:
 		return InjectionResult{}, fmt.Errorf("mcp injector does not support MCP strategy %d for agent %q", adapter.MCPStrategy(), adapter.Agent())
 	}
+}
+
+// context7Args returns the pinned args slice for the Context7 MCP server.
+func context7Args() []string {
+	return []string{"-y", "--package=@upstash/context7-mcp@" + versions.Context7MCP, "--", "context7-mcp"}
+}
+
+// injectTOMLFile upserts the [mcp_servers.context7] block into a TOML-based
+// agent config file (e.g. ~/.codex/config.toml) using Context7's remote MCP
+// endpoint. The file is created if it does not yet exist.
+func injectTOMLFile(homeDir string, adapter agents.Adapter) (InjectionResult, error) {
+	configPath := adapter.MCPConfigPath(homeDir, "context7")
+
+	existingBytes, err := osReadFile(configPath)
+	if err != nil {
+		return InjectionResult{}, fmt.Errorf("read TOML config %q: %w", configPath, err)
+	}
+
+	existing := string(existingBytes)
+	updated := filemerge.UpsertCodexRemoteMCPServerBlock(existing, "context7", "https://mcp.context7.com/mcp")
+
+	writeResult, err := filemerge.WriteFileAtomic(configPath, []byte(updated), 0o644)
+	if err != nil {
+		return InjectionResult{}, fmt.Errorf("write TOML config %q: %w", configPath, err)
+	}
+
+	return InjectionResult{Changed: writeResult.Changed, Files: []string{configPath}}, nil
+}
+
+// injectYAMLFile upserts the context7 MCP server block into a YAML-based agent
+// config file (e.g. ~/.hermes/config.yaml) via the filemerge YAML helpers.
+// The file is created if it does not yet exist. The upsert is idempotent and
+// comment-preserving — user content outside the managed block is untouched.
+func injectYAMLFile(homeDir string, adapter agents.Adapter) (InjectionResult, error) {
+	configPath := adapter.MCPConfigPath(homeDir, "context7")
+
+	raw, err := os.ReadFile(configPath)
+	var existingBytes []byte
+	switch {
+	case err == nil:
+		existingBytes = raw
+	case os.IsNotExist(err):
+		existingBytes = nil
+	default:
+		return InjectionResult{}, fmt.Errorf("read YAML config %q: %w", configPath, err)
+	}
+
+	existing := string(existingBytes)
+	updated := filemerge.UpsertHermesContext7Block(existing)
+
+	writeResult, err := filemerge.WriteFileAtomic(configPath, []byte(updated), 0o644)
+	if err != nil {
+		return InjectionResult{}, fmt.Errorf("write YAML config %q: %w", configPath, err)
+	}
+
+	return InjectionResult{Changed: writeResult.Changed, Files: []string{configPath}}, nil
 }
 
 // injectSeparateFile writes a standalone JSON file per MCP server (Claude Code pattern).

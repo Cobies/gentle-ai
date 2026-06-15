@@ -9,7 +9,6 @@ import (
 
 	"github.com/gentleman-programming/gentle-ai/internal/model"
 	"github.com/gentleman-programming/gentle-ai/internal/system"
-	"github.com/gentleman-programming/gentle-ai/internal/versions"
 )
 
 func TestAdapterIdentityAndCapabilities(t *testing.T) {
@@ -139,8 +138,16 @@ func TestAdapterDetectMissingPiBinary(t *testing.T) {
 	}
 }
 
-func TestAdapterInstallCommandSequenceIsExact(t *testing.T) {
-	a := NewAdapter()
+func TestAdapterInstallCommandSequenceUsesNpmWhenPnpmIsUnavailable(t *testing.T) {
+	a := &Adapter{
+		lookPath: func(file string) (string, error) {
+			if file == "pnpm" {
+				return "", os.ErrNotExist
+			}
+			return "/usr/local/bin/" + file, nil
+		},
+		statPath: defaultStat,
+	}
 	commands, err := a.InstallCommand(system.PlatformProfile{})
 	if err != nil {
 		t.Fatalf("InstallCommand() error = %v", err)
@@ -150,16 +157,36 @@ func TestAdapterInstallCommandSequenceIsExact(t *testing.T) {
 		{"pi", "install", "npm:gentle-pi"},
 		{"pi", "install", "npm:gentle-engram"},
 		{"pi", "install", "npm:pi-mcp-adapter"},
-		{"npm", "exec", "--yes", "--package", "gentle-engram@" + versions.GentleEngram, "--", "pi-engram", "init"},
+		{"npm", "exec", "--yes", "--package", "gentle-engram@latest", "--", "pi-engram", "init"},
 		{"pi", "install", "npm:pi-subagents"},
 		{"pi", "install", "npm:pi-intercom"},
 		{"pi", "install", "npm:@juicesharp/rpiv-ask-user-question"},
 		{"pi", "install", "npm:pi-web-access"},
-		{"pi", "install", "npm:pi-lens"},
 		{"pi", "install", "npm:@juicesharp/rpiv-todo"},
 		{"pi", "install", "npm:pi-btw"},
 	}
 	if !reflect.DeepEqual(commands, want) {
 		t.Fatalf("InstallCommand() = %#v, want %#v", commands, want)
+	}
+}
+
+func TestAdapterInstallCommandSequenceUsesPnpmForEngramInitWhenAvailable(t *testing.T) {
+	a := &Adapter{
+		lookPath: func(file string) (string, error) {
+			if file == "pnpm" {
+				return "/usr/local/bin/pnpm", nil
+			}
+			return "", os.ErrNotExist
+		},
+		statPath: defaultStat,
+	}
+	commands, err := a.InstallCommand(system.PlatformProfile{})
+	if err != nil {
+		t.Fatalf("InstallCommand() error = %v", err)
+	}
+
+	want := []string{"pnpm", "dlx", "gentle-engram@latest", "pi-engram", "init"}
+	if !reflect.DeepEqual(commands[3], want) {
+		t.Fatalf("InstallCommand()[3] = %#v, want %#v", commands[3], want)
 	}
 }

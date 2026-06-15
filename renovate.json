@@ -14,6 +14,7 @@
     {
       "matchManagers": ["custom.regex"],
       "matchFileNames": ["internal/versions/versions.go"],
+      "matchDatasources": ["npm"],
       "groupName": "pinned npm packages",
       "labels": ["dependencies", "security"]
     }

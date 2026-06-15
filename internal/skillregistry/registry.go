@@ -70,6 +70,7 @@ func UserSkillDirs(home string) []string {
 		filepath.Join(home, ".qwen", "skills"),
 		filepath.Join(home, ".kiro", "skills"),
 		filepath.Join(home, ".openclaw", "skills"),
+		filepath.Join(home, ".hermes", "skills"),
 	}
 }
 
@@ -94,6 +95,7 @@ func ProjectSkillDirs(cwd string) []string {
 		filepath.Join(cwd, ".agent", "skills"),
 		filepath.Join(cwd, ".agents", "skills"),
 		filepath.Join(cwd, ".atl", "skills"),
+		filepath.Join(cwd, ".hermes", "skills"),
 	}
 }
 
@@ -280,6 +282,8 @@ func uniqueExistingDirs(dirs []string) []string {
 }
 
 func parseFrontmatter(source string) (name, description, body string) {
+	source = strings.ReplaceAll(source, "\r\n", "\n")
+	source = strings.ReplaceAll(source, "\r", "\n")
 	if !strings.HasPrefix(source, "---\n") {
 		return "", "", source
 	}

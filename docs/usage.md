@@ -38,7 +38,7 @@ Before any managed file is modified, `gentle-ai` creates a backup snapshot so th
 
 ### install
 
-First-time setup — detects your tools, configures agents, injects all components:
+First-time setup — detects your tools, configures agents, injects all components. When installing a single agent with `--agent X`, gentle-ai **merges** the new agent into the existing `installed_agents` list in `state.json` and **preserves** any existing `model_assignments` — it does not overwrite the full state.
 
 ```bash
 # Full ecosystem for multiple agents
@@ -83,7 +83,7 @@ The command scans project skills first (`skills/`, `.opencode/skills/`, `.claude
 
 The command writes `.atl/skill-registry.md` and `.atl/.skill-registry.cache.json`. The cache fingerprint includes schema version plus each discovered `SKILL.md` file path, mtime, and size, so normal startup is a cheap cache-hit when skills have not changed.
 
-Claude Code and OpenCode installs wire this command into startup/plugin hooks. Pi gets the equivalent behavior from `gentle-pi`; keep that extension's scan roots in sync when changing these discovery rules.
+Codex, Claude Code, and OpenCode installs wire this command into startup/plugin hooks. Pi gets the equivalent behavior from `gentle-pi`; keep those hook/plugin scan roots in sync when changing these discovery rules.
 
 See [Skill Registry](skill-registry.md) for the full index-first flow and diagrams.
 
@@ -107,18 +107,17 @@ gentle-ai sync
 # Sync specific agents only
 gentle-ai sync --agent claude-code --agent opencode
 
-# Sync a specific component
-gentle-ai sync --component sdd
-gentle-ai sync --component skills
-gentle-ai sync --component engram
-
 # Refresh OpenClaw workspace instructions and MCP config
 gentle-ai sync --agent openclaw
 ```
 
-Sync is safe and idempotent — running it twice produces no changes the second time.
+Sync is safe and idempotent — running it twice produces no changes the second time. When files change, the summary reports the changed file count and lists the changed file paths.
+
+`sync` refreshes the managed component set for the selected agents. It does not support `--component`; use `--include-permissions` or `--include-theme` for the opt-in components that are excluded from the default sync scope.
 
 For OpenClaw, sync reads the active workspace from `~/.openclaw/openclaw.json` (`agents.defaults.workspace`). It writes `AGENTS.md` / `SOUL.md` into that workspace, while MCP servers stay in the global OpenClaw config under `mcp.servers`.
+
+For Hermes, gentle-ai is detect-only: it cannot install Hermes. Install Hermes manually first. Detection is driven by the `~/.hermes` config directory (the binary being on `PATH` is reported separately). Once Hermes is detected, `gentle-ai install --agent hermes` injects context7 and Engram MCP blocks into `~/.hermes/config.yaml`, writes the SDD orchestrator and persona into `~/.hermes/SOUL.md`, and copies skills to `~/.hermes/skills/`. Use `gentle-ai sync --agent hermes` to update the managed configuration after upgrades.
 
 ### uninstall
 
@@ -148,7 +147,7 @@ If no `--component` flag is provided for a partial uninstall, `gentle-ai` remove
 
 ### update / upgrade
 
-Check for and install new versions of `gentle-ai` itself:
+Check for and install new versions of `gentle-ai` itself. The pre-upgrade backup snapshot covers only the agents recorded in `state.InstalledAgents` (`~/.gentle-ai/state.json`) — not every agent config directory that exists on your machine.
 
 ```bash
 # Check if a newer version is available
@@ -161,6 +160,54 @@ gentle-ai upgrade
 After upgrading, run `gentle-ai sync` to refresh all managed assets to the new version's content.
 
 If GitHub rate-limits update checks, export `GITHUB_TOKEN` or `GH_TOKEN` before running `gentle-ai update`/`upgrade`.
+
+If Homebrew refuses an upgrade from an untrusted tap, trust only the artifact Homebrew names and retry the upgrade:
+
+```bash
+# Formula tools, for example gentle-ai
+brew trust --formula gentleman-programming/tap/gentle-ai
+brew upgrade gentle-ai
+
+# Cask tools, for example engram
+brew trust --cask gentleman-programming/tap/engram
+brew upgrade engram
+```
+
+**Self-update prompt behavior** (changed in v1.x slice 5 — `GENTLE_AI_CONFIRM_UPDATE` removed):
+
+| Situation | Behavior |
+|-----------|----------|
+| Interactive terminal (TTY) | Always prompts `Apply now? [Y/n]`. Empty Enter accepts. |
+| Non-TTY (CI, pipe, script) | Auto-declines — never hangs. |
+| `GENTLE_AI_YES=1` | Auto-accepts without prompting (for scripted upgrades). This variable is inherited by subprocesses, so scope it to a single invocation when needed (e.g. `GENTLE_AI_YES=1 gentle-ai …`). |
+| `GENTLE_AI_NO_SELF_UPDATE=1` | Skips the self-update check entirely. |
+
+`GENTLE_AI_CONFIRM_UPDATE` was removed in slice 5. It is now ignored if set.
+
+`GENTLE_AI_SELF_UPDATE_DONE` is an internal loop guard and should not be set manually.
+
+### model assignment
+
+The TUI **Configure Models** screen can assign different models to SDD phases, `sdd-onboard`, and Judgment Day agents (`jd-judge-a`, `jd-judge-b`, `jd-fix-agent`) when the selected agent supports those slots. This lets you keep review or apply phases on stronger models while routing cheaper phases to faster models.
+
+### doctor
+
+Read-only ecosystem health diagnostics — no changes made to your configuration:
+
+```bash
+gentle-ai doctor
+```
+
+Checks performed:
+
+| Check | What it verifies |
+|-------|-----------------|
+| Tool binaries | Required tools present on `PATH`; shadow detection (wrong binary resolves first) |
+| `state.json` validity | Parses `~/.gentle-ai/state.json` and reports any schema/corruption issues |
+| Engram MCP reachability | Confirms the Engram MCP server responds |
+| Disk space | Warns when available space is critically low |
+
+Each check reports **pass**, **warn**, or **fail** with an optional remedy hint. Run `doctor` first when troubleshooting an unexpected install or sync result.
 
 ### version
 
@@ -181,6 +228,8 @@ gentle-ai -v
 | `--skill`, `--skills`         | Skills to install (comma-separated)                                                                               |
 | `--persona`                   | Persona mode: `gentleman`, `neutral`, `custom` (`custom` keeps your existing persona unmanaged)                   |
 | `--preset`                    | Preset: `full-gentleman`, `ecosystem-only`, `minimal`, `custom` (`custom` means manual component/skill selection) |
+| `--sdd-mode`                  | SDD orchestrator mode: `single` or `multi`                                                                        |
+| `--scope`                     | Install scope for agent-scoped files: `global` (default, writes to each selected agent's global config directory) or `workspace` (writes to the current project root). Also settable via `GENTLE_AI_INSTALL_SCOPE` env var for CI/non-interactive use. |
 | `--dry-run`                   | Preview the install plan without applying changes                                                                 |
 
 ## CLI Flags (sync)
@@ -188,12 +237,15 @@ gentle-ai -v
 | Flag                     | Description                                                                                          |
 | ------------------------ | ---------------------------------------------------------------------------------------------------- |
 | `--agent`, `--agents`    | Agents to sync (defaults to all installed agents)                                                    |
-| `--component`            | Sync a specific component only: `sdd`, `engram`, `context7`, `skills`, `gga`, `permissions`, `theme` |
+| `--skill`, `--skills`    | Skills to sync (comma-separated; defaults to selected preset skills)                                  |
+| `--sdd-mode`             | SDD orchestrator mode: `single` or `multi`                                                           |
+| `--strict-tdd`           | Enable Strict TDD Mode for SDD agents                                                                |
 | `--profile`              | Create or update an SDD profile: `name:provider/model` (sets the default model for all phases)       |
 | `--profile-phase`        | Override a specific phase in a profile: `name:phase:provider/model`                                  |
 | `--sdd-profile-strategy` | OpenCode profile sync strategy: `generated-multi` or `external-single-active`                        |
 | `--include-permissions`  | Include permissions sync (opt-in)                                                                    |
 | `--include-theme`        | Include theme sync (opt-in)                                                                          |
+| `--dry-run`              | Preview the sync plan without applying changes                                                       |
 
 **Profile examples:**
 
@@ -243,6 +295,35 @@ gentle-ai uninstall --agent claude-code --component sdd,persona
 # Adding a new agent later
 gentle-ai install --agent windsurf --preset full-gentleman
 ```
+
+### Homebrew upgrade troubleshooting
+
+Homebrew 6 can require explicit trust for non-official taps and, on Linux, can
+sandbox builds with Bubblewrap. `gentle-ai upgrade` and `scripts/install.sh`
+auto-trust only the Gentle AI formula, but manual upgrades may still need this
+one-time command:
+
+```bash
+brew trust --formula gentleman-programming/tap/gentle-ai
+brew upgrade gentle-ai
+```
+
+On Linux, if Homebrew reports that Bubblewrap cannot create a rootless sandbox,
+there is nothing for Gentle AI to install: Bubblewrap is already present, but the
+host blocks the rootless namespace primitives it needs. This is a security
+tradeoff and should be an explicit admin decision. If your policy allows it,
+fix the host namespace policy first:
+
+```bash
+sudo sysctl -w kernel.unprivileged_userns_clone=1
+sudo sysctl -w user.max_user_namespaces=28633
+sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+```
+
+Use `HOMEBREW_NO_SANDBOX_LINUX=1 brew upgrade gentle-ai` only as a final
+workaround when your distro policy forbids the namespace settings; it disables
+Homebrew's Linux sandbox for that command.
+
 
 ---
 

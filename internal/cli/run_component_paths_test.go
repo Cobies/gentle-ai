@@ -50,7 +50,7 @@ func TestComponentPathsSDDMultiIncludesOpenCodePlugins(t *testing.T) {
 
 	paths := componentPaths(home, model.Selection{SDDMode: model.SDDModeMulti}, adapters, model.ComponentSDD)
 
-	for _, plugin := range []string{"background-agents.ts", "model-variants.ts"} {
+	for _, plugin := range []string{"background-agents.ts", "model-variants.ts", "skill-registry.ts"} {
 		path := filepath.Join(home, ".config", "opencode", "plugins", plugin)
 		if !containsPath(paths, path) {
 			t.Fatalf("componentPaths(sdd multi) missing OpenCode plugin path %q\npaths=%v", path, paths)
@@ -64,11 +64,80 @@ func TestComponentPathsSDDSingleIncludesOpenCodePlugins(t *testing.T) {
 
 	paths := componentPaths(home, model.Selection{SDDMode: model.SDDModeSingle}, adapters, model.ComponentSDD)
 
-	for _, plugin := range []string{"background-agents.ts", "model-variants.ts"} {
+	for _, plugin := range []string{"background-agents.ts", "model-variants.ts", "skill-registry.ts"} {
 		path := filepath.Join(home, ".config", "opencode", "plugins", plugin)
 		if !containsPath(paths, path) {
 			t.Fatalf("componentPaths(sdd single) missing OpenCode plugin path %q\npaths=%v", path, paths)
 		}
+	}
+}
+
+func TestComponentPathsWorkspaceScopedOpenCodeSDDUsesWorkspaceManagedPaths(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	adapters := resolveAdapters([]model.AgentID{model.AgentOpenCode})
+	selection := model.Selection{SDDMode: model.SDDModeMulti}
+
+	paths := componentPathsWithWorkspaceScoped(home, workspace, ScopeWorkspace, selection, adapters, model.ComponentSDD)
+
+	for _, want := range []string{
+		filepath.Join(workspace, ".config", "opencode", "opencode.json"),
+		filepath.Join(workspace, ".config", "opencode", "commands", "sdd-init.md"),
+		filepath.Join(workspace, ".config", "opencode", "plugins", "background-agents.ts"),
+		filepath.Join(workspace, ".config", "opencode", "plugins", "model-variants.ts"),
+		filepath.Join(workspace, ".config", "opencode", "plugins", "skill-registry.ts"),
+		filepath.Join(workspace, ".config", "opencode", "prompts", "sdd", "sdd-apply.md"),
+		filepath.Join(workspace, ".config", "opencode", "skills", "sdd-apply", "SKILL.md"),
+	} {
+		if !containsPath(paths, want) {
+			t.Fatalf("componentPathsWithWorkspaceScoped(sdd,opencode,workspace) missing workspace-scoped path %q\npaths=%v", want, paths)
+		}
+	}
+
+	for _, unwanted := range []string{
+		filepath.Join(home, ".config", "opencode", "opencode.json"),
+		filepath.Join(home, ".config", "opencode", "commands", "sdd-init.md"),
+		filepath.Join(home, ".config", "opencode", "plugins", "background-agents.ts"),
+		filepath.Join(home, ".config", "opencode", "plugins", "model-variants.ts"),
+		filepath.Join(home, ".config", "opencode", "plugins", "skill-registry.ts"),
+		filepath.Join(home, ".config", "opencode", "prompts", "sdd", "sdd-apply.md"),
+		filepath.Join(home, ".config", "opencode", "skills", "sdd-apply", "SKILL.md"),
+	} {
+		if containsPath(paths, unwanted) {
+			t.Fatalf("componentPathsWithWorkspaceScoped(sdd,opencode,workspace) must not include home-scoped path %q\npaths=%v", unwanted, paths)
+		}
+	}
+}
+
+func TestLegacyOpenCodeBackgroundAgentsPluginRequiresConfigOpenCodePluginsPath(t *testing.T) {
+	home := t.TempDir()
+
+	for _, tt := range []struct {
+		name string
+		path string
+		want bool
+	}{
+		{
+			name: "legacy plugin under opencode config",
+			path: filepath.Join(home, ".config", "opencode", "plugins", "background-agents.ts"),
+			want: true,
+		},
+		{
+			name: "same file under unrelated opencode directory",
+			path: filepath.Join(home, "opencode", "plugins", "background-agents.ts"),
+			want: false,
+		},
+		{
+			name: "managed replacement plugin is not legacy",
+			path: filepath.Join(home, ".config", "opencode", "plugins", "model-variants.ts"),
+			want: false,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isLegacyOpenCodeBackgroundAgentsPlugin(tt.path); got != tt.want {
+				t.Fatalf("isLegacyOpenCodeBackgroundAgentsPlugin(%q) = %v, want %v", tt.path, got, tt.want)
+			}
+		})
 	}
 }
 
@@ -200,6 +269,66 @@ func TestComponentPathsEngramCodexIncludesConfigTOML(t *testing.T) {
 	want := filepath.Join(home, ".codex", "config.toml")
 	if !containsPath(paths, want) {
 		t.Fatalf("componentPaths(engram,codex) missing %q\npaths=%v", want, paths)
+	}
+}
+
+// TestComponentPathsPermissionsCodexIncludesConfigTOML verifies that
+// ComponentPermission + Codex reports ~/.codex/config.toml as a backup target.
+func TestComponentPathsPermissionsCodexIncludesConfigTOML(t *testing.T) {
+	home := t.TempDir()
+	adapters := resolveAdapters([]model.AgentID{model.AgentCodex})
+
+	paths := componentPaths(home, model.Selection{}, adapters, model.ComponentPermission)
+
+	want := filepath.Join(home, ".codex", "config.toml")
+	if !containsPath(paths, want) {
+		t.Fatalf("componentPaths(permissions,codex) missing %q\npaths=%v", want, paths)
+	}
+}
+
+func TestComponentPathsPermissionsSkipsAgentsWithoutInjectionTarget(t *testing.T) {
+	home := t.TempDir()
+	adapters := resolveAdapters([]model.AgentID{
+		model.AgentCursor,
+		model.AgentAntigravity,
+		model.AgentHermes,
+	})
+
+	paths := componentPaths(home, model.Selection{}, adapters, model.ComponentPermission)
+
+	for _, adapter := range adapters {
+		unwanted := adapter.SettingsPath(home)
+		if unwanted == "" {
+			continue
+		}
+		if containsPath(paths, unwanted) {
+			t.Fatalf("componentPaths(permissions) must not include unsupported injection path %q\npaths=%v", unwanted, paths)
+		}
+	}
+}
+
+func TestComponentPathsPermissionsIncludesAgentsWithInjectionTarget(t *testing.T) {
+	home := t.TempDir()
+	adapters := resolveAdapters([]model.AgentID{
+		model.AgentClaudeCode,
+		model.AgentOpenCode,
+		model.AgentKilocode,
+		model.AgentGeminiCLI,
+		model.AgentQwenCode,
+		model.AgentVSCodeCopilot,
+		model.AgentCodex,
+	})
+
+	paths := componentPaths(home, model.Selection{}, adapters, model.ComponentPermission)
+
+	for _, adapter := range adapters {
+		want := adapter.SettingsPath(home)
+		if adapter.Agent() == model.AgentCodex {
+			want = filepath.Join(home, ".codex", "config.toml")
+		}
+		if !containsPath(paths, want) {
+			t.Fatalf("componentPaths(permissions) missing supported injection path %q\npaths=%v", want, paths)
+		}
 	}
 }
 
