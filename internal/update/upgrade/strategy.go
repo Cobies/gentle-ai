@@ -20,18 +20,10 @@ import (
 	"github.com/gentleman-programming/gentle-ai/internal/update"
 )
 
-// engramDownloadFn is the function used to download the engram binary on the stable channel.
-// Package-level var for testability — swapped in tests to avoid real network calls.
-var engramDownloadFn = func(profile system.PlatformProfile) (string, error) {
-	return engram.DownloadLatestBinary(profile, false)
-}
-
-// engramBetaInstallFn installs engram from HEAD via `go install @main` (beta channel).
-// It delegates to engram.DownloadLatestBinary(profile, true), which is the single
-// canonical beta path shared with the install-time flow. Package-level var for
-// testability — swapped in tests to avoid real go install/network calls.
-var engramBetaInstallFn = func(profile system.PlatformProfile) (string, error) {
-	return engram.DownloadLatestBinary(profile, true)
+// engramDownloadFn is the function used to download or install the engram binary.
+// Package-level var for testability — swapped in tests to avoid real network/install calls.
+var engramDownloadFn = func(profile system.PlatformProfile, channel cli.InstallChannel) (string, error) {
+	return engram.DownloadLatestBinary(profile, string(channel))
 }
 
 // execCommand is a package-level var declared in executor.go (same package).
@@ -588,23 +580,12 @@ func engramBinaryUpgrade(profile system.PlatformProfile) error {
 		channel = cli.ChannelStable
 	}
 
-	var binaryPath string
-	if channel.IsBeta() {
-		// Beta channel: install engram from HEAD via engramBetaInstallFn, which
-		// delegates to engram.DownloadLatestBinary(profile, true). This is the
-		// single canonical beta path shared with the install-time flow in
-		// internal/cli/run.go (installBetaEngramFromMain). The previous inline
-		// `go install` block is removed — all beta logic lives in download.go.
-		binaryPath, err = engramBetaInstallFn(profile)
-		if err != nil {
+	binaryPath, err := engramDownloadFn(profile, channel)
+	if err != nil {
+		if channel.IsBeta() {
 			return fmt.Errorf("install engram from main (beta): %w", err)
 		}
-	} else {
-		// Stable channel (default): download the latest release binary.
-		binaryPath, err = engramDownloadFn(profile)
-		if err != nil {
-			return fmt.Errorf("download engram binary: %w", err)
-		}
+		return fmt.Errorf("download engram binary: %w", err)
 	}
 
 	// Add install dir to PATH. On Windows this also persists via PowerShell (user registry).

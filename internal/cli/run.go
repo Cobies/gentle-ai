@@ -65,7 +65,7 @@ var (
 	// Always uses the stable (release) path; beta channel at install time is handled
 	// separately via installBetaEngramFromMain.
 	engramDownloadFn = func(profile system.PlatformProfile) (string, error) {
-		return engram.DownloadLatestBinary(profile, false)
+		return engram.DownloadLatestBinary(profile, string(ChannelStable))
 	}
 
 	// AppVersion is the gentle-ai version that will be written into backup manifests.

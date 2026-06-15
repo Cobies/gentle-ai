@@ -3,6 +3,7 @@ package upgrade
 import (
 	"context"
 	"errors"
+	"github.com/gentleman-programming/gentle-ai/internal/cli"
 	"github.com/gentleman-programming/gentle-ai/internal/system"
 	"github.com/gentleman-programming/gentle-ai/internal/update"
 	"net/http"
@@ -1359,7 +1360,7 @@ func TestEngramUpgradeUsesDownloadNotGoInstall(t *testing.T) {
 	}
 
 	downloadCalled := false
-	engramDownloadFn = func(profile system.PlatformProfile) (string, error) {
+	engramDownloadFn = func(profile system.PlatformProfile, channel cli.InstallChannel) (string, error) {
 		downloadCalled = true
 		return "/fake/path/engram.exe", nil
 	}
@@ -1408,7 +1409,7 @@ func TestEngramUpgradeLinuxUsesDownload(t *testing.T) {
 	}
 
 	downloadCalled := false
-	engramDownloadFn = func(profile system.PlatformProfile) (string, error) {
+	engramDownloadFn = func(profile system.PlatformProfile, channel cli.InstallChannel) (string, error) {
 		downloadCalled = true
 		return "/home/user/.local/bin/engram", nil
 	}
@@ -1612,88 +1613,50 @@ func TestInstallerUpgrade_NonWindows(t *testing.T) {
 	}
 }
 
-// --- TestEngramBinaryUpgrade_ChannelRouting (Slice 3) ---
-
-// TestEngramBinaryUpgrade_StableChannelCallsDownloadFn verifies that when
-// GENTLE_AI_CHANNEL is unset or "stable", engramBinaryUpgrade delegates to
-// engramDownloadFn (the release-download path) and NOT go install @main.
-func TestEngramBinaryUpgrade_StableChannelCallsDownloadFn(t *testing.T) {
+// TestEngramBinaryUpgrade_ChannelHonoring verifies that engramBinaryUpgrade
+// resolves GENTLE_AI_CHANNEL and passes it directly to engramDownloadFn.
+func TestEngramBinaryUpgrade_ChannelHonoring(t *testing.T) {
 	tests := []struct {
-		name   string
-		envVal string
+		name        string
+		channelEnv  string
+		wantChannel cli.InstallChannel
 	}{
-		{name: "channel unset", envVal: ""},
-		{name: "channel explicit stable", envVal: "stable"},
+		{name: "unset defaults to stable", channelEnv: "", wantChannel: cli.ChannelStable},
+		{name: "explicit stable", channelEnv: "stable", wantChannel: cli.ChannelStable},
+		{name: "explicit beta", channelEnv: "beta", wantChannel: cli.ChannelBeta},
+		{name: "explicit nightly aliases beta", channelEnv: "nightly", wantChannel: cli.ChannelBeta},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv("GENTLE_AI_CHANNEL", tt.envVal)
+			t.Setenv("GENTLE_AI_CHANNEL", tt.channelEnv)
 
 			origDownloadFn := engramDownloadFn
-			origExecCommand := execCommand
 			t.Cleanup(func() {
 				engramDownloadFn = origDownloadFn
-				execCommand = origExecCommand
 			})
 
+			var gotChannel cli.InstallChannel
 			downloadCalled := false
-			engramDownloadFn = func(profile system.PlatformProfile) (string, error) {
+			engramDownloadFn = func(profile system.PlatformProfile, channel cli.InstallChannel) (string, error) {
 				downloadCalled = true
-				return "/tmp/engram", nil
-			}
-
-			// go install must NOT be called for stable channel.
-			execCommand = func(name string, args ...string) *exec.Cmd {
-				t.Errorf("execCommand called unexpectedly for stable channel: %s %v", name, args)
-				return mockCmd("echo", "unexpected")
+				gotChannel = channel
+				return "/tmp/engram-test", nil
 			}
 
 			profile := system.PlatformProfile{OS: "linux", PackageManager: "apt"}
 			err := engramBinaryUpgrade(profile)
 			if err != nil {
-				t.Fatalf("engramBinaryUpgrade stable: unexpected error: %v", err)
+				t.Fatalf("engramBinaryUpgrade unexpected error: %v", err)
 			}
+
 			if !downloadCalled {
-				t.Error("expected engramDownloadFn to be called for stable channel, but it was not")
+				t.Fatal("expected engramDownloadFn to be called, but it was not")
+			}
+			if gotChannel != tt.wantChannel {
+				t.Errorf("engramDownloadFn called with channel = %q, want %q", gotChannel, tt.wantChannel)
 			}
 		})
-	}
-}
-
-// TestEngramBinaryUpgrade_BetaChannelUsesGoInstallMain verifies that when
-// GENTLE_AI_CHANNEL=beta, engramBinaryUpgrade delegates to
-// engramBetaInstallFn (the consolidated beta path, backed by
-// engram.DownloadLatestBinary(profile, true) in production). The stable
-// engramDownloadFn must NOT be called.
-func TestEngramBinaryUpgrade_BetaChannelUsesGoInstallMain(t *testing.T) {
-	t.Setenv("GENTLE_AI_CHANNEL", "beta")
-
-	origDownloadFn := engramDownloadFn
-	origBetaFn := engramBetaInstallFn
-	t.Cleanup(func() {
-		engramDownloadFn = origDownloadFn
-		engramBetaInstallFn = origBetaFn
-	})
-
-	engramDownloadFn = func(profile system.PlatformProfile) (string, error) {
-		t.Error("engramDownloadFn (stable path) must NOT be called for beta channel")
-		return "", nil
-	}
-
-	var betaCalled bool
-	engramBetaInstallFn = func(profile system.PlatformProfile) (string, error) {
-		betaCalled = true
-		return "/tmp/engram-beta", nil
-	}
-
-	profile := system.PlatformProfile{OS: "linux", PackageManager: "apt"}
-	err := engramBinaryUpgrade(profile)
-	if err != nil {
-		t.Fatalf("engramBinaryUpgrade beta: unexpected error: %v", err)
-	}
-	if !betaCalled {
-		t.Fatal("expected engramBetaInstallFn (beta path) to be called, but it was not")
 	}
 }
 

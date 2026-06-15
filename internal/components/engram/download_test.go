@@ -277,7 +277,7 @@ func TestDownloadLatestBinaryLinux(t *testing.T) {
 	t.Cleanup(func() { engramInstallDirFn = origInstallDirFn })
 
 	profile := system.PlatformProfile{OS: "linux", PackageManager: "apt"}
-	installedPath, err := DownloadLatestBinary(profile, false)
+	installedPath, err := DownloadLatestBinary(profile, "stable")
 	if err != nil {
 		t.Fatalf("DownloadLatestBinary() error = %v", err)
 	}
@@ -324,7 +324,7 @@ func TestDownloadLatestBinaryWindows(t *testing.T) {
 	t.Cleanup(func() { engramInstallDirFn = origInstallDirFn })
 
 	profile := system.PlatformProfile{OS: "windows", PackageManager: "winget"}
-	installedPath, err := DownloadLatestBinary(profile, false)
+	installedPath, err := DownloadLatestBinary(profile, "stable")
 	if err != nil {
 		t.Fatalf("DownloadLatestBinary() error = %v", err)
 	}
@@ -364,7 +364,7 @@ func TestDownloadLatestBinaryDownloadError(t *testing.T) {
 	})
 
 	profile := system.PlatformProfile{OS: "linux", PackageManager: "apt"}
-	_, err := DownloadLatestBinary(profile, false)
+	_, err := DownloadLatestBinary(profile, "stable")
 	if err == nil {
 		t.Fatal("expected error when GitHub API returns 500, got nil")
 	}
@@ -442,7 +442,7 @@ func TestDownloadLatestBinarySkipsLatestReleaseWithoutBinaryAssets(t *testing.T)
 	t.Cleanup(func() { engramInstallDirFn = origInstallDirFn })
 
 	profile := system.PlatformProfile{OS: "linux", PackageManager: "apt"}
-	installedPath, err := DownloadLatestBinary(profile, false)
+	installedPath, err := DownloadLatestBinary(profile, "stable")
 	if err != nil {
 		t.Fatalf("DownloadLatestBinary() error = %v", err)
 	}
@@ -527,7 +527,7 @@ func TestDownloadLatestBinaryReleaseListFallsBackToAnonymousWhenTokenGets403(t *
 	t.Cleanup(func() { engramInstallDirFn = origInstallDirFn })
 
 	profile := system.PlatformProfile{OS: "linux", PackageManager: "apt"}
-	installedPath, err := DownloadLatestBinary(profile, false)
+	installedPath, err := DownloadLatestBinary(profile, "stable")
 	if err != nil {
 		t.Fatalf("DownloadLatestBinary() error = %v", err)
 	}
@@ -564,7 +564,7 @@ func TestDownloadLatestBinaryWindowsStopsEngramBeforeReplace(t *testing.T) {
 		return nil
 	}
 
-	installedPath, err := DownloadLatestBinary(system.PlatformProfile{OS: "windows", PackageManager: "winget"}, false)
+	installedPath, err := DownloadLatestBinary(system.PlatformProfile{OS: "windows", PackageManager: "winget"}, "stable")
 	if err != nil {
 		t.Fatalf("DownloadLatestBinary(windows) error = %v", err)
 	}
@@ -602,7 +602,7 @@ func TestDownloadLatestBinaryWindowsStopFailureAbortsBeforeReplace(t *testing.T)
 	engramInstallDirFn = func(goos string) string { return installDir }
 	engramStopProcessesFn = func() error { return errors.New("stop denied") }
 
-	_, err := DownloadLatestBinary(system.PlatformProfile{OS: "windows", PackageManager: "winget"}, false)
+	_, err := DownloadLatestBinary(system.PlatformProfile{OS: "windows", PackageManager: "winget"}, "stable")
 	if err == nil {
 		t.Fatal("expected stop failure, got nil")
 	}
@@ -645,7 +645,7 @@ func TestDownloadLatestBinaryWindowsStopSucceedsWhenProcessNotRunning(t *testing
 	// Simulate stopEngramProcesses returning nil (no engram process found — clean).
 	engramStopProcessesFn = func() error { return nil }
 
-	installedPath, err := DownloadLatestBinary(system.PlatformProfile{OS: "windows", PackageManager: "winget"}, false)
+	installedPath, err := DownloadLatestBinary(system.PlatformProfile{OS: "windows", PackageManager: "winget"}, "stable")
 	if err != nil {
 		t.Fatalf("DownloadLatestBinary(windows) should succeed when stop returns nil, got: %v", err)
 	}
@@ -688,7 +688,7 @@ func TestDownloadLatestBinaryWindowsStopNilProceedsToInstall(t *testing.T) {
 		return nil
 	}
 
-	installedPath, err := DownloadLatestBinary(system.PlatformProfile{OS: "windows", PackageManager: "winget"}, false)
+	installedPath, err := DownloadLatestBinary(system.PlatformProfile{OS: "windows", PackageManager: "winget"}, "stable")
 	if err != nil {
 		t.Fatalf("DownloadLatestBinary(windows) should not abort when stop returns nil (warning path), got: %v", err)
 	}
@@ -783,7 +783,7 @@ func TestDownloadLatestBinaryIgnoresGentleEngramAndPiTags(t *testing.T) {
 	t.Cleanup(func() { engramInstallDirFn = origInstallDirFn })
 
 	profile := system.PlatformProfile{OS: "linux", PackageManager: "apt"}
-	installedPath, err := DownloadLatestBinary(profile, false)
+	installedPath, err := DownloadLatestBinary(profile, "stable")
 	if err != nil {
 		t.Fatalf("DownloadLatestBinary() error = %v, want core engram v%s to be selected", err, binaryVersion)
 	}
@@ -880,7 +880,7 @@ func TestEngramChecksumVerification(t *testing.T) {
 			t.Cleanup(func() { engramInstallDirFn = origInstallDirFn })
 
 			profile := system.PlatformProfile{OS: "linux", PackageManager: "apt"}
-			_, err := DownloadLatestBinary(profile, false)
+			_, err := DownloadLatestBinary(profile, "stable")
 
 			if tt.wantErrSubstr == "" {
 				if err != nil {
@@ -1012,7 +1012,7 @@ func TestFetchLatestEngramVersionWithAssetsPaginates(t *testing.T) {
 	t.Cleanup(func() { engramInstallDirFn = origInstallDirFn })
 
 	profile := system.PlatformProfile{OS: "linux", PackageManager: "apt"}
-	installedPath, err := DownloadLatestBinary(profile, false)
+	installedPath, err := DownloadLatestBinary(profile, "stable")
 	if err != nil {
 		t.Fatalf("DownloadLatestBinary() error = %v, want core engram v%s selected from page 2", err, binaryVersion)
 	}
@@ -1126,7 +1126,7 @@ func TestDownloadLatestBinary_StableChannelUsesRelease(t *testing.T) {
 
 	profile := system.PlatformProfile{OS: "linux", PackageManager: "apt"}
 	// isBeta=false → should use the release download path.
-	installedPath, err := DownloadLatestBinary(profile, false)
+	installedPath, err := DownloadLatestBinary(profile, "stable")
 	if err != nil {
 		t.Fatalf("DownloadLatestBinary(stable): unexpected error: %v", err)
 	}
@@ -1154,7 +1154,7 @@ func TestDownloadLatestBinary_BetaChannelUsesGoInstallMain(t *testing.T) {
 
 	profile := system.PlatformProfile{OS: "linux", PackageManager: "apt"}
 	// isBeta=true → should use go install @main, not release download.
-	installedPath, err := DownloadLatestBinary(profile, true)
+	installedPath, err := DownloadLatestBinary(profile, "beta")
 	if err != nil {
 		t.Fatalf("DownloadLatestBinary(beta): unexpected error: %v", err)
 	}
@@ -1281,3 +1281,70 @@ func TestEngramStopScriptIsDefensive(t *testing.T) {
 		t.Errorf("stop script must not use -ErrorAction Stop on Stop-Process (reintroduces issue #815/#850)\nscript:\n%s", script)
 	}
 }
+
+// TestDownloadLatestBinary_StableChannelUsesPinnedVersionDirectly verifies that for
+// the stable channel, DownloadLatestBinary uses the pinned version in versions.EngramCore
+// directly and does NOT request the latest version from the GitHub Releases API.
+func TestDownloadLatestBinary_StableChannelUsesPinnedVersionDirectly(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on Windows: uses tar.gz server fixture")
+	}
+
+	// Server serves "1.3.0" for the assets, but /releases/latest returns "9.9.9" (which should be ignored!)
+	tarContent := buildFakeTarGz(t, "engram")
+	checksums := ""
+	for _, goos := range []string{"linux", "darwin"} {
+		for _, goarch := range []string{"amd64", "arm64"} {
+			name := engramArchiveName("1.3.0", goos, goarch)
+			checksums += makeChecksumsTxt(name, tarContent)
+		}
+	}
+
+	latestCalled := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "releases/latest"):
+			latestCalled = true
+			payload := map[string]string{"tag_name": "v9.9.9"}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(payload)
+		case strings.HasSuffix(r.URL.Path, "checksums.txt"):
+			w.Header().Set("Content-Type", "text/plain")
+			fmt.Fprint(w, checksums)
+		default:
+			// Binary asset (should be for v1.3.0, not v9.9.9)
+			if !strings.Contains(r.URL.Path, "v1.3.0") {
+				t.Errorf("expected URL to request v1.3.0, got path: %q", r.URL.Path)
+			}
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.WriteHeader(http.StatusOK)
+			w.Write(tarContent)
+		}
+	}))
+	defer server.Close()
+
+	origClient := engramHTTPClient
+	origBaseURL := engramGitHubBaseURL
+	engramHTTPClient = server.Client()
+	engramGitHubBaseURL = server.URL
+	t.Cleanup(func() {
+		engramHTTPClient = origClient
+		engramGitHubBaseURL = origBaseURL
+	})
+
+	tmpDir := t.TempDir()
+	origInstallDirFn := engramInstallDirFn
+	engramInstallDirFn = func(goos string) string { return tmpDir }
+	t.Cleanup(func() { engramInstallDirFn = origInstallDirFn })
+
+	profile := system.PlatformProfile{OS: "linux", PackageManager: "apt"}
+	_, err := DownloadLatestBinary(profile, "stable")
+	if err != nil {
+		t.Fatalf("DownloadLatestBinary(stable): unexpected error: %v", err)
+	}
+
+	if latestCalled {
+		t.Error("expected fetchLatestEngramVersion (releases/latest) NOT to be called, but it was")
+	}
+}
+

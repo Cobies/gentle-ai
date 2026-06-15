@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/gentleman-programming/gentle-ai/internal/system"
+	"github.com/gentleman-programming/gentle-ai/internal/versions"
 )
 
 const (
@@ -123,9 +124,10 @@ const engramCoreTagPattern = `^v[0-9]+\.[0-9]+\.[0-9]+$`
 // installs it to the appropriate directory for the given platform.
 // It returns the full path to the installed binary.
 //
-// When isBeta is true, engram is installed from source via `go install @main`
-// instead of downloading a release archive. This mirrors the install-time beta
-// path used by the CLI and ensures the upgrade executor honors GENTLE_AI_CHANNEL.
+// When channel is "beta" or "nightly", engram is installed from source via
+// `go install @main` instead of downloading a release archive. This mirrors the
+// install-time beta path used by the CLI and ensures the upgrade executor honors
+// GENTLE_AI_CHANNEL.
 //
 // Checksum verification is mandatory for the stable (release) path: the install
 // fails if checksums.txt is unavailable, if the archive is not listed, or if
@@ -133,9 +135,10 @@ const engramCoreTagPattern = `^v[0-9]+\.[0-9]+\.[0-9]+$`
 //
 // This is the non-brew installation method for Linux and Windows.
 // On macOS, brew handles engram transitively and this should not be called.
-func DownloadLatestBinary(profile system.PlatformProfile, isBeta bool) (string, error) {
+func DownloadLatestBinary(profile system.PlatformProfile, channel string) (string, error) {
 	// Beta channel: install from HEAD via go install rather than a release archive.
 	// This mirrors the installBetaEngramFromMain path used at install time.
+	isBeta := strings.EqualFold(channel, "beta") || strings.EqualFold(channel, "nightly")
 	if isBeta {
 		const pkg = "github.com/Gentleman-Programming/engram/cmd/engram@main"
 		return engramGoInstallFn(pkg)
@@ -143,13 +146,8 @@ func DownloadLatestBinary(profile system.PlatformProfile, isBeta bool) (string, 
 
 	ctx := context.Background()
 
-	// 1. Fetch the latest version tag from GitHub API. Only tags matching the
-	// core engram pattern (vX.Y.Z) are considered; gentle-engram/pi tags are
-	// excluded so the download and update-check paths share the same source of truth.
-	version, err := fetchLatestEngramVersion()
-	if err != nil {
-		return "", fmt.Errorf("fetch latest engram version: %w", err)
-	}
+	// 1. Use the pinned engram core version from the versions package.
+	version := versions.EngramCore
 
 	// 2. Determine binary name and archive URL.
 	goos := profile.OS

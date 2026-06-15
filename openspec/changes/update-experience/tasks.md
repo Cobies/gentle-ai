@@ -40,17 +40,17 @@ Chain strategy: pending
 **Spec**: update-check-cache | **Files**: `internal/state/state.go`, `internal/update/check.go`, `internal/app/selfupdate.go`, `internal/tui/model.go`
 
 ### Phase 1 — Red (failing tests)
-- [ ] 2.1 `internal/state/state_test.go` — add test: `InstallState` round-trips `LastUpdateCheck` via `Write`/`Read`; field absent in old JSON is deserialized as zero value (back-compat scenario from spec)
-- [ ] 2.2 `internal/update/check_test.go` — add test: `CheckAllWithCooldown` skips GitHub call when `now − LastUpdateCheck < 6h`; makes call and updates timestamp when elapsed ≥ 6h; does NOT update timestamp on fetch error
+- [x] 2.1 `internal/state/state_test.go` — add test: `InstallState` round-trips `LastUpdateCheck` via `Write`/`Read`; field absent in old JSON is deserialized as zero value (back-compat scenario from spec)
+- [x] 2.2 `internal/update/check_test.go` — add test: `CheckAllWithCooldown` skips GitHub call when `now − LastUpdateCheck < 6h`; makes call and updates timestamp when elapsed ≥ 6h; does NOT update timestamp on fetch error
 
 ### Phase 2 — Green (implementation)
-- [ ] 2.3 `internal/state/state.go` — add `LastUpdateCheck time.Time \`json:"last_update_check,omitempty"\`` to `InstallState`; carry field through `MergeAgents` return struct
-- [ ] 2.4 `internal/update/check.go` — add `CheckAllWithCooldown(ctx, version, profile, homeDir, ttl)` that reads state, compares elapsed time, calls `CheckAll` if stale, writes `LastUpdateCheck` on success only
-- [ ] 2.5 `internal/app/selfupdate.go` — replace `updateCheckFiltered` call at line ~94 with cooldown-aware variant; pass `homeDir` and `6*time.Hour` TTL
-- [ ] 2.6 `internal/tui/model.go` `Init()` — wrap `update.CheckAll` with cooldown gate using home dir from `os.UserHomeDir()`; accept zero-value (missing field) as always-check (back-compat)
+- [x] 2.3 `internal/state/state.go` — add `LastUpdateCheck time.Time \`json:"last_update_check,omitempty"\`` to `InstallState`; carry field through `MergeAgents` return struct
+- [x] 2.4 `internal/update/check.go` — add `CheckAllWithCooldown(ctx, version, profile, homeDir, ttl)` that reads state, compares elapsed time, calls `CheckAll` if stale, writes `LastUpdateCheck` on success only
+- [x] 2.5 `internal/app/selfupdate.go` — replace `updateCheckFiltered` call at line ~94 with cooldown-aware variant; pass `homeDir` and `6*time.Hour` TTL
+- [x] 2.6 `internal/tui/model.go` `Init()` — wrap `update.CheckAll` with cooldown gate using home dir from `os.UserHomeDir()`; accept zero-value (missing field) as always-check (back-compat)
 
 ### Phase 3 — Refactor
-- [ ] 2.7 Extract clock injection (`nowFn func() time.Time`) into `CheckAllWithCooldown` for test determinism; update tests (2.2) to use injected clock
+- [x] 2.7 Extract clock injection (`nowFn func() time.Time`) into `CheckAllWithCooldown` for test determinism; update tests (2.2) to use injected clock
 
 ---
 
@@ -59,16 +59,16 @@ Chain strategy: pending
 **Spec**: upgrade-channel, self-update | **Files**: `internal/update/upgrade/strategy.go`, `internal/components/engram/download.go`, `internal/cli/channel.go`
 
 ### Phase 1 — Red (failing tests)
-- [ ] 3.1 `internal/update/upgrade/strategy_test.go` — add test: `engramBinaryUpgrade` called with `ChannelBeta` passes `@main` ref to `engramDownloadFn`; called with `ChannelStable` passes pinned version ref
-- [ ] 3.2 `internal/components/engram/download_test.go` (new or existing) — add test: `DownloadLatestBinary(profile, ChannelBeta)` uses `@main`; `DownloadLatestBinary(profile, ChannelStable)` uses `versions.EngramCore`
+- [x] 3.1 `internal/update/upgrade/strategy_test.go` — add test: `engramBinaryUpgrade` called with `ChannelBeta` passes `@main` ref to `engramDownloadFn`; called with `ChannelStable` passes pinned version ref
+- [x] 3.2 `internal/components/engram/download_test.go` (new or existing) — add test: `DownloadLatestBinary(profile, ChannelBeta)` uses `@main`; `DownloadLatestBinary(profile, ChannelStable)` uses `versions.EngramCore`
 
 ### Phase 2 — Green (implementation)
-- [ ] 3.3 `internal/components/engram/download.go` — add `channel cli.InstallChannel` param to `DownloadLatestBinary`; when `channel.IsBeta()` use `@main`, else `versions.EngramCore` (fills admitted gap at line ~52–54)
-- [ ] 3.4 `internal/update/upgrade/strategy.go` — update `engramDownloadFn` signature to accept channel; `engramBinaryUpgrade` reads `GENTLE_AI_CHANNEL` via `cli.ResolveInstallChannel` and passes channel to `engramDownloadFn`
-- [ ] 3.5 `internal/update/upgrade/strategy.go` — update `engramDownloadFn` package-level var declaration to match new signature; update all callers in test stubs
+- [x] 3.3 `internal/components/engram/download.go` — add `channel cli.InstallChannel` param to `DownloadLatestBinary`; when `channel.IsBeta()` use `@main`, else `versions.EngramCore` (fills admitted gap at line ~52–54)
+- [x] 3.4 `internal/update/upgrade/strategy.go` — update `engramDownloadFn` signature to accept channel; `engramBinaryUpgrade` reads `GENTLE_AI_CHANNEL` via `cli.ResolveInstallChannel` and passes channel to `engramDownloadFn`
+- [x] 3.5 `internal/update/upgrade/strategy.go` — update `engramDownloadFn` package-level var declaration to match new signature; update all callers in test stubs
 
 ### Phase 3 — Refactor
-- [ ] 3.6 Verify `cli.ResolveInstallChannel` handles empty-string and unknown values per spec (fall back to stable, optionally warn); add channel_test.go case for unknown value if not already covered
+- [x] 3.6 Verify `cli.ResolveInstallChannel` handles empty-string and unknown values per spec (fall back to stable, optionally warn); add channel_test.go case for unknown value if not already covered
 
 ---
 
