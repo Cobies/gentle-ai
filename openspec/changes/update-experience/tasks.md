@@ -77,19 +77,19 @@ Chain strategy: pending
 **Spec**: upgrade-sync | **Files**: `internal/state/state.go`, `internal/app/selfupdate.go`, `internal/app/app.go`, `internal/tui/screens/upgrade_sync.go`
 
 ### Phase 1 — Red (failing tests)
-- [ ] 4.1 `internal/state/state_test.go` — add test: `PendingSync` bool round-trips via `Write`/`Read`; absent field reads as `false` (back-compat)
-- [ ] 4.2 `internal/app/selfupdate_test.go` (new or existing) — add test: after successful `gentle-ai` self-upgrade, `PendingSync = true` is written to state before process exit
-- [ ] 4.3 `internal/app/app_test.go` (new or existing) — add test: on startup with `state.PendingSync = true`, `RunSync` is called and `PendingSync` is cleared on success; on failure, `PendingSync` remains true
+- [x] 4.1 `internal/state/state_test.go` — add test: `PendingSync` bool round-trips via `Write`/`Read`; absent field reads as `false` (back-compat)
+- [x] 4.2 `internal/app/selfupdate_test.go` (new or existing) — add test: after successful `gentle-ai` self-upgrade, `PendingSync = true` is written to state before process exit
+- [x] 4.3 `internal/app/app_test.go` (new or existing) — add test: on startup with `state.PendingSync = true`, `RunSync` is called and `PendingSync` is cleared on success; on failure, `PendingSync` remains true
 
 ### Phase 2 — Green (implementation)
-- [ ] 4.4 `internal/state/state.go` — add `PendingSync bool \`json:"pending_sync,omitempty"\`` to `InstallState`; carry field through `MergeAgents`
-- [ ] 4.5 `internal/app/selfupdate.go` — after `upgradeExecute` confirms `gentle-ai` succeeded, call `state.Read` + set `PendingSync = true` + `state.Write` before calling `restartAfterGentleAIUpgrade`
-- [ ] 4.6 `internal/app/selfupdate.go` `restartAfterGentleAIUpgrade` — converge Unix + Windows: drop `goOS() == "windows"` branch; always print "Updated to vX — restart gentle-ai…" and return (no re-exec); remove `reExec` var and `syscall` import if unused
-- [ ] 4.7 `internal/app/app.go` — after `state.Read` at line ~127, check `installedState.PendingSync`; if true, call `cli.RunSync`; on success write state with `PendingSync = false`; on failure log error and leave flag set
-- [ ] 4.8 `internal/tui/screens/upgrade_sync.go` — set `PendingSync = true` in state when Upgrade+Sync detects a self-upgrade event (parallel to CLI path)
+- [x] 4.4 `internal/state/state.go` — add `PendingSync bool \`json:"pending_sync,omitempty"\`` to `InstallState`; carry field through `MergeAgents`
+- [x] 4.5 `internal/app/selfupdate.go` — after `upgradeExecute` confirms `gentle-ai` succeeded, call `state.Read` + set `PendingSync = true` + `state.Write` before calling `restartAfterGentleAIUpgrade`
+- [x] 4.6 `internal/app/selfupdate.go` `restartAfterGentleAIUpgrade` — converge Unix + Windows: drop `goOS() == "windows"` branch; always print "Updated to vX — restart gentle-ai…" and return (no re-exec); remove `reExec` var and `syscall` import if unused
+- [x] 4.7 `internal/app/app.go` — after `state.Read` at line ~127, check `installedState.PendingSync`; if true, call `cli.RunSync`; on success write state with `PendingSync = false`; on failure log error and leave flag set
+- [x] 4.8 `internal/tui/screens/upgrade_sync.go` — set `PendingSync = true` in state when Upgrade+Sync detects a self-upgrade event (parallel to CLI path)
 
 ### Phase 3 — Refactor
-- [ ] 4.9 Ensure `RunSync` is idempotent (no state left) before merge; add a guard comment citing spec scenario "deferred sync fails → retry"
+- [x] 4.9 Ensure `RunSync` is idempotent (no state left) before merge; add a guard comment citing spec scenario "deferred sync fails → retry"
 
 ---
 

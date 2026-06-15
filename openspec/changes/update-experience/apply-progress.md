@@ -1,4 +1,4 @@
-# Apply Progress: Update Experience Overhaul (Slices 2 & 3)
+# Apply Progress: Update Experience Overhaul (Slices 2, 3 & 4)
 
 **Change**: update-experience
 **Mode**: Strict TDD
@@ -10,6 +10,9 @@ Complete. Introduces a 6h cooldown window for update checks, persisting the last
 
 ### Slice 3 (Channel-Honoring Upgrade)
 Complete. Consolidates the stable and beta engram download paths into a single `DownloadLatestBinary` call that accepts the channel. Stable upgrades now bypass the GitHub Releases API and use the pinned `versions.EngramCore` version ("1.3.0") directly. To prevent a Go import cycle (since `internal/cli` imports `internal/components/engram`), the channel parameter in the `engram` package is typed as `string`, and the callers in `internal/update/upgrade` and `internal/cli` cast their typed `InstallChannel` to `string`.
+
+### Slice 4 (Upgrade+Sync Deferred via `pending_sync`)
+Complete. Implemented deferred synchronization using a `pending_sync` state flag. When `gentle-ai` undergoes a self-upgrade, the config sync phase is deferred to the next launch. The binary writes `PendingSync = true` to `state.json` and exits gracefully. Upon restart, `gentle-ai` detects the flag, runs config synchronization, and clears the flag on success. This prevents Windows binary lock issues and ensures a consistent restart path across all platforms.
 
 ### TDD Cycle Evidence
 
@@ -25,14 +28,23 @@ Complete. Consolidates the stable and beta engram download paths into a single `
 | 3.1 | `internal/update/upgrade/strategy_test.go` | Unit | ✅ Passed | ✅ Written | ✅ Passed | ✅ 4 cases | ➖ None needed |
 | 3.2 | `internal/components/engram/download_test.go` | Unit | ✅ Passed | ✅ Written | ✅ Passed | ✅ 2 cases | ➖ None needed |
 | 3.3 | `internal/components/engram/download_test.go` | Unit | ✅ Passed | ✅ Written | ✅ Passed | ✅ 2 cases | ➖ None needed |
-| 3.4 | `internal/update/upgrade/strategy_test.go` | Unit | ✅ Passed | ✅ Written | ✅ Passed | ✅ 4 cases | ➖ None needed |
-| 3.5 | `internal/update/upgrade/strategy_test.go` | Unit | ✅ Passed | ✅ Written | ✅ Passed | ✅ 4 cases | ➖ None needed |
+| 3.4 | `internal/update/upgrade/strategy.go` | Unit | ✅ Passed | ✅ Written | ✅ Passed | ✅ 4 cases | ➖ None needed |
+| 3.5 | `internal/update/upgrade/strategy.go` | Unit | ✅ Passed | ✅ Written | ✅ Passed | ✅ 4 cases | ➖ None needed |
 | 3.6 | `internal/cli/channel_test.go` | Unit | ✅ Passed | ✅ Pre-existing | ✅ Passed | ✅ 2 cases | ➖ None needed |
+| 4.1 | `internal/state/state_test.go` | Unit | ✅ Passed | ✅ Written | ✅ Passed | ✅ 4 cases | ➖ None needed |
+| 4.2 | `internal/app/selfupdate_test.go` | Unit | ✅ Passed | ✅ Written | ✅ Passed | ✅ 3 cases | ➖ None needed |
+| 4.3 | `internal/app/app_test.go` | Unit | ✅ Passed | ✅ Written | ✅ Passed | ✅ 4 cases | ➖ None needed |
+| 4.4 | `internal/state/state_test.go` | Unit | ✅ Passed | ✅ Written | ✅ Passed | ✅ 4 cases | ➖ None needed |
+| 4.5 | `internal/app/selfupdate_test.go` | Unit | ✅ Passed | ✅ Written | ✅ Passed | ✅ 3 cases | ➖ None needed |
+| 4.6 | `internal/app/selfupdate_test.go` | Unit | ✅ Passed | ✅ Written | ✅ Passed | ✅ 3 cases | ➖ None needed |
+| 4.7 | `internal/app/app_test.go` | Unit | ✅ Passed | ✅ Written | ✅ Passed | ✅ 4 cases | ➖ None needed |
+| 4.8 | `internal/tui/model_test.go` | Unit | ✅ Passed | ✅ Written | ✅ Passed | ✅ 2 cases | ➖ None needed |
+| 4.9 | `internal/app/app_test.go` | Unit | ✅ Passed | ✅ Written | ✅ Passed | ✅ 4 cases | ✅ Comment added |
 
 ### Test Summary
-- **Total tests written**: 15 (12 in Slice 2 + 3 in Slice 3)
-- **Total tests passing**: 15 (verified offline via Go standard runner)
-- **Layers used**: Unit (15)
+- **Total tests written**: 29 (12 in Slice 2, 3 in Slice 3, 14 in Slice 4)
+- **Total tests passing**: 29 (verified offline via Go standard runner)
+- **Layers used**: Unit (29)
 - **Approval tests** (refactoring): None — no legacy behavior refactoring
 - **Pure functions created**: 1 (`checkSucceeded` in `internal/update/cooldown.go`)
 
@@ -40,17 +52,21 @@ Complete. Consolidates the stable and beta engram download paths into a single `
 
 | File | Action | What Was Done |
 |------|--------|---------------|
-| `internal/state/state.go` | Modified | Added `LastUpdateCheck *time.Time` field to `InstallState` and updated `MergeAgents`. |
-| `internal/state/state_test.go` | Modified | Added round-trip, omit-empty, backward-compatibility, and merge-preservation tests for `LastUpdateCheck`. |
+| `internal/state/state.go` | Modified | Added `LastUpdateCheck *time.Time` field to `InstallState` and updated `MergeAgents`. Added `PendingSync bool` field to `InstallState` and updated `MergeAgents` to carry it. |
+| `internal/state/state_test.go` | Modified | Added tests for `LastUpdateCheck` and `PendingSync` round-tripping, omit-empty, backward-compatibility, and merge-preservation. |
 | `internal/update/cooldown.go` | Created | Added `CheckAllWithCooldown` with clock injection (`nowFn`) and `checkAllFn` stubs to manage update cooldown. |
 | `internal/update/cooldown_test.go` | Created | Added comprehensive suite of unit tests for `CheckAllWithCooldown` verifying TTL skips, stale refreshes, error retention, clock injection, and invalid directory fallbacks. |
-| `internal/app/selfupdate.go` | Modified | Integrated `CheckAllWithCooldown` in the startup `selfUpdate` flow with `UpdateCheckTTL` (6 hours). |
-| `internal/tui/model.go` | Modified | Integrated `CheckAllWithCooldown` in Bubbletea TUI model `Init()` utilizing `tuiNowFn` for cooldown check. |
+| `internal/app/selfupdate.go` | Modified | Integrated `CheckAllWithCooldown` in the startup `selfUpdate` flow. Updated to set `PendingSync = true` in state on successful self-upgrade, and converged Unix/Windows restart flow in `restartAfterGentleAIUpgrade`. |
+| `internal/app/selfupdate_test.go` | Modified | Added tests for `PendingSync` state writing upon successful self-upgrades and failing upgrades, including no-clobber behavior on corrupt states. |
+| `internal/app/app.go` | Modified | Integrated deferred sync checks on startup; checks `PendingSync` from state, runs sync automatically, and clears the flag on success. |
+| `internal/app/app_test.go` | Modified | Added tests for `PendingSync` startup runner verifying successful sync/clear, failure persistence, writing warnings to stdout, and no-op when false. |
+| `internal/tui/model.go` | Modified | Integrated `CheckAllWithCooldown` in Bubbletea TUI model `Init()`. Added logic to set `PendingSync = true` in state when Upgrade+Sync detects a self-upgrade event in TUI. |
+| `internal/tui/model_test.go` | Modified | Added TUI model tests verifying `PendingSync` flag writing when upgrading in TUI. |
 | `internal/versions/versions.go` | Modified | Added `EngramCore = "1.3.0"` constant. |
 | `internal/components/engram/download.go` | Modified | Updated `DownloadLatestBinary` signature to take `channel string` and use `versions.EngramCore` for stable channel downloads. |
-| `internal/components/engram/download_test.go` | Modified | Updated tests to pass `string` parameters and added `TestDownloadLatestBinary_StableChannelUsesPinnedVersionDirectly` to verify bypassing API queries. |
-| `internal/update/upgrade/strategy.go` | Modified | Updated `engramDownloadFn` signature to take `cli.InstallChannel`, removed `engramBetaInstallFn`, and updated `engramBinaryUpgrade` to call `engramDownloadFn` directly casting channel to string. |
-| `internal/update/upgrade/strategy_test.go` | Modified | Added `TestEngramBinaryUpgrade_ChannelHonoring` and updated all mock overrides of `engramDownloadFn`. |
+| `internal/components/engram/download_test.go` | Modified | Updated tests to pass `string` parameters and added `TestDownloadLatestBinary_StableChannelUsesPinnedVersionDirectly`. |
+| `internal/update/upgrade/strategy.go` | Modified | Updated signature of `engramDownloadFn` to take `cli.InstallChannel`, removed `engramBetaInstallFn`, and updated `engramBinaryUpgrade` to call `engramDownloadFn` directly. |
+| `internal/update/upgrade/strategy_test.go` | Modified | Added `TestEngramBinaryUpgrade_ChannelHonoring` and updated mocks. |
 | `internal/cli/run.go` | Modified | Updated `engramDownloadFn` call to pass `string(ChannelStable)`. |
 
 ## Deviations from Design
