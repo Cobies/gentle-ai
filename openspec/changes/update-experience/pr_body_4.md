@@ -21,6 +21,15 @@ This PR completes Slice 4 (Upgrade+Sync Deferred via `pending_sync`) of the Upda
 
 ---
 
+## ⚖️ Size Exception Rationale
+
+This PR exceeds the 400 changed lines limit because:
+1. **Stacked PR Chain:** It is stacked on top of PR #894. The actual changes introduced solely by Slice 4 are ~130 lines, but GitHub compares against `main` and counts the cumulative changes of both slices.
+2. **Windows Compatibility Fixes:** To ensure a green CI on all systems, we resolved pre-existing Windows-specific test harness bugs (isolated APPDATA/USERPROFILE caches, normalized paths, mocked executables/cmds) which added multiple platform-specific test configurations.
+
+---
+
+
 ## 📂 Changes
 
 | File / Area | What Changed |
