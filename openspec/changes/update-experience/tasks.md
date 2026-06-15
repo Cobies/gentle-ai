@@ -119,25 +119,25 @@ Chain strategy: pending
 > **Flagged: this slice stands alone. Estimated ~350–450 lines. Must be its own PR. Do not bundle with any other slice.**
 
 ### Phase 1 — Red (failing tests)
-- [ ] 6.1 `internal/tui/model_test.go` — add test: when `UpdateCheckResultMsg` arrives with `HasUpdates = true`, model transitions to `ScreenUpdatePrompt` (not `ScreenWelcome`)
-- [ ] 6.2 `internal/tui/model_test.go` — add test: `ScreenUpdatePrompt` key "u" triggers upgrade and then `tea.Quit`
-- [ ] 6.3 `internal/tui/model_test.go` — add test: `ScreenUpdatePrompt` key "c" or Enter transitions to `ScreenWelcome` (keep current)
-- [ ] 6.4 `internal/tui/model_test.go` — add test: `ScreenUpdatePrompt` key "v" calls open-browser / prints URL; prompt remains visible
-- [ ] 6.5 `internal/tui/model_test.go` — add test: when no update available, `UpdateCheckResultMsg` transitions to `ScreenWelcome` (no prompt screen)
-- [ ] 6.6 `internal/tui/model_test.go` — add test: cooldown gate in `Init()` (from slice 2) causes `UpdateCheckDone = true` immediately with cached results when elapsed < 6h; `ScreenUpdatePrompt` NOT shown when no update in cache
+- [x] 6.1 `internal/tui/model_test.go` — add test: when `UpdateCheckResultMsg` arrives with `HasUpdates = true`, model transitions to `ScreenUpdatePrompt` (not `ScreenWelcome`)
+- [x] 6.2 `internal/tui/model_test.go` — add test: `ScreenUpdatePrompt` key "u" triggers upgrade and then `tea.Quit`
+- [x] 6.3 `internal/tui/model_test.go` — add test: `ScreenUpdatePrompt` key "c" or Enter transitions to `ScreenWelcome` (keep current)
+- [x] 6.4 `internal/tui/model_test.go` — add test: `ScreenUpdatePrompt` key "v" calls open-browser / prints URL; prompt remains visible
+- [x] 6.5 `internal/tui/model_test.go` — add test: when no update available, `UpdateCheckResultMsg` transitions to `ScreenWelcome` (no prompt screen)
+- [x] 6.6 `internal/tui/model_test.go` — add test: cooldown gate in `Init()` (from slice 2) causes `UpdateCheckDone = true` immediately with cached results when elapsed < 6h; `ScreenUpdatePrompt` NOT shown when no update in cache
 
 ### Phase 2 — Green (implementation)
-- [ ] 6.7 `internal/tui/model.go` — add `ScreenUpdatePrompt Screen` constant after `ScreenUnknown` block (preserve iota order; append after last screen)
-- [ ] 6.8 `internal/tui/model.go` `Update()` — in `UpdateCheckResultMsg` handler: if `HasUpdates`, set `m.Screen = ScreenUpdatePrompt`; else remain at `ScreenWelcome`; show spinner until `UpdateCheckDone`
-- [ ] 6.9 `internal/tui/model.go` `Update()` — add `ScreenUpdatePrompt` key handler: "u" → run `UpgradeFn` then `tea.Quit`; "c"/Enter → `setScreen(ScreenWelcome)`; "v" → `openBrowser(UpdateResults[0].ReleaseURL)` or print URL if browser unavailable, stay on screen
-- [ ] 6.10 `internal/tui/screens/update_prompt.go` (create) — implement `RenderUpdatePrompt(results []update.UpdateResult, spinnerFrame int) string`; shows available version, three options (Update / View changes / Keep current version), spinner while checking
-- [ ] 6.11 `internal/tui/model.go` `View()` — add `case ScreenUpdatePrompt: return screens.RenderUpdatePrompt(m.UpdateResults, m.SpinnerFrame)`
-- [ ] 6.12 `internal/tui/model.go` `optionCount()` — add `case ScreenUpdatePrompt: return 3`
-- [ ] 6.13 `internal/app/app.go` — wire `openBrowser` helper (open URL or fallback to `fmt.Fprintln`) into model for "View changes" action
+- [x] 6.7 `internal/tui/model.go` — add `ScreenUpdatePrompt Screen` constant after `ScreenUnknown` block (preserve iota order; append after last screen)
+- [x] 6.8 `internal/tui/model.go` `Update()` — in `UpdateCheckResultMsg` handler: if `HasUpdates`, set `m.Screen = ScreenUpdatePrompt`; else remain at `ScreenWelcome`; show spinner until `UpdateCheckDone`
+- [x] 6.9 `internal/tui/model.go` `Update()` — add `ScreenUpdatePrompt` key handler: "u" → run `UpgradeFn` then `tea.Quit`; "c"/Enter → `setScreen(ScreenWelcome)`; "v" → `openBrowser(UpdateResults[0].ReleaseURL)` or print URL if browser unavailable, stay on screen
+- [x] 6.10 `internal/tui/screens/update_prompt.go` (create) — implement `RenderUpdatePrompt(results []update.UpdateResult, spinnerFrame int) string`; shows available version, three options (Update / View changes / Keep current version), spinner while checking
+- [x] 6.11 `internal/tui/model.go` `View()` — add `case ScreenUpdatePrompt: return screens.RenderUpdatePrompt(m.UpdateResults, m.SpinnerFrame)`
+- [x] 6.12 `internal/tui/model.go` `optionCount()` — add `case ScreenUpdatePrompt: return 3`
+- [x] 6.13 `internal/app/app.go` — wire `openBrowser` helper (open URL or fallback to `fmt.Fprintln`) into model for "View changes" action
 
 ### Phase 3 — Refactor
-- [ ] 6.14 Verify `ScreenUpdatePrompt` is listed in `confirmSelection()` switch and `withResetOperationState()` if it holds state; confirm `TickMsg` keeps spinner running while `!UpdateCheckDone` on this screen
-- [ ] 6.15 Add `case ScreenUpdatePrompt` to any exhaustive switch that lints missing cases (`optionCount`, `confirmSelection`, `withEscKey`)
+- [x] 6.14 Verify `ScreenUpdatePrompt` is listed in `confirmSelection()` switch and `withResetOperationState()` if it holds state; confirm `TickMsg` keeps spinner running while `!UpdateCheckDone` on this screen
+- [x] 6.15 Add `case ScreenUpdatePrompt` to any exhaustive switch that lints missing cases (`optionCount`, `confirmSelection`, `withEscKey`)
 
 ---
 
@@ -146,20 +146,21 @@ Chain strategy: pending
 **Spec**: advisory-manifest | **Files**: `internal/update/advisory.go` (new), `internal/update/advisory_test.go` (new), `internal/app/app.go`
 
 ### Phase 1 — Red (failing tests)
-- [ ] 7.1 `internal/update/advisory_test.go` (create) — add test: `FetchAdvisory` with `httptest` server returning valid JSON `{message: "hi", severity: "info"}` returns `Advisory{Message:"hi"}, true`
-- [ ] 7.2 `internal/update/advisory_test.go` — add test: `FetchAdvisory` with slow server (> 2s) returns `Advisory{}, false` (timeout, fail-open)
-- [ ] 7.3 `internal/update/advisory_test.go` — add test: `FetchAdvisory` with HTTP 500 returns `Advisory{}, false`
-- [ ] 7.4 `internal/update/advisory_test.go` — add test: `FetchAdvisory` with malformed JSON returns `Advisory{}, false`
-- [ ] 7.5 `internal/update/advisory_test.go` — add test: `FetchAdvisory` with empty `message` field returns `Advisory{}, false` (nothing to display)
+- [x] 7.1 `internal/update/advisory_test.go` (create) — add test: `FetchAdvisory` with `httptest` server returning valid JSON `{message: "hi", severity: "info"}` returns `Advisory{Message:"hi"}, true`
+- [x] 7.2 `internal/update/advisory_test.go` — add test: `FetchAdvisory` with slow server (> 2s) returns `Advisory{}, false` (timeout, fail-open)
+- [x] 7.3 `internal/update/advisory_test.go` — add test: `FetchAdvisory` with HTTP 500 returns `Advisory{}, false`
+- [x] 7.4 `internal/update/advisory_test.go` — add test: `FetchAdvisory` with malformed JSON returns `Advisory{}, false`
+- [x] 7.5 `internal/update/advisory_test.go` — add test: `FetchAdvisory` with empty `message` field returns `Advisory{}, false` (nothing to display)
 
 ### Phase 2 — Green (implementation)
-- [ ] 7.6 `internal/update/advisory.go` (create) — define `Advisory{Message, Severity, URL string}`; implement `FetchAdvisory(ctx context.Context) (Advisory, bool)` with 2s timeout, GET to advisory tag asset URL (`https://github.com/Gentleman-Programming/gentle-ai/releases/download/advisory/advisory.json`), JSON decode, fail-open on any error
-- [ ] 7.7 `internal/app/app.go` — launch `update.FetchAdvisory` in background goroutine alongside `update.CheckAll` at TUI init; collect result; display non-empty `Advisory.Message` as informational text on Welcome screen or after prompt (never gate launch)
+- [x] 7.6 `internal/update/advisory.go` (create) — define `Advisory{Message, Severity, URL string}`; implement `FetchAdvisory(ctx context.Context) (Advisory, bool)` with 2s timeout, GET to advisory tag asset URL (`https://github.com/Gentleman-Programming/gentle-ai/releases/download/advisory/advisory.json`), JSON decode, fail-open on any error
+- [x] 7.7 `internal/app/app.go` — launch `update.FetchAdvisory` in background goroutine alongside `update.CheckAll` at TUI init; collect result; display non-empty `Advisory.Message` as informational text on Welcome screen or after prompt (never gate launch)
 
 ### Phase 3 — Refactor
-- [ ] 7.8 Inject advisory fetch URL as package-level var in `advisory.go` for test override; confirm `advisoryHTTPClient` timeout is exactly 2s and not shared with other clients
+- [x] 7.8 Inject advisory fetch URL as package-level var in `advisory.go` for test override; confirm `advisoryHTTPClient` timeout is exactly 2s and not shared with other clients
 
 ---
+
 
 ## Cross-Slice Notes
 
