@@ -777,7 +777,9 @@ func sddMultiCursor(t *testing.T) int {
 // opencode.json and otherwise shows its explicit empty state instead of silently
 // skipping model assignment.
 func TestSDDModeMultiShowsModelPickerWhenCacheMissing(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 
 	m := NewModel(system.DetectionResult{}, "dev")
 	m.Screen = ScreenSDDMode
@@ -797,7 +799,9 @@ func TestSDDModeMultiShowsModelPickerWhenCacheMissing(t *testing.T) {
 }
 
 func TestSDDModeMultiEmptyModelPickerCanContinueWithDefaults(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 
 	m := NewModel(system.DetectionResult{}, "dev")
 	m.Screen = ScreenSDDMode

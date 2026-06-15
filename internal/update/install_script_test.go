@@ -87,6 +87,9 @@ func TestInstallScriptBetaGoInstallBypassesPublicGoProxy(t *testing.T) {
 		t.Fatal("could not locate end of prepend_go_env_pattern function")
 	}
 	function := script[start : start+end+3]
+	if err := exec.Command("bash", "-c", "exit 0").Run(); err != nil {
+		t.Skip("skipping: bash is not functional on this system")
+	}
 
 	cmd := exec.Command("bash", "-c", function+`
 GONOSUMDB=example.com/private

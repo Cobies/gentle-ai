@@ -98,17 +98,17 @@ Chain strategy: pending
 **Spec**: self-update | **Files**: `internal/app/selfupdate.go`, `internal/app/selfupdate_test.go`
 
 ### Phase 1 — Red (failing tests)
-- [ ] 5.1 `internal/app/selfupdate_test.go` — add test: `selfUpdate` calls `promptFn` unconditionally when update is available (without `GENTLE_AI_CONFIRM_UPDATE`); test `GENTLE_AI_CONFIRM_UPDATE` env set to "1" does NOT gate the prompt (env is ignored)
-- [ ] 5.2 `internal/app/selfupdate_test.go` — add test: non-TTY stdin causes `defaultPromptForUpdate` to return `(false, nil)` (auto-decline in CI)
-- [ ] 5.3 `internal/app/selfupdate_test.go` — add test: `--yes` flag (via injected promptFn) bypasses interactive prompt and returns `(true, nil)`
+- [x] 5.1 `internal/app/selfupdate_test.go` — add test: `selfUpdate` calls `promptFn` unconditionally when update is available (without `GENTLE_AI_CONFIRM_UPDATE`); test `GENTLE_AI_CONFIRM_UPDATE` env set to "1" does NOT gate the prompt (env is ignored)
+- [x] 5.2 `internal/app/selfupdate_test.go` — add test: non-TTY stdin causes `defaultPromptForUpdate` to return `(false, nil)` (auto-decline in CI)
+- [x] 5.3 `internal/app/selfupdate_test.go` — add test: `--yes` flag (via injected promptFn) bypasses interactive prompt and returns `(true, nil)`
 
 ### Phase 2 — Green (implementation)
-- [ ] 5.4 `internal/app/selfupdate.go` — remove `envConfirmUpdate` constant and the guard block at lines ~111–116; always call `promptFn` when update is available
-- [ ] 5.5 `internal/app/selfupdate.go` — add `--yes` flag handling: accept `yesFlag bool` param or read `GENTLE_AI_YES=1`; when set, substitute `promptFn` with a stub that returns `(true, nil)`
-- [ ] 5.6 `internal/app/selfupdate.go` `defaultPromptForUpdate` — change prompt text to "[Y/n]" (default Y); update answer parse: empty string or "y"/"yes" → true; "n"/"no" → false
+- [x] 5.4 `internal/app/selfupdate.go` — remove `envConfirmUpdate` constant and the guard block at lines ~111–116; always call `promptFn` when update is available
+- [x] 5.5 `internal/app/selfupdate.go` — add `--yes` flag handling: accept `yesFlag bool` param or read `GENTLE_AI_YES=1`; when set, substitute `promptFn` with a stub that returns `(true, nil)`
+- [x] 5.6 `internal/app/selfupdate.go` `defaultPromptForUpdate` — change prompt text to "[Y/n]" (default Y); update answer parse: empty string or "y"/"yes" → true; "n"/"no" → false
 
 ### Phase 3 — Refactor
-- [ ] 5.7 Remove `envConfirmUpdate` from constant block entirely; update any test that set it; add a comment "GENTLE_AI_CONFIRM_UPDATE removed — prompt is now unconditional"
+- [x] 5.7 Remove `envConfirmUpdate` from constant block entirely; update any test that set it; add a comment "GENTLE_AI_CONFIRM_UPDATE removed — prompt is now unconditional"
 
 ---
 
