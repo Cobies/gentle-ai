@@ -83,5 +83,5 @@ Complete. Implemented unconditional CLI prompt default and converged exit behavi
 - To prevent a Go compilation import cycle (since `internal/cli` imports `internal/components/engram` to use `DownloadLatestBinary`, and `components/engram` would import `internal/cli` to use `cli.InstallChannel`), the channel parameter in `DownloadLatestBinary` is typed as a standard `string`. Callers cast their `cli.InstallChannel` values to `string` where needed.
 
 ## Issues Found
-- The test `TestConfigPathsForBackup_GGAExtrasAreIncluded` in `internal/update/upgrade/executor_test.go` has a pre-existing path resolution failure on Windows environments, which is unrelated to the changes introduced in this slice.
-- Windows-specific path slash issues exist in `TestEngramGoInstallFromMain_UsesGoEnvForBinDir` and `TestEngramGoInstallFromMain_BypassesPublicGoProxy` (pre-existing test failures on Windows).
+- **None**: All pre-existing Windows-specific path resolution, executable extensions, shell script mocks, and env isolation issues (such as `TestConfigPathsForBackup_GGAExtrasAreIncluded`, `TestEngramGoInstallFromMain_UsesGoEnvForBinDir`, and `TestEngramGoInstallFromMain_BypassesPublicGoProxy`) have been successfully resolved and are now passing cleanly on Windows.
+
