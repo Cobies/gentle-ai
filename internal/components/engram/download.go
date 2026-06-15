@@ -20,7 +20,6 @@ import (
 	"time"
 
 	"github.com/gentleman-programming/gentle-ai/internal/system"
-	"github.com/gentleman-programming/gentle-ai/internal/versions"
 )
 
 const (
@@ -146,8 +145,13 @@ func DownloadLatestBinary(profile system.PlatformProfile, channel string) (strin
 
 	ctx := context.Background()
 
-	// 1. Use the pinned engram core version from the versions package.
-	version := versions.EngramCore
+	// 1. Fetch the latest version tag from GitHub API. Only tags matching the
+	// core engram pattern (vX.Y.Z) are considered; gentle-engram/pi tags are
+	// excluded so the download and update-check paths share the same source of truth.
+	version, err := fetchLatestEngramVersion()
+	if err != nil {
+		return "", fmt.Errorf("fetch latest engram version: %w", err)
+	}
 
 	// 2. Determine binary name and archive URL.
 	goos := profile.OS
