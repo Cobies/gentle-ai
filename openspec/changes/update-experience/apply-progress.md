@@ -9,7 +9,7 @@
 Complete. Introduces a 6h cooldown window for update checks, persisting the last successful check timestamp in the `.gentle-ai/state.json` file. Repeated launches check this cached timestamp to avoid rate-limiting or unnecessary remote requests to the GitHub API.
 
 ### Slice 3 (Channel-Honoring Upgrade)
-Complete. Consolidates the stable and beta engram download paths into a single `DownloadLatestBinary` call that accepts the channel. Stable upgrades now bypass the GitHub Releases API and use the pinned `versions.EngramCore` version ("1.3.0") directly. To prevent a Go import cycle (since `internal/cli` imports `internal/components/engram`), the channel parameter in the `engram` package is typed as `string`, and the callers in `internal/update/upgrade` and `internal/cli` cast their typed `InstallChannel` to `string`.
+Complete. Consolidates the stable and beta engram download paths into a single `DownloadLatestBinary` call that accepts the channel. Stable upgrades dynamically resolve the latest core engram version from the GitHub Releases API (excluding gentle-engram/pi tags) to share the same source of truth as the update-check path. Beta upgrades are installed from the main branch. To prevent a Go import cycle (since `internal/cli` imports `internal/components/engram`), the channel parameter in the `engram` package is typed as `string`, and the callers in `internal/update/upgrade` and `internal/cli` cast their typed `InstallChannel` to `string`.
 
 ### Slice 4 (Upgrade+Sync Deferred via `pending_sync`)
 Complete. Implemented deferred synchronization using a `pending_sync` state flag. When `gentle-ai` undergoes a self-upgrade, the config sync phase is deferred to the next launch. The binary writes `PendingSync = true` to `state.json` and exits gracefully. Upon restart, `gentle-ai` detects the flag, runs config synchronization, and clears the flag on success. This prevents Windows binary lock issues and ensures a consistent restart path across all platforms.
@@ -62,9 +62,9 @@ Complete. Implemented deferred synchronization using a `pending_sync` state flag
 | `internal/app/app_test.go` | Modified | Added tests for `PendingSync` startup runner verifying successful sync/clear, failure persistence, writing warnings to stdout, and no-op when false. |
 | `internal/tui/model.go` | Modified | Integrated `CheckAllWithCooldown` in Bubbletea TUI model `Init()`. Added logic to set `PendingSync = true` in state when Upgrade+Sync detects a self-upgrade event in TUI. |
 | `internal/tui/model_test.go` | Modified | Added TUI model tests verifying `PendingSync` flag writing when upgrading in TUI. |
-| `internal/versions/versions.go` | Modified | Added `EngramCore = "1.3.0"` constant. |
-| `internal/components/engram/download.go` | Modified | Updated `DownloadLatestBinary` signature to take `channel string` and use `versions.EngramCore` for stable channel downloads. |
-| `internal/components/engram/download_test.go` | Modified | Updated tests to pass `string` parameters and added `TestDownloadLatestBinary_StableChannelUsesPinnedVersionDirectly`. |
+| `internal/versions/versions.go` | Modified | Removed unused `EngramCore` constant. |
+| `internal/components/engram/download.go` | Modified | Updated `DownloadLatestBinary` signature to take `channel string` and restore dynamic version resolution for the stable channel. |
+| `internal/components/engram/download_test.go` | Modified | Updated tests to pass `string` parameters and removed `TestDownloadLatestBinary_StableChannelUsesPinnedVersionDirectly` as it asserted incorrect hard-pinned behavior. |
 | `internal/update/upgrade/strategy.go` | Modified | Updated signature of `engramDownloadFn` to take `cli.InstallChannel`, removed `engramBetaInstallFn`, and updated `engramBinaryUpgrade` to call `engramDownloadFn` directly. |
 | `internal/update/upgrade/strategy_test.go` | Modified | Added `TestEngramBinaryUpgrade_ChannelHonoring` and updated mocks. |
 | `internal/cli/run.go` | Modified | Updated `engramDownloadFn` call to pass `string(ChannelStable)`. |
