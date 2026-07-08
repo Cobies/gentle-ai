@@ -70,6 +70,12 @@ const requiredOrchestratorMergeModeClause = "Subagent mode (Claude, Cursor, Kimi
 // inline-mode orchestrator (no dedicated review-*/jd-* subagents) must carry.
 const requiredOrchestratorInlineModeClause = "Inline mode (this adapter has no dedicated review-*/jd-* subagents): run each lens sequentially inside your own orchestrator context and maintain the merged ledger directly."
 
+// requiredOrchestratorDynamicModeClause is the execution-mode sentence every
+// dynamic-subagent orchestrator must carry. These adapters do not copy static
+// review-*/jd-* agent files, but they still run reviewers in fresh dynamic
+// subagent contexts.
+const requiredOrchestratorDynamicModeClause = "Dynamic subagent mode: define and invoke review-*/jd-* agents at runtime."
+
 // requiredJDSubagentModeClause is the execution-mode sentence every jd-judge-*.md
 // subagent asset (Claude, Kiro) must carry. jd-fix-agent.md files do NOT carry
 // this judge-oriented clause — see requiredFixAgentClauses (JD-001).
@@ -231,12 +237,19 @@ var reviewLedgerOrchestratorAssets = map[string]string{
 }
 
 // subagentFamilyOrchestrators are the orchestrators that also need the
-// merge-side clause because their lenses run as subagents.
+// merge-side clause because their lenses run as static/native subagents.
 var subagentFamilyOrchestrators = map[string]bool{
 	"claude": true,
 	"cursor": true,
 	"kimi":   true,
 	"kiro":   true,
+}
+
+// dynamicSubagentFamilyOrchestrators are orchestrators that do not install
+// static review-*/jd-* files, but define and invoke those agents dynamically at
+// runtime.
+var dynamicSubagentFamilyOrchestrators = map[string]bool{
+	"antigravity": true,
 }
 
 // reviewLedgerJudgmentDaySkillAssets enumerates the 2 judgment-day skill docs
@@ -292,6 +305,8 @@ func TestRequiredLedgerClauses(t *testing.T) {
 				content := assets.MustRead(path)
 				if subagentFamilyOrchestrators[family] {
 					assertTextContainsClauses(t, path, content, []string{requiredOrchestratorMergeModeClause})
+				} else if dynamicSubagentFamilyOrchestrators[family] {
+					assertTextContainsClauses(t, path, content, []string{requiredOrchestratorDynamicModeClause})
 				} else {
 					assertTextContainsClauses(t, path, content, []string{requiredOrchestratorInlineModeClause})
 				}
