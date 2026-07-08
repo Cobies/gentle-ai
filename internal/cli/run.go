@@ -748,14 +748,25 @@ func computeSlugSlimVerdicts(agentIDs []model.AgentID, isSlim func(model.AgentID
 }
 
 // resolveAdapters creates adapters for each agent ID, skipping unsupported ones.
+// It ensures that Antigravity is processed last so that if another agent (like Gemini CLI)
+// shares its prompt file surface (GEMINI.md), Antigravity's prompt rules (which include
+// dynamic subagent delegation protocols) take precedence and are not overwritten.
 func resolveAdapters(agentIDs []model.AgentID) []agents.Adapter {
 	adapters := make([]agents.Adapter, 0, len(agentIDs))
+	var hasAntigravity agents.Adapter
 	for _, id := range agentIDs {
 		adapter, err := agents.NewAdapter(id)
 		if err != nil {
 			continue
 		}
+		if id == model.AgentAntigravity {
+			hasAntigravity = adapter
+			continue
+		}
 		adapters = append(adapters, adapter)
+	}
+	if hasAntigravity != nil {
+		adapters = append(adapters, hasAntigravity)
 	}
 	return adapters
 }
