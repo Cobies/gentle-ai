@@ -16,7 +16,7 @@
 | VS Code Copilot | `vscode-copilot` | Yes          | Yes | Full (runSubagent)               | No            | No             | `~/.copilot` + VS Code User profile |
 | Codex           | `codex`          | Yes          | Yes | Solo-agent (multi-agent opt-in, experimental) | No            | No             | `~/.codex`                          |
 | Windsurf        | `windsurf`       | Yes (native) | Yes | Solo-agent                       | No            | No             | `~/.codeium/windsurf`               |
-| Antigravity     | `antigravity`    | Yes (native) | Yes | Solo-agent + Mission Control     | No            | No             | `~/.gemini/antigravity`             |
+| Antigravity     | `antigravity`    | Yes (native) | Yes | Full (dynamic subagents) + Mission Control | No            | No             | `~/.gemini/antigravity-cli` or `~/.gemini/antigravity-desktop` |
 | Kimi Code       | `kimi`           | Yes          | Yes | Full (native custom agents)      | Via KIMI.md include [^kimi-output-style] | No | `~/.kimi`                           |
 | Qwen Code       | `qwen-code`      | Yes          | Yes | Full (native sub-agents)         | No            | Yes            | `~/.qwen`                           |
 | Kiro IDE        | `kiro-ide`       | Yes          | Yes | Full (native subagents)          | No            | No             | `~/.kiro`                           |
@@ -37,9 +37,9 @@ Most agents receive the **full SDD orchestrator** policy, plus skill files writt
 
 | Model                 | How It Works                                                                                                                                                                                       | Agents                                                                                                    |
 | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| **Full (sub-agents)** | Each SDD phase runs in an isolated context window via native sub-agent delegation, package-managed subagents, or an OpenCode-compatible overlay. The orchestrator coordinates; sub-agents execute. | Claude Code, OpenCode, Kilo Code, Gemini CLI, Cursor, VS Code Copilot, Kimi Code, Kiro IDE, Qwen Code, Pi |
+| **Full (sub-agents)** | Each SDD phase runs in an isolated context window via native sub-agent delegation, package-managed subagents, dynamic runtime subagents, or an OpenCode-compatible overlay. The orchestrator coordinates; sub-agents execute. | Claude Code, OpenCode, Kilo Code, Gemini CLI, Antigravity, Cursor, VS Code Copilot, Kimi Code, Kiro IDE, Qwen Code, Pi |
 | **Full (delegate_task)** | The orchestrator uses Hermes's native `delegate_task` primitive to spawn ephemeral workers in fresh context windows. Workers receive only a self-contained mission; the parent receives only their final summary. Toolsets, MCP, and skills must be passed explicitly (not inherited by default). | Hermes |
-| **Solo-agent**        | All SDD phases run inline in the same conversation. The orchestrator IS the executor. Engram provides cross-phase persistence.                                                                     | Codex, Windsurf, Antigravity, OpenClaw, Trae                                                              |
+| **Solo-agent**        | All SDD phases run inline in the same conversation. The orchestrator IS the executor. Engram provides cross-phase persistence.                                                                     | Codex, Windsurf, OpenClaw, Trae                                                                           |
 
 ### Cursor Native Subagents
 
@@ -60,7 +60,7 @@ Windsurf runs as a solo-agent (no custom sub-agents). The orchestrator leverages
 
 ### Antigravity + Mission Control
 
-Antigravity is an agent-first platform with built-in sub-agents (Browser, Terminal) managed by Mission Control. However, custom sub-agent creation is not yet available. SDD phases run inline, with Mission Control handling automatic delegation to built-in sub-agents when specialized tooling is needed (e.g., Browser for research during `sdd-explore`).
+Antigravity is an agent-first platform with built-in sub-agents managed by Mission Control and runtime custom subagents defined through `define_subagent` and invoked through `invoke_subagent`. Gentle AI does not install static Antigravity subagent files; instead, the Antigravity orchestrator defines SDD phase agents, 4R review agents, and Judgment Day agents dynamically from installed skill files. If those dynamic subagent tools are unavailable, required SDD phase work and required reviews fail closed instead of silently degrading into parent-thread inline execution.
 
 ### Kiro Native Subagents
 
@@ -145,7 +145,7 @@ Kiro uses native custom agents in `~/.kiro/agents/`. `gentle-ai` writes phase ag
 - SDD model-selection profiles written as separate files at `~/.codex/<name>.config.toml` (Codex >= 0.134.0 separate-file mechanism). Selected at runtime via `codex --profile <name>`:
 
   | Profile | `model_reasoning_effort` | SDD phases |
-  |---------|--------------------------|------------|
+  | --------- | -------------------------- | ------------ |
   | `sdd-strong` | `xhigh` | propose, design, verify, judge |
   | `sdd-mid` | `high` | spec, tasks, apply |
   | `sdd-cheap` | `low` | explore, archive, onboard |
@@ -162,11 +162,11 @@ Kiro uses native custom agents in `~/.kiro/agents/`. `gentle-ai` writes phase ag
 
 ### Antigravity
 
-- Skills at `~/.gemini/antigravity/skills/` (native Antigravity feature)
-- MCP config at `~/.gemini/antigravity/mcp_config.json`
+- Skills at `~/.gemini/antigravity-cli/skills/` or `~/.gemini/antigravity-desktop/skills/` depending on the detected Antigravity surface
+- MCP config at `~/.gemini/antigravity-cli/mcp_config.json` or `~/.gemini/antigravity-desktop/mcp_config.json`
+- CLI settings at `~/.gemini/antigravity-cli/settings.json`; Desktop settings may live at `~/.gemini/antigravity-desktop/settings.json` and remain managed by the Antigravity UI
 - System prompt appended to `~/.gemini/GEMINI.md` (shared with Gemini CLI — collision check warns if both are installed)
-- Mission Control handles built-in sub-agent delegation (Browser, Terminal) automatically
-- Settings managed via the IDE's Agent settings UI, not via `settings.json`
+- Mission Control handles built-in sub-agent delegation automatically, and Gentle AI uses `define_subagent`/`invoke_subagent` for dynamic SDD, 4R, and Judgment Day agents
 
 ### Kimi Code
 
@@ -264,7 +264,7 @@ Hermes uses `delegate_task` to spawn ephemeral sub-agents. Each worker starts in
 **Tuning knobs** (configure in `~/.hermes/config.yaml` under the `delegation` key):
 
 | Parameter | Default | Effect |
-|-----------|---------|--------|
+| ----------- | --------- | -------- |
 | `max_spawn_depth` | 2 | Maximum recursive delegation depth |
 | `max_concurrent_children` | 4 | Maximum parallel workers |
 | `max_iterations` | agent default | Iteration budget per worker |
