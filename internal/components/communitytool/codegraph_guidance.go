@@ -140,7 +140,11 @@ func InjectCodeGraphGuidance(homeDir string) (GuidanceInjectionResult, error) {
 
 	installed := agents.DiscoverInstalled(reg, homeDir)
 	result := GuidanceInjectionResult{}
+	hasAntigravity := false
 	for _, installedAgent := range installed {
+		if installedAgent.ID == model.AgentAntigravity {
+			hasAntigravity = true
+		}
 		adapter, ok := reg.Get(installedAgent.ID)
 		if !ok || !isCodeGraphSupportedAgent(installedAgent.ID) || !adapter.SupportsSystemPrompt() {
 			continue
@@ -157,7 +161,69 @@ func InjectCodeGraphGuidance(homeDir string) (GuidanceInjectionResult, error) {
 		result.Files = append(result.Files, file)
 	}
 
+	if hasAntigravity {
+		mcpChanged, mcpErr := injectCodeGraphMCPForAntigravity(homeDir)
+		if mcpErr != nil {
+			return result, mcpErr
+		}
+		if mcpChanged {
+			result.Changed = true
+			adapter, ok := reg.Get(model.AgentAntigravity)
+			if ok {
+				result.Files = append(result.Files, adapter.MCPConfigPath(homeDir, "codegraph"))
+			}
+		}
+	}
+
 	return result, nil
+}
+
+func injectCodeGraphMCPForAntigravity(homeDir string) (bool, error) {
+	reg, err := agents.NewDefaultRegistry()
+	if err != nil {
+		return false, err
+	}
+	adapter, ok := reg.Get(model.AgentAntigravity)
+	if !ok {
+		return false, nil
+	}
+
+	mcpPath := adapter.MCPConfigPath(homeDir, "codegraph")
+	if mcpPath == "" {
+		return false, nil
+	}
+
+	var baseJSON []byte
+	raw, err := os.ReadFile(mcpPath)
+	if err == nil {
+		baseJSON = raw
+	} else if !os.IsNotExist(err) {
+		return false, fmt.Errorf("read Antigravity MCP config %q: %w", mcpPath, err)
+	}
+
+	overlay := []byte(`{
+  "mcpServers": {
+    "codegraph": {
+      "command": "codegraph",
+      "args": [
+        "serve",
+        "--mcp"
+      ]
+    }
+  }
+}`)
+
+	merged, err := filemerge.MergeJSONObjects(baseJSON, overlay)
+	if err != nil {
+		return false, fmt.Errorf("merge Antigravity CodeGraph MCP config: %w", err)
+	}
+
+	writeResult, err := filemerge.WriteFileAtomic(mcpPath, merged, 0o644)
+	if err != nil {
+		return false, fmt.Errorf("write Antigravity MCP config %q: %w", mcpPath, err)
+	}
+
+	return writeResult.Changed, nil
 }
 
 // CodeGraphGuidancePaths returns the system prompt files that the CodeGraph

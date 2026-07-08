@@ -227,6 +227,10 @@ func antigravityEngramHooksJSON() []byte {
 		"gentle-ai-engram-tools": map[string]any{
 			"PreInvocation": []any{
 				map[string]any{
+					"type":    "command",
+					"command": `gentle-ai skill-registry refresh --quiet --no-gitignore --cwd "$PWD" || true`,
+				},
+				map[string]any{
 					"type": "command",
 					"command": "printf '%s\\n' '" + mustJSONString(map[string]any{
 						"injectSteps": []any{
