@@ -1,6 +1,7 @@
 package permissions
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"runtime"
@@ -23,6 +24,9 @@ type InjectionResult struct {
 func TargetPath(homeDir string, adapter agents.Adapter) string {
 	if adapter.Agent() == model.AgentCodex {
 		return adapter.MCPConfigPath(homeDir, "")
+	}
+	if adapter.Agent() == model.AgentAntigravity {
+		return adapter.SettingsPath(homeDir)
 	}
 	if agentOverlay(adapter.Agent()) == nil {
 		return ""
@@ -132,8 +136,7 @@ func agentOverlay(id model.AgentID) []byte {
 	case model.AgentQwenCode:
 		return qwenCodeOverlayJSON
 	case model.AgentAntigravity:
-		// Antigravity manages permissions via IDE UI (Artifact Review Policy /
-		// Terminal Command Auto Execution). No injectable settings.json schema.
+		// Antigravity manages permissions via custom union-merge settings.json.
 		return nil
 	case model.AgentVSCodeCopilot:
 		return vscodeCopilotOverlayJSON
@@ -154,6 +157,9 @@ func agentOverlay(id model.AgentID) []byte {
 func Inject(homeDir string, adapter agents.Adapter) (InjectionResult, error) {
 	if adapter.Agent() == model.AgentCodex {
 		return injectCodexPermissions(homeDir, adapter)
+	}
+	if adapter.Agent() == model.AgentAntigravity {
+		return injectAntigravityPermissions(homeDir, adapter)
 	}
 
 	settingsPath := adapter.SettingsPath(homeDir)
@@ -270,4 +276,82 @@ var osReadFile = func(path string) ([]byte, error) {
 	}
 
 	return content, nil
+}
+
+// injectAntigravityPermissions union-merges command(gentle-ai), command(codegraph), and command(git)
+// into permissions.allow in settings.json. It preserves all user preferences and existing commands.
+func injectAntigravityPermissions(homeDir string, adapter agents.Adapter) (InjectionResult, error) {
+	settingsPath := adapter.SettingsPath(homeDir)
+	if settingsPath == "" {
+		return InjectionResult{}, nil
+	}
+
+	baseJSON, err := osReadFile(settingsPath)
+	if err != nil {
+		return InjectionResult{}, err
+	}
+
+	var data map[string]interface{}
+	if len(baseJSON) > 0 {
+		if err := json.Unmarshal(baseJSON, &data); err != nil {
+			// Back up and start fresh on malformed JSON
+			data = make(map[string]interface{})
+		}
+	}
+	if data == nil {
+		data = make(map[string]interface{})
+	}
+
+	var perms map[string]interface{}
+	if pVal, ok := data["permissions"]; ok {
+		if pm, ok := pVal.(map[string]interface{}); ok {
+			perms = pm
+		} else {
+			perms = make(map[string]interface{})
+		}
+	} else {
+		perms = make(map[string]interface{})
+	}
+
+	var allow []interface{}
+	if aVal, ok := perms["allow"]; ok {
+		if al, ok := aVal.([]interface{}); ok {
+			allow = al
+		}
+	}
+
+	existing := make(map[string]bool)
+	for _, val := range allow {
+		if s, ok := val.(string); ok {
+			existing[s] = true
+		}
+	}
+
+	required := []string{"command(gentle-ai)", "command(codegraph)", "command(git)"}
+	changed := false
+	for _, req := range required {
+		if !existing[req] {
+			allow = append(allow, req)
+			existing[req] = true
+			changed = true
+		}
+	}
+
+	if changed {
+		perms["allow"] = allow
+		data["permissions"] = perms
+
+		newJSON, err := json.MarshalIndent(data, "", "  ")
+		if err != nil {
+			return InjectionResult{}, err
+		}
+
+		writeResult, err := filemerge.WriteFileAtomic(settingsPath, newJSON, 0o644)
+		if err != nil {
+			return InjectionResult{}, err
+		}
+		return InjectionResult{Changed: writeResult.Changed, Files: []string{settingsPath}}, nil
+	}
+
+	return InjectionResult{Changed: false, Files: []string{settingsPath}}, nil
 }

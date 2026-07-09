@@ -1120,8 +1120,16 @@ func TestRunInstallAntigravityInitializesCLISettingsAfterEngramSetup(t *testing.
 	if err != nil {
 		t.Fatalf("ReadFile(%q) error = %v", settingsPath, err)
 	}
-	if string(got) != "{}\n" {
-		t.Fatalf("antigravity settings = %q, want initialized empty settings", got)
+	for _, want := range []string{
+		`"permissions"`,
+		`"allow"`,
+		`"command(gentle-ai)"`,
+		`"command(codegraph)"`,
+		`"command(git)"`,
+	} {
+		if !strings.Contains(string(got), want) {
+			t.Fatalf("antigravity settings missing %s; got:\n%s", want, got)
+		}
 	}
 }
 
