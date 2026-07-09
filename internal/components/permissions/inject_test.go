@@ -40,6 +40,27 @@ func tomlSection(text, header string) string {
 	return section
 }
 
+func assertCodexWorkspaceWriteRulesScoped(t *testing.T, text string) {
+	t.Helper()
+
+	rootFilesystem := tomlSection(text, `[permissions.gentle-dev.filesystem]`)
+	for _, rule := range []string{`"." = "write"`, `".git/**" = "write"`} {
+		if strings.Contains(rootFilesystem, rule) {
+			t.Fatalf("root filesystem table contains workspace write rule %q; got:\n%s", rule, rootFilesystem)
+		}
+	}
+
+	scopedFilesystem := tomlSection(text, `[permissions.gentle-dev.filesystem.":workspace_roots"]`)
+	if scopedFilesystem == "" {
+		t.Fatalf("config.toml missing workspace-scoped filesystem table; got:\n%s", text)
+	}
+	for _, rule := range []string{`"." = "write"`, `".git/**" = "write"`} {
+		if !strings.Contains(scopedFilesystem, rule) {
+			t.Fatalf("workspace-scoped filesystem table missing workspace write rule %q; got:\n%s", rule, scopedFilesystem)
+		}
+	}
+}
+
 // TestInjectHermesSkipsPermissions verifies that Hermes returns nil (no file written)
 // because Hermes permission format is undocumented — §14 of spec.
 func TestInjectHermesSkipsPermissions(t *testing.T) {
@@ -357,6 +378,21 @@ func TestInjectCodexWritesGentleDevPermissionsProfile(t *testing.T) {
 		`"~/.local/state/nix/profiles/home-manager/home-path" = "read"`,
 		`"~/.nix-profile" = "read"`,
 		`"/nix/store" = "read"`,
+		`":tmpdir" = "write"`,
+		`":slash_tmp" = "write"`,
+		`glob_scan_max_depth = 6`,
+		`[permissions.gentle-dev.filesystem.":workspace_roots"]`,
+		`"**/.env" = "deny"`,
+		`"**/.env.local" = "deny"`,
+		`"**/.env.*.local" = "deny"`,
+		`"**/*.pem" = "deny"`,
+		`"**/*.key" = "deny"`,
+		`"**/secrets/**" = "deny"`,
+		`"**/.ssh/**" = "deny"`,
+		`"**/.credentials/**" = "deny"`,
+		`"**/credentials.json" = "deny"`,
+		`"**/.aws/credentials" = "deny"`,
+		`"**/.config/gh/hosts.yml" = "deny"`,
 		`[permissions.gentle-dev.workspace_roots]`,
 		`"~" = true`,
 	}
@@ -365,17 +401,28 @@ func TestInjectCodexWritesGentleDevPermissionsProfile(t *testing.T) {
 			t.Fatalf("config.toml missing %q; got:\n%s", want, text)
 		}
 	}
+	rootFilesystem := tomlSection(text, `[permissions.gentle-dev.filesystem]`)
+	if !strings.Contains(rootFilesystem, `glob_scan_max_depth = 6`) {
+		t.Fatalf("root filesystem table missing glob_scan_max_depth; got:\n%s", rootFilesystem)
+	}
+	for _, invalidRootGlob := range []string{`"**/.env" = "deny"`, `"**/*.pem" = "deny"`, `"**/*.key" = "deny"`} {
+		if strings.Contains(rootFilesystem, invalidRootGlob) {
+			t.Fatalf("root filesystem table contains scoped secret deny %q; got:\n%s", invalidRootGlob, rootFilesystem)
+		}
+	}
+	assertCodexWorkspaceWriteRulesScoped(t, text)
+	scopedFilesystem := tomlSection(text, `[permissions.gentle-dev.filesystem.":workspace_roots"]`)
+	if scopedFilesystem == "" {
+		t.Fatalf("config.toml missing workspace-scoped filesystem table; got:\n%s", text)
+	}
+	for _, want := range []string{`"**/.env" = "deny"`, `"**/*.pem" = "deny"`, `"**/*.key" = "deny"`} {
+		if !strings.Contains(scopedFilesystem, want) {
+			t.Fatalf("workspace-scoped filesystem table missing %q; got:\n%s", want, scopedFilesystem)
+		}
+	}
 	for _, invalid := range []string{
-		`glob_scan_max_depth = 6`,
-		`":tmpdir" = "write"`,
-		`":slash_tmp" = "write"`,
-		`[permissions.gentle-dev.filesystem.":workspace_roots"]`,
-		`"." = "write"`,
-		`".git/**" = "write"`,
 		`"**/.git" = "write"`,
 		`"**/.git/**" = "write"`,
-		`"**/.env" = "deny"`,
-		`"**/*.pem" = "deny"`,
 	} {
 		if strings.Contains(text, invalid) {
 			t.Fatalf("config.toml contains invalid Codex permission entry %q; got:\n%s", invalid, text)
@@ -501,6 +548,7 @@ args = ["mcp", "--tools=agent"]
 	for _, section := range []string{
 		"[permissions.gentle-dev]",
 		"[permissions.gentle-dev.filesystem]",
+		`[permissions.gentle-dev.filesystem.":workspace_roots"]`,
 		"[permissions.gentle-dev.network]",
 		"[permissions.gentle-dev.network.domains]",
 		"[permissions.gentle-dev.workspace_roots]",
@@ -509,21 +557,32 @@ args = ["mcp", "--tools=agent"]
 			t.Fatalf("section %q count = %d, want 1; got:\n%s", section, count, text)
 		}
 	}
-	for _, invalid := range []string{`glob_scan_max_depth = 6`, `":tmpdir" = "write"`, `":slash_tmp" = "write"`, `[permissions.gentle-dev.filesystem.":workspace_roots"]`} {
-		if strings.Contains(text, invalid) {
-			t.Fatalf("config.toml should remove stale invalid entry %q; got:\n%s", invalid, text)
+	rootFilesystem := tomlSection(text, `[permissions.gentle-dev.filesystem]`)
+	for _, invalid := range []string{`"**/*.key" = "deny"`, `"**/*.pem" = "deny"`} {
+		if strings.Contains(rootFilesystem, invalid) {
+			t.Fatalf("root filesystem table should not contain invalid/stale entry %q; got:\n%s", invalid, rootFilesystem)
 		}
 	}
+	for _, want := range []string{`":tmpdir" = "write"`, `":slash_tmp" = "write"`} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("config.toml missing compatible Codex permission entry %q; got:\n%s", want, text)
+		}
+	}
+	assertCodexWorkspaceWriteRulesScoped(t, text)
 }
 
-func TestInjectCodexPermissionsRemovesInvalidWorkspaceRootsTable(t *testing.T) {
+func TestInjectCodexPermissionsRelocatesSecretDeniesToWorkspaceRootsTable(t *testing.T) {
 	home := t.TempDir()
 	configPath := filepath.Join(home, ".codex", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}
 
-	initial := `[permissions.gentle-dev.filesystem.":workspace_roots"]
+	initial := `[permissions.gentle-dev.filesystem]
+"**/*.key" = "deny"
+"**/*.pem" = "deny"
+
+[permissions.gentle-dev.filesystem.":workspace_roots"]
 "**/.git" = "write"
 "**/.git/**" = "write"
 "**/.env" = "deny"
@@ -547,16 +606,25 @@ func TestInjectCodexPermissionsRemovesInvalidWorkspaceRootsTable(t *testing.T) {
 	}
 	text := string(content)
 
-	for _, invalid := range []string{
-		`[permissions.gentle-dev.filesystem.":workspace_roots"]`,
-		`"**/.git" = "write"`,
-		`"**/.git/**" = "write"`,
-		`"**/.env" = "deny"`,
-		`"**/*.pem" = "deny"`,
-		`"**/*.key" = "deny"`,
-	} {
+	rootFilesystem := tomlSection(text, `[permissions.gentle-dev.filesystem]`)
+	for _, invalid := range []string{`"**/*.key" = "deny"`, `"**/*.pem" = "deny"`} {
+		if strings.Contains(rootFilesystem, invalid) {
+			t.Fatalf("root filesystem table still contains stale secret deny %q; got:\n%s", invalid, rootFilesystem)
+		}
+	}
+
+	scopedFilesystem := tomlSection(text, `[permissions.gentle-dev.filesystem.":workspace_roots"]`)
+	if scopedFilesystem == "" {
+		t.Fatalf("config.toml should keep workspace-scoped table for secret denies; got:\n%s", text)
+	}
+	for _, want := range []string{`"**/.env" = "deny"`, `"**/*.key" = "deny"`, `"**/*.pem" = "deny"`} {
+		if !strings.Contains(scopedFilesystem, want) {
+			t.Fatalf("workspace-scoped table missing relocated secret deny %q; got:\n%s", want, scopedFilesystem)
+		}
+	}
+	for _, invalid := range []string{`"**/.git" = "write"`, `"**/.git/**" = "write"`} {
 		if strings.Contains(text, invalid) {
-			t.Fatalf("config.toml still contains invalid workspace_roots entry %q; got:\n%s", invalid, text)
+			t.Fatalf("config.toml still contains invalid git write rule %q; got:\n%s", invalid, text)
 		}
 	}
 }
@@ -590,12 +658,8 @@ func TestInjectCodexPermissionsRemovesObsoleteWorkspaceRootDenyRules(t *testing.
 	text := string(content)
 
 	for _, obsolete := range []string{
-		`[permissions.gentle-dev.filesystem.":workspace_roots"]`,
 		`"**/.env.*" = "deny"`,
 		`"*.env.*" = "deny"`,
-		`"**/.env" = "deny"`,
-		`"**/.env.local" = "deny"`,
-		`"**/.env.*.local" = "deny"`,
 	} {
 		if strings.Contains(text, obsolete) {
 			t.Fatalf("config.toml still contains obsolete workspace root deny entry %q; got:\n%s", obsolete, text)

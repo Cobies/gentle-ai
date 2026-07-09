@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"runtime"
-	"strings"
 
 	"github.com/gentleman-programming/gentle-ai/internal/agents"
 	"github.com/gentleman-programming/gentle-ai/internal/components/filemerge"
@@ -191,12 +190,27 @@ func injectCodexPermissions(homeDir string, adapter agents.Adapter) (InjectionRe
 	merged = filemerge.UpsertTOMLTableKey(merged, "permissions.gentle-dev.network.domains", `"*"`, `"allow"`)
 
 	merged = filemerge.RemoveTOMLTableKeys(merged, `permissions.gentle-dev.filesystem.":root"`, []string{`"."`})
-	merged = filemerge.RemoveTOMLTableKeys(merged, "permissions.gentle-dev.filesystem", []string{
-		"glob_scan_max_depth",
-		`":tmpdir"`,
-		`":slash_tmp"`,
+	secretDenyPaths := []string{
+		`"**/.env"`,
+		`"**/.env.local"`,
+		`"**/.env.*.local"`,
+		`"**/*.pem"`,
+		`"**/*.key"`,
+		`"**/secrets/**"`,
+		`"**/.ssh/**"`,
+		`"**/.credentials/**"`,
+		`"**/credentials.json"`,
+		`"**/.aws/credentials"`,
+		`"**/.config/gh/hosts.yml"`,
+	}
+	merged = filemerge.RemoveTOMLTableKeys(merged, "permissions.gentle-dev.filesystem", secretDenyPaths)
+	merged = filemerge.RemoveTOMLTableKeys(merged, `permissions.gentle-dev.filesystem.":workspace_roots"`, []string{
+		`"**/.git"`,
+		`"**/.git/**"`,
+		`"**/.env.*"`,
+		`"*.env.*"`,
+		`"**/secrets/*"`,
 	})
-	merged = removeTOMLTable(merged, `permissions.gentle-dev.filesystem.":workspace_roots"`)
 
 	readPaths := []string{
 		`":minimal"`,
@@ -211,6 +225,16 @@ func injectCodexPermissions(homeDir string, adapter agents.Adapter) (InjectionRe
 	for _, path := range readPaths {
 		merged = filemerge.UpsertTOMLTableKey(merged, "permissions.gentle-dev.filesystem", path, `"read"`)
 	}
+	for _, path := range []string{`":tmpdir"`, `":slash_tmp"`} {
+		merged = filemerge.UpsertTOMLTableKey(merged, "permissions.gentle-dev.filesystem", path, `"write"`)
+	}
+	merged = filemerge.UpsertTOMLTableKey(merged, "permissions.gentle-dev.filesystem", "glob_scan_max_depth", "6")
+	for _, path := range []string{`"."`, `".git/**"`} {
+		merged = filemerge.UpsertTOMLTableKey(merged, `permissions.gentle-dev.filesystem.":workspace_roots"`, path, `"write"`)
+	}
+	for _, path := range secretDenyPaths {
+		merged = filemerge.UpsertTOMLTableKey(merged, `permissions.gentle-dev.filesystem.":workspace_roots"`, path, `"deny"`)
+	}
 
 	merged = filemerge.UpsertTOMLTableKey(merged, "permissions.gentle-dev.workspace_roots", `"~"`, "true")
 
@@ -220,32 +244,6 @@ func injectCodexPermissions(homeDir string, adapter agents.Adapter) (InjectionRe
 	}
 
 	return InjectionResult{Changed: writeResult.Changed, Files: []string{configPath}}, nil
-}
-
-func removeTOMLTable(content, section string) string {
-	content = strings.ReplaceAll(content, "\r\n", "\n")
-	header := "[" + section + "]"
-	lines := strings.Split(content, "\n")
-	out := make([]string, 0, len(lines))
-	inSection := false
-
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == header {
-			inSection = true
-			continue
-		}
-		if inSection {
-			if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
-				inSection = false
-			} else {
-				continue
-			}
-		}
-		out = append(out, line)
-	}
-
-	return strings.TrimSpace(strings.Join(out, "\n")) + "\n"
 }
 
 func mergeJSONFile(path string, overlay []byte) (filemerge.WriteResult, error) {

@@ -82,12 +82,14 @@ var (
 	// testability — tests replace this to avoid depending on a real
 	// installed engram binary. Overridden to a safe fake for the whole
 	// package's test run (see TestMain in protocol_probe_test.go).
-	verifyEngramVersion = engram.VerifyVersion
+	verifyEngramVersion        = engram.VerifyVersion
+	verifyEngramVersionCommand = engram.VerifyVersionCommand
 
 	// probeEngramProtocolFlag detects whether the installed engram binary
 	// supports the --protocol verbosity flag (design.md Decision 4).
 	// Package-level var for testability — same rationale as verifyEngramVersion.
-	probeEngramProtocolFlag = engram.ProbeProtocolFlag
+	probeEngramProtocolFlag        = engram.ProbeProtocolFlag
+	probeEngramProtocolFlagCommand = engram.ProbeProtocolFlagCommand
 
 	// AppVersion is the gentle-ai version that will be written into backup manifests.
 	// It is set by app.go before any CLI operation so that every backup created during
@@ -174,7 +176,14 @@ func RunInstall(args []string, detection system.DetectionResult) (InstallResult,
 		return result, fmt.Errorf("execute install pipeline: %w", result.Execution.Err)
 	}
 
-	result.Verify = runPostApplyVerification(homeDir, runtime.workspaceDir, input.Scope, input.Selection, resolved, runtime.state)
+	result.Verify = runPostApplyVerification(postApplyVerificationInput{
+		HomeDir:      homeDir,
+		WorkspaceDir: runtime.workspaceDir,
+		Scope:        input.Scope,
+		Selection:    input.Selection,
+		Resolved:     resolved,
+		State:        runtime.state,
+	})
 	result.Verify = withPostInstallNotes(result.Verify, resolved)
 	if !result.Verify.Ready {
 		return result, fmt.Errorf("post-apply verification failed:\n%s", verify.RenderReport(result.Verify))
@@ -828,6 +837,20 @@ func engramBinaryDirsOnPath(pathEntries []string, goos string) []string {
 	return dirs
 }
 
+func resolveEngramVersion(command string) (string, error) {
+	if strings.TrimSpace(command) == "" || command == "engram" {
+		return verifyEngramVersion()
+	}
+	return verifyEngramVersionCommand(command)
+}
+
+func resolveEngramProtocolFlag(ctx context.Context, command string) (string, error) {
+	if strings.TrimSpace(command) == "" || command == "engram" {
+		return probeEngramProtocolFlag(ctx)
+	}
+	return probeEngramProtocolFlagCommand(ctx, command)
+}
+
 func splitPathForOS(value, goos string) []string {
 	separator := string(os.PathListSeparator)
 	if goos == "windows" {
@@ -877,6 +900,7 @@ func (s componentApplyStep) Run() error {
 					// Non-fatal: warn but continue — the binary was downloaded successfully.
 					fmt.Fprintf(os.Stderr, "WARNING: could not add %s to PATH: %v\n", binDir, err)
 				}
+				engramCommand = binaryPath
 			}
 		} else if shouldRefreshWindowsEngram(s.profile, installedPath, pathEnvEntries(s.profile)) {
 			binaryPath, err := engramDownloadFn(s.profile)
@@ -902,7 +926,7 @@ func (s componentApplyStep) Run() error {
 		// verdict for every adapter. The result (including the error) is cached
 		// on s.state so the post-apply health check reuses it instead of
 		// shelling out to `engram version` a second time (JD-016).
-		engramVersion, versionErr := verifyEngramVersion()
+		engramVersion, versionErr := resolveEngramVersion(engramCommand)
 		if s.state != nil {
 			s.state.engramVersionResolved = true
 			s.state.engramVersion = engramVersion
@@ -925,7 +949,7 @@ func (s componentApplyStep) Run() error {
 		}
 		protocolFlagSupported := false
 		if willAttemptSetup {
-			if stdout, err := probeEngramProtocolFlag(context.Background()); err == nil {
+			if stdout, err := resolveEngramProtocolFlag(context.Background(), engramCommand); err == nil {
 				protocolFlagSupported = strings.Contains(stdout, "--protocol")
 			}
 		}
@@ -1594,14 +1618,23 @@ func openCodeSDDPluginPaths(targetDir string) []string {
 	}
 }
 
-func runPostApplyVerification(homeDir, workspaceDir string, scope InstallScope, selection model.Selection, resolved planner.ResolvedPlan, state *runtimeState) verify.Report {
+type postApplyVerificationInput struct {
+	HomeDir      string
+	WorkspaceDir string
+	Scope        InstallScope
+	Selection    model.Selection
+	Resolved     planner.ResolvedPlan
+	State        *runtimeState
+}
+
+func runPostApplyVerification(input postApplyVerificationInput) verify.Report {
 	checks := make([]verify.Check, 0)
-	adapters := resolveAdapters(resolved.Agents)
+	adapters := resolveAdapters(input.Resolved.Agents)
 
 	seenPath := make(map[string]struct{})
 	var uniqueFilePaths []string
-	for _, component := range resolved.OrderedComponents {
-		for _, path := range componentPathsWithWorkspaceScoped(homeDir, workspaceDir, scope, selection, adapters, component) {
+	for _, component := range input.Resolved.OrderedComponents {
+		for _, path := range componentPathsWithWorkspaceScoped(input.HomeDir, input.WorkspaceDir, input.Scope, input.Selection, adapters, component) {
 			if path == "" {
 				continue
 			}
@@ -1643,10 +1676,10 @@ func runPostApplyVerification(homeDir, workspaceDir string, scope InstallScope, 
 		})
 	}
 
-	if hasComponent(resolved.OrderedComponents, model.ComponentEngram) {
-		checks = append(checks, engramHealthChecks(state)...)
+	if hasComponent(input.Resolved.OrderedComponents, model.ComponentEngram) {
+		checks = append(checks, engramHealthChecks(input.State)...)
 	}
-	checks = append(checks, antigravityCollisionCheck(resolved.Agents)...)
+	checks = append(checks, antigravityCollisionCheck(input.Resolved.Agents)...)
 
 	return verify.BuildReport(verify.RunChecks(context.Background(), checks))
 }
