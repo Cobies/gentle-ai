@@ -387,7 +387,7 @@ This prevents duplicate dynamic subagent invocations that cause "File X has been
 Skill resolution is orchestrator-owned before each dynamic phase invocation. Do this ONCE per session (or after compaction):
 
 1. `mem_search(query: "skill-registry", project: "{project}")` → `mem_get_observation(id)` for full registry content
-2. Fallback: read `.atl/skill-registry.md` if engram not available
+2. Fallback: read `.atl/skill-registry.md` if the engram search returns empty or if engram is not available
 3. Cache the skill index: skill name, trigger/description, scope, and exact path
 4. If no registry exists, warn user and proceed without project-specific standards
 
