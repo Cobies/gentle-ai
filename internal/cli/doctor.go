@@ -78,6 +78,7 @@ func RunDoctor(ctx context.Context, w io.Writer) error {
 	report.Checks = append(report.Checks, checkStateJSON(homeDir))
 	report.Checks = append(report.Checks, checkEngramReachable())
 	report.Checks = append(report.Checks, checkDiskSpace(homeDir))
+	report.Checks = append(report.Checks, checkAntigravityDynamicSubagentRuntime(homeDir)...)
 
 	renderDoctorReport(w, report)
 	return nil
