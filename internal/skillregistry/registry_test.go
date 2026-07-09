@@ -186,6 +186,8 @@ func TestUserSkillDirsIncludesSupportedAgentSkillLocations(t *testing.T) {
 		filepath.Join(home, ".config", "kilo", "skills"),
 		filepath.Join(home, ".claude", "skills"),
 		filepath.Join(home, ".gemini", "skills"),
+		filepath.Join(home, ".gemini", "antigravity-cli", "skills"),
+		filepath.Join(home, ".gemini", "antigravity-desktop", "skills"),
 		filepath.Join(home, ".gemini", "antigravity", "skills"),
 		filepath.Join(home, ".cursor", "skills"),
 		filepath.Join(home, ".copilot", "skills"),
@@ -202,6 +204,74 @@ func TestUserSkillDirsIncludesSupportedAgentSkillLocations(t *testing.T) {
 	} {
 		if !containsPath(dirs, want) {
 			t.Fatalf("UserSkillDirs() missing %q in %#v", want, dirs)
+		}
+	}
+}
+
+func TestUserSkillDirsScansAntigravityVariantDirectories(t *testing.T) {
+	home := t.TempDir()
+	cwd := t.TempDir()
+
+	writeSkill := func(t *testing.T, dir string) {
+		t.Helper()
+		path := filepath.Join(dir, "demo", "SKILL.md")
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("---\nname: demo\ndescription: antigravity variant\n---\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// antigravity-cli variant (Mission Control CLI) — must be scanned.
+	writeSkill(t, filepath.Join(home, ".gemini", "antigravity-cli", "skills"))
+	// antigravity-desktop variant (Mission Control desktop) — must be scanned.
+	writeSkill(t, filepath.Join(home, ".gemini", "antigravity-desktop", "skills"))
+	// Legacy bare antigravity dir — must still be scanned additively.
+	writeSkill(t, filepath.Join(home, ".gemini", "antigravity", "skills"))
+
+	entries := List(cwd, home)
+	found := map[string]string{}
+	for _, entry := range entries {
+		found[entry.Name] = entry.Path
+	}
+
+	want := map[string]string{
+		"antigravity-cli":     filepath.Join(home, ".gemini", "antigravity-cli", "skills", "demo", "SKILL.md"),
+		"antigravity-desktop": filepath.Join(home, ".gemini", "antigravity-desktop", "skills", "demo", "SKILL.md"),
+		"antigravity-legacy":  filepath.Join(home, ".gemini", "antigravity", "skills", "demo", "SKILL.md"),
+	}
+
+	// All three are deduped by skill name (`demo`); we only need to prove the
+	// first scan-order winner is one of the supported variant paths. The
+	// dedicated test below verifies the registry path coverage itself.
+	demodPath, ok := found["demo"]
+	if !ok {
+		t.Fatalf("expected at least one `demo` skill entry, got %#v", found)
+	}
+	allowed := []string{want["antigravity-cli"], want["antigravity-desktop"], want["antigravity-legacy"]}
+	matched := false
+	for _, p := range allowed {
+		if demodPath == p {
+			matched = true
+			break
+		}
+	}
+	if !matched {
+		t.Fatalf("demo skill resolved to %q, want one of %v", demodPath, allowed)
+	}
+
+	// Stronger guarantee: every supported Antigravity variant dir is part of
+	// UserSkillDirs. The 1-level scan can only see existing dirs, so we also
+	// assert the function returns the dir even when it does not exist yet.
+	dirs := UserSkillDirs(home)
+	for _, wantDir := range []string{
+		filepath.Join(home, ".gemini", "antigravity-cli", "skills"),
+		filepath.Join(home, ".gemini", "antigravity-desktop", "skills"),
+		filepath.Join(home, ".gemini", "antigravity", "skills"),
+	} {
+		if !containsPath(dirs, wantDir) {
+			t.Fatalf("UserSkillDirs() missing %q in %#v", wantDir, dirs)
 		}
 	}
 }
