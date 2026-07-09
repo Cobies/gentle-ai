@@ -25,6 +25,15 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+func containsString(items []string, want string) bool {
+	for _, item := range items {
+		if item == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestDefinitionsIncludesCodeGraph(t *testing.T) {
 	def, ok := DefinitionFor(model.CommunityToolCodeGraph)
 	if !ok {
@@ -497,6 +506,145 @@ func TestCodeGraphGuidanceInjectPreservesManualNotesInterleavedWithUnmarkedUpstr
 	for _, want := range []string{"custom notes", "Manual note: prefer the MCP tool when it returns exact source.", "Manual note: shell fallback is okay after CodeGraph initialization fails.", "more notes", "<!-- gentle-ai:codegraph-guidance -->", "codegraph init <project-root>"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("updated guidance missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestCodeGraphGuidanceInjectsAntigravityPluginHarness(t *testing.T) {
+	home := t.TempDir()
+	mustWrite(t, filepath.Join(home, ".gemini", "antigravity-cli", "settings.json"), `{}`)
+
+	result, err := InjectCodeGraphGuidanceIfSelected(home, []model.CommunityToolID{model.CommunityToolCodeGraph})
+	if err != nil {
+		t.Fatalf("InjectCodeGraphGuidanceIfSelected() error = %v", err)
+	}
+	if !result.Changed {
+		t.Fatalf("result.Changed = false, want true")
+	}
+
+	pluginDir := filepath.Join(home, ".gemini", "antigravity-cli", "plugins", "gentle-ai-codegraph")
+	for _, path := range []string{
+		filepath.Join(home, ".gemini", "GEMINI.md"),
+		filepath.Join(pluginDir, "plugin.json"),
+		filepath.Join(pluginDir, "mcp_config.json"),
+		filepath.Join(pluginDir, "hooks.json"),
+	} {
+		if !containsString(result.Files, path) {
+			t.Fatalf("result.Files missing %q; files=%v", path, result.Files)
+		}
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("expected %q to exist: %v", path, err)
+		}
+	}
+
+	mcpBody, err := os.ReadFile(filepath.Join(pluginDir, "mcp_config.json"))
+	if err != nil {
+		t.Fatalf("ReadFile(mcp_config.json) error = %v", err)
+	}
+	for _, want := range []string{`"mcpServers"`, `"codegraph"`, `"command": "codegraph"`, `"serve"`, `"--mcp"`} {
+		if !strings.Contains(string(mcpBody), want) {
+			t.Fatalf("Antigravity CodeGraph MCP config missing %s:\n%s", want, mcpBody)
+		}
+	}
+
+	hooksBody, err := os.ReadFile(filepath.Join(pluginDir, "hooks.json"))
+	if err != nil {
+		t.Fatalf("ReadFile(hooks.json) error = %v", err)
+	}
+	for _, want := range []string{`"PreInvocation"`, "CodeGraph harness", "codegraph init", "codegraph sync", "project-root", "codegraph_explore"} {
+		if !strings.Contains(string(hooksBody), want) {
+			t.Fatalf("Antigravity CodeGraph hooks missing %q:\n%s", want, hooksBody)
+		}
+	}
+}
+
+func TestCodeGraphStatusDoesNotBlockOnAntigravityDesktopOnly(t *testing.T) {
+	home := t.TempDir()
+	mustWrite(t, filepath.Join(home, ".gemini", "antigravity-desktop", "settings.json"), `{}`)
+
+	status := DetectStatus(model.CommunityToolCodeGraph, home, DetectorFunc(func(name string) (string, error) {
+		if name == "codegraph" {
+			return "/bin/codegraph", nil
+		}
+		return "", errors.New("not found")
+	}))
+	for _, agent := range status.Agents {
+		if agent.Agent != model.AgentAntigravity {
+			continue
+		}
+		if agent.Detected {
+			t.Fatalf("desktop-only Antigravity must not block CodeGraph install validation as a detected CLI-supported surface: %#v", agent)
+		}
+		if !strings.Contains(agent.Reason, "Antigravity CLI plugin surface") {
+			t.Fatalf("desktop-only Antigravity reason should explain CLI plugin scope; got %q", agent.Reason)
+		}
+	}
+}
+
+func TestCodeGraphGuidanceSkipsAntigravityPluginForDesktopOnly(t *testing.T) {
+	home := t.TempDir()
+	mustWrite(t, filepath.Join(home, ".gemini", "antigravity-desktop", "settings.json"), `{}`)
+
+	result, err := InjectCodeGraphGuidanceIfSelected(home, []model.CommunityToolID{model.CommunityToolCodeGraph})
+	if err != nil {
+		t.Fatalf("InjectCodeGraphGuidanceIfSelected() error = %v", err)
+	}
+	pluginPath := filepath.Join(home, ".gemini", "antigravity-cli", "plugins", "gentle-ai-codegraph", "plugin.json")
+	if _, err := os.Stat(pluginPath); !os.IsNotExist(err) {
+		t.Fatalf("desktop-only Antigravity must not be reported/configured through the CLI plugin surface; stat err = %v", err)
+	}
+	for _, file := range result.Files {
+		if strings.Contains(file, filepath.Join("antigravity-cli", "plugins", "gentle-ai-codegraph")) {
+			t.Fatalf("desktop-only Antigravity result must not include CLI plugin file %q; files=%v", file, result.Files)
+		}
+	}
+}
+
+func TestCodeGraphConfiguredDetectsAntigravityCodeGraphPlugin(t *testing.T) {
+	home := t.TempDir()
+	mustWrite(t, filepath.Join(home, ".gemini", "antigravity-cli", "settings.json"), `{}`)
+	mustWrite(t, filepath.Join(home, ".gemini", "antigravity-cli", "plugins", "gentle-ai-codegraph", "mcp_config.json"), string(antigravityCodeGraphMCPJSON()))
+
+	configured := HasConfiguredCodeGraph(home, DetectorFunc(func(name string) (string, error) {
+		if name == "codegraph" {
+			return "/bin/codegraph", nil
+		}
+		return "", errors.New("not found")
+	}))
+	if !configured {
+		t.Fatal("HasConfiguredCodeGraph() = false, want true for Antigravity CodeGraph plugin MCP config")
+	}
+}
+
+func TestCodeGraphGuidanceAntigravityPluginMergePreservesExistingConfig(t *testing.T) {
+	home := t.TempDir()
+	pluginDir := filepath.Join(home, ".gemini", "antigravity-cli", "plugins", "gentle-ai-codegraph")
+	mustWrite(t, filepath.Join(home, ".gemini", "antigravity-cli", "settings.json"), `{}`)
+	mustWrite(t, filepath.Join(pluginDir, "mcp_config.json"), `{"mcpServers":{"custom":{"command":"custom-tool"}}}`)
+	mustWrite(t, filepath.Join(pluginDir, "hooks.json"), `{"custom-hook":{"PreInvocation":[{"type":"command","command":"echo custom"}]}}`)
+
+	_, err := InjectCodeGraphGuidanceIfSelected(home, []model.CommunityToolID{model.CommunityToolCodeGraph})
+	if err != nil {
+		t.Fatalf("InjectCodeGraphGuidanceIfSelected() error = %v", err)
+	}
+
+	mcpBody, err := os.ReadFile(filepath.Join(pluginDir, "mcp_config.json"))
+	if err != nil {
+		t.Fatalf("ReadFile(mcp_config.json) error = %v", err)
+	}
+	for _, want := range []string{`"custom"`, `"custom-tool"`, `"codegraph"`} {
+		if !strings.Contains(string(mcpBody), want) {
+			t.Fatalf("merged MCP config missing %s:\n%s", want, mcpBody)
+		}
+	}
+
+	hooksBody, err := os.ReadFile(filepath.Join(pluginDir, "hooks.json"))
+	if err != nil {
+		t.Fatalf("ReadFile(hooks.json) error = %v", err)
+	}
+	for _, want := range []string{`"custom-hook"`, "echo custom", `"gentle-ai-codegraph-first"`, "CodeGraph harness"} {
+		if !strings.Contains(string(hooksBody), want) {
+			t.Fatalf("merged hooks config missing %q:\n%s", want, hooksBody)
 		}
 	}
 }

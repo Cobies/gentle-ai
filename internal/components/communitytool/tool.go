@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -264,6 +265,13 @@ func detectCodeGraphAgents(homeDir string) []AgentStatus {
 			Status:   AgentStatusUnavailable,
 			Reason:   "agent config directory was not detected",
 		}
+		if detected && id == model.AgentAntigravity && !hasAntigravityCLIConfigDir(homeDir) {
+			state.Detected = false
+			state.Status = AgentStatusUnavailable
+			state.Reason = "detected Antigravity desktop/legacy surface, but CodeGraph automation is only installed for the Antigravity CLI plugin surface"
+			result = append(result, state)
+			continue
+		}
 		if detected {
 			configured, markerPath, reason := hasCodeGraphWiring(homeDir, adapter)
 			state.Configured = configured
@@ -313,6 +321,9 @@ func isCodeGraphSupportedAgent(id model.AgentID) bool {
 
 func hasCodeGraphWiring(homeDir string, adapter agents.Adapter) (bool, string, string) {
 	guidancePath := codeGraphGuidancePath(homeDir, adapter)
+	if adapter.Agent() == model.AgentAntigravity && !hasAntigravityCLIConfigDir(homeDir) {
+		return false, adapter.GlobalConfigDir(homeDir), "detected Antigravity desktop/legacy surface but no Antigravity CLI plugin surface was found for CodeGraph"
+	}
 	if adapter.Agent() == model.AgentPi {
 		if hasCodeGraphGuidance(guidancePath) {
 			return true, guidancePath, "found CodeGraph guidance marker"
@@ -353,6 +364,9 @@ func hasCodeGraphToolWiring(homeDir string, adapter agents.Adapter) (string, boo
 	paths := []string{
 		adapter.MCPConfigPath(homeDir, "codegraph"),
 		adapter.SettingsPath(homeDir),
+	}
+	if adapter.Agent() == model.AgentAntigravity {
+		paths = append(paths, filepath.Join(homeDir, ".gemini", "antigravity-cli", "plugins", "gentle-ai-codegraph", "mcp_config.json"))
 	}
 	seen := map[string]struct{}{}
 	for _, path := range paths {

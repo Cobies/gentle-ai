@@ -1,6 +1,7 @@
 package communitytool
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -40,7 +41,7 @@ func CodeGraphGuidanceMarkdown() string {
 		"1. Resolve the project root with `git rev-parse --show-toplevel || pwd`.",
 		"2. Confirm the root is a real project/workspace. Do not ask the user before initializing CodeGraph in a real project. Do not initialize CodeGraph in `$HOME`, temporary directories, or non-project folders.",
 		"3. Check for `<project-root>/.codegraph/` before any broad Read/Glob/Grep filesystem exploration.",
-		"4. If `.codegraph/` is missing and CodeGraph is enabled/available, immediately run `codegraph init <project-root>` once, then use the `codegraph_explore` MCP tool or `codegraph explore \"...\"`.",
+		"4. If `.codegraph/` is missing and CodeGraph is enabled/available, immediately run `codegraph init <project-root>` once. If `.codegraph/` is already present, run `codegraph sync <project-root>` once at the start of the task/session to ensure the index is up-to-date, then use the `codegraph_explore` MCP tool or `codegraph explore \"...\"`.",
 		"5. Missing .codegraph/ is the trigger to initialize, not a reason to skip CodeGraph. Do not fall back just because `.codegraph/` is missing; a missing index is the trigger to lazy-initialize, not a reason to skip CodeGraph.",
 		"6. Only fall back after CodeGraph init or CodeGraph use fails. Only fall back to normal filesystem tools after CodeGraph init or CodeGraph use fails, and briefly explain the fallback.",
 		"",
@@ -143,6 +144,9 @@ func InjectCodeGraphGuidance(homeDir string) (GuidanceInjectionResult, error) {
 	hasAntigravity := false
 	for _, installedAgent := range installed {
 		if installedAgent.ID == model.AgentAntigravity {
+			if !hasAntigravityCLIConfigDir(homeDir) {
+				continue
+			}
 			hasAntigravity = true
 		}
 		adapter, ok := reg.Get(installedAgent.ID)
@@ -161,47 +165,29 @@ func InjectCodeGraphGuidance(homeDir string) (GuidanceInjectionResult, error) {
 		result.Files = append(result.Files, file)
 	}
 
-	if hasAntigravity {
-		mcpChanged, mcpErr := injectCodeGraphMCPForAntigravity(homeDir)
-		if mcpErr != nil {
-			return result, mcpErr
+	if hasAntigravity && hasAntigravityCLIConfigDir(homeDir) {
+		pluginChanged, pluginFiles, pluginErr := installAntigravityCodeGraphPlugin(homeDir)
+		if pluginErr != nil {
+			return result, pluginErr
 		}
-		if mcpChanged {
-			result.Changed = true
-			adapter, ok := reg.Get(model.AgentAntigravity)
-			if ok {
-				result.Files = append(result.Files, adapter.MCPConfigPath(homeDir, "codegraph"))
-			}
-		}
+		result.Changed = result.Changed || pluginChanged
+		result.Files = append(result.Files, pluginFiles...)
 	}
 
 	return result, nil
 }
 
-func injectCodeGraphMCPForAntigravity(homeDir string) (bool, error) {
-	reg, err := agents.NewDefaultRegistry()
-	if err != nil {
-		return false, err
-	}
-	adapter, ok := reg.Get(model.AgentAntigravity)
-	if !ok {
-		return false, nil
-	}
+const antigravityCodeGraphPluginJSON = `{
+  "name": "gentle-ai-codegraph",
+  "description": "Loads CodeGraph MCP and CodeGraph-first investigation hooks for Antigravity CLI.",
+  "version": "0.1.0"
+}
+`
 
-	mcpPath := adapter.MCPConfigPath(homeDir, "codegraph")
-	if mcpPath == "" {
-		return false, nil
-	}
+const antigravityCodeGraphHookMessage = "CodeGraph harness: For structural/codebase investigation, first resolve the project root with `git rev-parse --show-toplevel || pwd`; never initialize CodeGraph in $HOME, temp, or non-project folders; run `codegraph init <project-root>` if `.codegraph/` is missing, or `codegraph sync <project-root>` once when it exists; then use the `codegraph_explore` MCP tool or `codegraph explore` before broad grep/list/find/read sweeps. Fall back only after CodeGraph init/explore fails and report the fallback."
 
-	var baseJSON []byte
-	raw, err := os.ReadFile(mcpPath)
-	if err == nil {
-		baseJSON = raw
-	} else if !os.IsNotExist(err) {
-		return false, fmt.Errorf("read Antigravity MCP config %q: %w", mcpPath, err)
-	}
-
-	overlay := []byte(`{
+func antigravityCodeGraphMCPJSON() []byte {
+	return []byte(`{
   "mcpServers": {
     "codegraph": {
       "command": "codegraph",
@@ -211,19 +197,89 @@ func injectCodeGraphMCPForAntigravity(homeDir string) (bool, error) {
       ]
     }
   }
-}`)
+}
+`)
+}
+
+func antigravityCodeGraphHooksJSON() []byte {
+	cfg := map[string]any{
+		"gentle-ai-codegraph-first": map[string]any{
+			"PreInvocation": []any{
+				map[string]any{
+					"type": "command",
+					"command": "printf '%s\\n' '" + mustJSONString(map[string]any{
+						"injectSteps": []any{
+							map[string]any{"ephemeralMessage": antigravityCodeGraphHookMessage},
+						},
+					}) + "'",
+				},
+			},
+		},
+	}
+	b, _ := json.MarshalIndent(cfg, "", "  ")
+	return append(b, '\n')
+}
+
+func mustJSONString(v any) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
+}
+
+func hasAntigravityCLIConfigDir(homeDir string) bool {
+	info, err := os.Stat(filepath.Join(homeDir, ".gemini", "antigravity-cli"))
+	return err == nil && info.IsDir()
+}
+
+func installAntigravityCodeGraphPlugin(homeDir string) (bool, []string, error) {
+	pluginDir := filepath.Join(homeDir, ".gemini", "antigravity-cli", "plugins", "gentle-ai-codegraph")
+	files := make([]string, 0, 3)
+	changed := false
+
+	pluginPath := filepath.Join(pluginDir, "plugin.json")
+	pluginWrite, err := filemerge.WriteFileAtomic(pluginPath, []byte(antigravityCodeGraphPluginJSON), 0o644)
+	if err != nil {
+		return false, nil, fmt.Errorf("write Antigravity CodeGraph plugin manifest: %w", err)
+	}
+	changed = changed || pluginWrite.Changed
+	files = append(files, pluginPath)
+
+	pluginMCPPath := filepath.Join(pluginDir, "mcp_config.json")
+	mcpWrite, err := mergeJSONFile(pluginMCPPath, antigravityCodeGraphMCPJSON())
+	if err != nil {
+		return false, nil, fmt.Errorf("write Antigravity CodeGraph plugin MCP config: %w", err)
+	}
+	changed = changed || mcpWrite.Changed
+	files = append(files, pluginMCPPath)
+
+	hooksPath := filepath.Join(pluginDir, "hooks.json")
+	hooksWrite, err := mergeJSONFile(hooksPath, antigravityCodeGraphHooksJSON())
+	if err != nil {
+		return false, nil, fmt.Errorf("write Antigravity CodeGraph hooks: %w", err)
+	}
+	changed = changed || hooksWrite.Changed
+	files = append(files, hooksPath)
+
+	return changed, files, nil
+}
+
+func mergeJSONFile(path string, overlay []byte) (filemerge.WriteResult, error) {
+	var baseJSON []byte
+	raw, err := os.ReadFile(path)
+	if err == nil {
+		baseJSON = raw
+	} else if !os.IsNotExist(err) {
+		return filemerge.WriteResult{}, err
+	}
 
 	merged, err := filemerge.MergeJSONObjects(baseJSON, overlay)
 	if err != nil {
-		return false, fmt.Errorf("merge Antigravity CodeGraph MCP config: %w", err)
+		return filemerge.WriteResult{}, err
 	}
 
-	writeResult, err := filemerge.WriteFileAtomic(mcpPath, merged, 0o644)
-	if err != nil {
-		return false, fmt.Errorf("write Antigravity MCP config %q: %w", mcpPath, err)
-	}
-
-	return writeResult.Changed, nil
+	return filemerge.WriteFileAtomic(path, merged, 0o644)
 }
 
 // CodeGraphGuidancePaths returns the system prompt files that the CodeGraph
