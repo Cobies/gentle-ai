@@ -151,8 +151,8 @@ When answering structural or codebase questions, use CodeGraph before broad file
 1. Resolve the project root with `git rev-parse --show-toplevel || pwd`.
 2. Confirm the root is a real project/workspace. Do not initialize CodeGraph in `$HOME`, temporary directories, or non-project folders.
 3. Check for `<project-root>/.codegraph/` before broad Read/Glob/Grep exploration.
-4. If `.codegraph/` is missing and the `codegraph` CLI is available, run `codegraph init <project-root>` once.
-5. Use `codegraph explore "..."` before broad `grep`, `find`, or multi-file read sweeps.
+4. If `.codegraph/` is missing and the `codegraph` CLI is available, run `codegraph init <project-root>` once. If `.codegraph/` is already present, run `codegraph sync <project-root>` once at the start of the task/session to ensure the index is up-to-date.
+5. Use `codegraph explore "..."` or the `codegraph_explore` MCP tool before broad `grep`, `find`, or multi-file read sweeps.
 6. Fall back to normal filesystem tools only after CodeGraph initialization or exploration fails, and briefly report that fallback.
 
 ### Antigravity Context Injection Before Forking (MANDATORY)

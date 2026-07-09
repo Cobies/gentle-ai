@@ -741,6 +741,25 @@ func Inject(homeDir string, adapter agents.Adapter, sddMode model.SDDModeID, opt
 	changed = changed || automationResult.Changed
 	files = append(files, automationResult.Files...)
 
+	// 4b. Install the Antigravity SDD-agents hardening plugin. This is the
+	// Antigravity equivalent of the OpenCode `permission.task` overlay: the
+	// gentle-ai-sdd-agents plugin/hooks.json injects a deterministic tool
+	// hardening contract so dynamic define_subagent calls that try to widen
+	// their scope above the role's allowed list fail closed. Antigravity has
+	// no static agent registry, so the policy is bound as a runtime
+	// instruction; OpenCode's sdd-overlay-*.json is unaffected. Other agents
+	// (OpenCode, Kilocode, Codex, Claude, Gemini, etc.) are completely
+	// unaffected by this step — it only writes to the antigravity-cli plugin
+	// directory.
+	if adapter.Agent() == model.AgentAntigravity {
+		sddAgentsChanged, sddAgentsFiles, sddAgentsErr := installAntigravitySddAgentsPlugin(homeDir)
+		if sddAgentsErr != nil {
+			return InjectionResult{}, sddAgentsErr
+		}
+		changed = changed || sddAgentsChanged
+		files = append(files, sddAgentsFiles...)
+	}
+
 	// 5. Post-injection verification — catch silent failures.
 	// Primary: validate against the in-memory merged bytes to avoid false
 	// negatives on Windows/WSL2 where a freshly-renamed file may not be

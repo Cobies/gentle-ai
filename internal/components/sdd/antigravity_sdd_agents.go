@@ -1,0 +1,260 @@
+package sdd
+
+import (
+	"encoding/json"
+	"fmt"
+	"path/filepath"
+	"sort"
+	"strings"
+
+	"github.com/gentleman-programming/gentle-ai/internal/components/filemerge"
+)
+
+// Antigravity has no static sub-agent registry with `permission.task` blocks
+// like OpenCode. Sub-agents are defined dynamically at runtime via
+// `define_subagent` / `invoke_subagent`. That means we cannot install a static
+// "deny all sub-agents except sdd-*/review-*/jd-*" policy the way OpenCode's
+// `sdd-overlay-multi.json` does.
+//
+// The safest supported Antigravity equivalent is a thin plugin whose only
+// job is to inject a deterministic Tool Hardening contract into the
+// orchestrator's context. The contract is identical in spirit to the
+// OpenCode `permission.task.__replace__` overlay: define_subagent calls that
+// try to step outside the role's allowed tool scope must fail closed.
+//
+// Files written by this installer:
+//
+//	~/.gemini/antigravity-cli/plugins/gentle-ai-sdd-agents/plugin.json  // plugin manifest
+//	~/.gemini/antigravity-cli/plugins/gentle-ai-sdd-agents/hooks.json   // PreInvocation inject
+//
+// The plugin lives under the antigravity-cli surface only, matching the
+// existing gentle-ai-engram / gentle-ai-codegraph plugin layout. The
+// antigravity-desktop variant does not consume plugin/hooks.json today;
+// gentle-ai-install for the desktop surface will not write this plugin to
+// keep behavior aligned with the supported runtime surface.
+
+const antigravitySddAgentsPluginName = "gentle-ai-sdd-agents"
+
+const antigravitySddAgentsPluginJSON = `{
+  "name": "gentle-ai-sdd-agents",
+  "description": "Injects the SDD/Review/Judgment-Day tool-hardening contract for Antigravity dynamic sub-agents. Mirrors the OpenCode permission.task overlay for the Antigravity runtime surface.",
+  "version": "0.1.0"
+}
+`
+
+// antigravitySddAgentsHardeningMessage is the ephemeral message injected via
+// PreInvocation. It mirrors the role-by-role tool scope from
+// internal/assets/antigravity/sdd-orchestrator.md (Antigravity Tool Hardening)
+// and the OpenCode sdd-overlay-*.json permission.task.__replace__ policy.
+//
+// The text is intentionally human-readable so the Antigravity runtime can
+// surface it as a system-level reminder. We do NOT invent Antigravity API
+// fields that the runtime does not consume; this is the safest supported
+// installable permission surface.
+const antigravitySddAgentsHardeningMessage = "Gentle AI SDD/Review/JD hardening contract for Antigravity dynamic sub-agents. This contract mirrors the OpenCode permission.task overlay; Antigravity has no static agent registry, so the policy is enforced as a runtime instruction bound to define_subagent calls. Allowed roles and their tool scopes: sdd-explore = read/search/CodeGraph/Engram only, no source writes; sdd-propose, sdd-spec, sdd-design, sdd-tasks = artifact reads/writes only, no source edits; sdd-apply = source edits and targeted verification commands only, no commit/push/PR/publish/destructive git; sdd-verify = read plus test/build commands, no source edits unless explicitly approved; sdd-archive, sdd-onboard, sdd-init = read plus scoped writes; review-* and jd-judge-* = read-only, emit ledger rows only; jd-fix-agent = edit only confirmed ledger findings, do not discover new findings. Any define_subagent call that tries to widen its tool scope above the allowed scope for that role MUST fail closed and surface status: blocked with the missing capability. Dynamic sub-agents MUST NOT use broad repository search (grep -R, find sweeps, full-tree reads) until CodeGraph has failed or returned insufficient results. Web/internet search is denied by default for code implementation, review, and verification phases unless the task explicitly requires external research."
+
+func antigravitySddAgentsPluginDir(homeDir string) string {
+	return filepath.Join(homeDir, ".gemini", "antigravity-cli", "plugins", antigravitySddAgentsPluginName)
+}
+
+func antigravitySddAgentsHooksJSON() []byte {
+	cfg := map[string]any{
+		"gentle-ai-sdd-agents-hardening": map[string]any{
+			"PreInvocation": []any{
+				map[string]any{
+					"type": "command",
+					"command": "printf '%s\\n' '" + mustJSONStringSDDAgents(map[string]any{
+						"injectSteps": []any{
+							map[string]any{"ephemeralMessage": antigravitySddAgentsHardeningMessage},
+						},
+					}) + "'",
+				},
+			},
+		},
+	}
+	b, _ := json.MarshalIndent(cfg, "", "  ")
+	return append(b, '\n')
+}
+
+func mustJSONStringSDDAgents(v any) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
+}
+
+// installAntigravitySddAgentsPlugin writes the gentle-ai-sdd-agents plugin
+// (plugin.json + hooks.json) under ~/.gemini/antigravity-cli/plugins/. It
+// returns (changed, files, err) so the SDD injector can fold the result into
+// its InjectionResult.
+//
+// This is the Antigravity equivalent of the OpenCode sdd-overlay-*.json
+// `permission.task.__replace__` block. We do NOT touch user-owned
+// settings.json or mcp_config.json here — the policy lives entirely inside
+// the plugin so a future uninstall deletes the plugin directory and
+// removes the hardening contract atomically.
+func installAntigravitySddAgentsPlugin(homeDir string) (bool, []string, error) {
+	pluginDir := antigravitySddAgentsPluginDir(homeDir)
+	files := make([]string, 0, 2)
+	changed := false
+
+	pluginPath := filepath.Join(pluginDir, "plugin.json")
+	pluginWrite, err := filemerge.WriteFileAtomic(pluginPath, []byte(antigravitySddAgentsPluginJSON), 0o644)
+	if err != nil {
+		return false, nil, fmt.Errorf("write Antigravity SDD agents plugin manifest: %w", err)
+	}
+	changed = changed || pluginWrite.Changed
+	files = append(files, pluginPath)
+
+	hooksPath := filepath.Join(pluginDir, "hooks.json")
+	hooksWrite, err := mergeJSONFile(hooksPath, antigravitySddAgentsHooksJSON())
+	if err != nil {
+		return false, nil, fmt.Errorf("write Antigravity SDD agents plugin hooks: %w", err)
+	}
+	changed = changed || hooksWrite.writeResult.Changed
+	files = append(files, hooksPath)
+
+	return changed, files, nil
+}
+
+// antigravitySddAgentsRoleScopes is the canonical role→tool-scope table used
+// by the hardening contract. The OpenCode permission.task overlay is
+// equivalent for the sdd-*, review-*, and jd-* sub-agent keys; Antigravity
+// cannot enforce it statically, so the table is exposed here for tests and
+// for any future static validation that needs to assert contract drift.
+var antigravitySddAgentsRoleScopes = []struct {
+	Role  string
+	Scope string
+}{
+	{"sdd-explore", "read/search/CodeGraph/Engram only; no source writes"},
+	{"sdd-spec", "artifact reads/writes only; no source edits"},
+	{"sdd-design", "artifact reads/writes only; no source edits"},
+	{"sdd-tasks", "artifact reads/writes only; no source edits"},
+	{"sdd-apply", "source edits and targeted verification commands only; no commit/push/PR/publish/destructive git"},
+	{"sdd-verify", "read plus test/build commands; no source edits unless explicitly approved"},
+	{"sdd-archive", "read plus scoped writes"},
+	{"sdd-onboard", "read plus scoped writes"},
+	{"sdd-init", "read plus scoped writes"},
+	{"sdd-propose", "artifact reads/writes only; no source edits"},
+	{"review-risk", "read-only; emit ledger rows only"},
+	{"review-resilience", "read-only; emit ledger rows only"},
+	{"review-readability", "read-only; emit ledger rows only"},
+	{"review-reliability", "read-only; emit ledger rows only"},
+	{"jd-judge-a", "read-only; emit ledger rows only"},
+	{"jd-judge-b", "read-only; emit ledger rows only"},
+	{"jd-fix-agent", "edit only confirmed ledger findings; do not discover new findings"},
+}
+
+// antigravitySddAgentsRoleAllowed reports whether the given role appears in
+// the canonical role-scope table. Used by tests to lock the fail-closed
+// contract; any role not in the table must not be allowed.
+func antigravitySddAgentsRoleAllowed(role string) bool {
+	for _, entry := range antigravitySddAgentsRoleScopes {
+		if entry.Role == role {
+			return true
+		}
+	}
+	return false
+}
+
+// sortedAntigravitySddAgentsRoleScopes returns the role table sorted by role
+// name. Used by tests for stable comparison.
+func sortedAntigravitySddAgentsRoleScopes() []struct {
+	Role  string
+	Scope string
+} {
+	out := make([]struct {
+		Role  string
+		Scope string
+	}, len(antigravitySddAgentsRoleScopes))
+	copy(out, antigravitySddAgentsRoleScopes)
+	sort.Slice(out, func(i, j int) bool { return out[i].Role < out[j].Role })
+	return out
+}
+
+// antigravitySddAgentsHardeningContractPhrases is the set of substrings the
+// hardening message MUST contain. Used by tests to lock the message text
+// against accidental edits that would weaken the contract.
+var antigravitySddAgentsHardeningContractPhrases = []string{
+	"sdd-explore",
+	"sdd-propose",
+	"sdd-apply",
+	"sdd-verify",
+	"review-*",
+	"jd-judge-*",
+	"jd-fix-agent",
+	"fail closed",
+	"CodeGraph",
+}
+
+// antigravitySddAgentsHardeningContractForbids is the set of substrings the
+// hardening message MUST NOT contain. We forbid wording that would fake a
+// real Antigravity API we cannot actually invoke (e.g. permission.task,
+// __replace__) — the contract is an ephemeral instruction, not a static
+// permission schema.
+var antigravitySddAgentsHardeningContractForbids = []string{
+	"__replace__",
+}
+
+// AntigravitySddAgentsHardeningMessage is the exported, read-only view of
+// the hardening contract. Exposed for callers (CLI doctor/validate) that
+// want to print or compare the message without depending on the unexported
+// constant directly.
+func AntigravitySddAgentsHardeningMessage() string {
+	return antigravitySddAgentsHardeningMessage
+}
+
+// AntigravitySddAgentsPluginDir is the exported, read-only view of the
+// plugin directory. Mirrors AntigravitySddAgentsHardeningMessage for tests
+// and diagnostics.
+func AntigravitySddAgentsPluginDir(homeDir string) string {
+	return antigravitySddAgentsPluginDir(homeDir)
+}
+
+// HasAntigravitySddAgentsHardeningContract reports whether the gentle-ai-sdd-agents
+// plugin is installed AND the hardening contract is present in its hooks.json.
+// This is the read-only, conservative check used by diagnostic surfaces.
+func HasAntigravitySddAgentsHardeningContract(homeDir string) bool {
+	hooksPath := filepath.Join(antigravitySddAgentsPluginDir(homeDir), "hooks.json")
+	data, err := readFileOrEmpty(hooksPath)
+	if err != nil {
+		return false
+	}
+	raw := strings.TrimSpace(data)
+	if raw == "" {
+		return false
+	}
+	var root map[string]any
+	if err := json.Unmarshal([]byte(raw), &root); err != nil {
+		return false
+	}
+	block, ok := root["gentle-ai-sdd-agents-hardening"].(map[string]any)
+	if !ok {
+		return false
+	}
+	pre, ok := block["PreInvocation"].([]any)
+	if !ok || len(pre) == 0 {
+		return false
+	}
+	commands := strings.Builder{}
+	for _, item := range pre {
+		entry, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		command, ok := entry["command"].(string)
+		if !ok {
+			continue
+		}
+		commands.WriteString(command)
+		commands.WriteByte('\n')
+	}
+	contract := commands.String()
+	for _, phrase := range antigravitySddAgentsHardeningContractPhrases {
+		if !strings.Contains(contract, phrase) {
+			return false
+		}
+	}
+	return true
+}
