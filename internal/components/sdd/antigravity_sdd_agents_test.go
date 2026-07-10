@@ -240,18 +240,27 @@ func TestAntigravitySddAgentsPluginDoesNotAffectOtherAgents(t *testing.T) {
 	}
 }
 
-func TestAntigravitySddAgentsPluginScopingToCLIOnly(t *testing.T) {
-	// The antigravity-desktop variant does not currently consume
-	// plugin/hooks.json; we deliberately do NOT install gentle-ai-sdd-agents
-	// under ~/.gemini/antigravity-desktop. This test locks that scope.
+func TestAntigravitySddAgentsPluginScopingDynamic(t *testing.T) {
+	// If only desktop directory exists, it must write to desktop.
 	home := t.TempDir()
+	desktopDir := filepath.Join(home, ".gemini", "antigravity-desktop")
+	if err := os.MkdirAll(desktopDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
 	_, _, err := installAntigravitySddAgentsPlugin(home)
 	if err != nil {
 		t.Fatalf("installAntigravitySddAgentsPlugin() error = %v", err)
 	}
-	desktopPlugin := filepath.Join(home, ".gemini", "antigravity-desktop", "plugins", "gentle-ai-sdd-agents", "plugin.json")
-	if _, err := os.Stat(desktopPlugin); !os.IsNotExist(err) {
-		t.Fatalf("installAntigravitySddAgentsPlugin() must NOT write to antigravity-desktop; stat err = %v", err)
+
+	desktopPlugin := filepath.Join(desktopDir, "plugins", "gentle-ai-sdd-agents", "plugin.json")
+	if _, err := os.Stat(desktopPlugin); err != nil {
+		t.Fatalf("expected plugin.json to be written to antigravity-desktop: %v", err)
+	}
+
+	cliPlugin := filepath.Join(home, ".gemini", "antigravity-cli", "plugins", "gentle-ai-sdd-agents", "plugin.json")
+	if _, err := os.Stat(cliPlugin); !os.IsNotExist(err) {
+		t.Fatalf("must NOT write to antigravity-cli when desktop is active; stat err = %v", err)
 	}
 }
 

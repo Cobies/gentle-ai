@@ -572,16 +572,16 @@ func TestCodeGraphStatusDoesNotBlockOnAntigravityDesktopOnly(t *testing.T) {
 		if agent.Agent != model.AgentAntigravity {
 			continue
 		}
-		if agent.Detected {
-			t.Fatalf("desktop-only Antigravity must not block CodeGraph install validation as a detected CLI-supported surface: %#v", agent)
+		if !agent.Detected {
+			t.Fatalf("desktop Antigravity must be detected dynamically: %#v", agent)
 		}
-		if !strings.Contains(agent.Reason, "Antigravity CLI plugin surface") {
-			t.Fatalf("desktop-only Antigravity reason should explain CLI plugin scope; got %q", agent.Reason)
+		if agent.Configured {
+			t.Fatalf("desktop Antigravity must not be pre-configured: %#v", agent)
 		}
 	}
 }
 
-func TestCodeGraphGuidanceSkipsAntigravityPluginForDesktopOnly(t *testing.T) {
+func TestCodeGraphGuidanceWritesAntigravityPluginForDesktop(t *testing.T) {
 	home := t.TempDir()
 	mustWrite(t, filepath.Join(home, ".gemini", "antigravity-desktop", "settings.json"), `{}`)
 
@@ -589,14 +589,19 @@ func TestCodeGraphGuidanceSkipsAntigravityPluginForDesktopOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InjectCodeGraphGuidanceIfSelected() error = %v", err)
 	}
-	pluginPath := filepath.Join(home, ".gemini", "antigravity-cli", "plugins", "gentle-ai-codegraph", "plugin.json")
-	if _, err := os.Stat(pluginPath); !os.IsNotExist(err) {
-		t.Fatalf("desktop-only Antigravity must not be reported/configured through the CLI plugin surface; stat err = %v", err)
+	pluginPath := filepath.Join(home, ".gemini", "antigravity-desktop", "plugins", "gentle-ai-codegraph", "plugin.json")
+	if _, err := os.Stat(pluginPath); err != nil {
+		t.Fatalf("desktop Antigravity plugin.json must be written dynamically; stat err = %v", err)
 	}
+	found := false
 	for _, file := range result.Files {
-		if strings.Contains(file, filepath.Join("antigravity-cli", "plugins", "gentle-ai-codegraph")) {
-			t.Fatalf("desktop-only Antigravity result must not include CLI plugin file %q; files=%v", file, result.Files)
+		if strings.Contains(file, filepath.Join("antigravity-desktop", "plugins", "gentle-ai-codegraph")) {
+			found = true
+			break
 		}
+	}
+	if !found {
+		t.Fatalf("desktop Antigravity result must include desktop plugin files; files=%v", result.Files)
 	}
 }
 

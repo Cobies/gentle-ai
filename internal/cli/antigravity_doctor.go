@@ -40,6 +40,14 @@ import (
 //     specific note that runtime availability of `define_subagent` /
 //     `invoke_subagent` is NOT shell-probable. Users are pointed to the
 //     in-runtime fail-closed contract as the source of truth.
+func antigravityActiveConfigDir(homeDir string) string {
+	desktop := filepath.Join(homeDir, ".gemini", "antigravity-desktop")
+	if info, err := os.Stat(desktop); err == nil && info.IsDir() {
+		return desktop
+	}
+	return filepath.Join(homeDir, ".gemini", "antigravity-cli")
+}
+
 func checkAntigravityDynamicSubagentRuntime(homeDir string) []CheckResult {
 	if !isAntigravityInstalled(homeDir) {
 		return nil
@@ -62,13 +70,14 @@ func checkAntigravityDynamicSubagentRuntime(homeDir string) []CheckResult {
 	// `invoke_subagent` — they are not external commands and any shell probe
 	// we wrote would be misleading. The strongest signal we can produce
 	// outside the agent runtime is "the installable contract is in place".
+	configDir := antigravityActiveConfigDir(homeDir)
 	hardeningOK := sdd.HasAntigravitySddAgentsHardeningContract(homeDir)
 	detail := "Antigravity dynamic subagent hardening plugin is installed at " +
 		sdd.AntigravitySddAgentsPluginDir(homeDir)
 	remedy := ""
 	if !hardeningOK {
 		detail = "Antigravity dynamic subagent hardening plugin is NOT installed; dynamic subagents will not be bound to the SDD/Review/JD tool-hardening contract."
-		remedy = "Run `gentle-ai install --agent antigravity` (or `gentle-ai sync`) to install the gentle-ai-sdd-agents plugin under ~/.gemini/antigravity-cli/plugins/."
+		remedy = fmt.Sprintf("Run `gentle-ai install --agent antigravity` (or `gentle-ai sync`) to install the gentle-ai-sdd-agents plugin under %s/plugins/.", configDir)
 	}
 	status := CheckStatusPass
 	if !hardeningOK {

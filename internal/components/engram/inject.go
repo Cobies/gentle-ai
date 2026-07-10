@@ -266,8 +266,16 @@ func ensureJSONFileIfMissing(path string) (filemerge.WriteResult, error) {
 	return filemerge.WriteFileAtomic(path, []byte("{}\n"), 0o644)
 }
 
+func antigravityActiveConfigDir(homeDir string) string {
+	desktop := filepath.Join(homeDir, ".gemini", "antigravity-desktop")
+	if info, err := os.Stat(desktop); err == nil && info.IsDir() {
+		return desktop
+	}
+	return filepath.Join(homeDir, ".gemini", "antigravity-cli")
+}
+
 func installAntigravityEngramPlugin(homeDir, engramCommand string) (bool, []string, error) {
-	pluginDir := filepath.Join(homeDir, ".gemini", "antigravity-cli", "plugins", "gentle-ai-engram")
+	pluginDir := filepath.Join(antigravityActiveConfigDir(homeDir), "plugins", "gentle-ai-engram")
 	files := make([]string, 0, 3)
 	changed := false
 
