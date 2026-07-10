@@ -19,7 +19,7 @@ To run any SDD phase:
    - global Antigravity Desktop: `~/.gemini/antigravity-desktop/skills/{phase}/SKILL.md`
    - global Antigravity CLI: `~/.gemini/antigravity-cli/skills/{phase}/SKILL.md`
    - shared Gemini fallback: `~/.gemini/skills/{phase}/SKILL.md`
-3. **Define the phase subagent**: call `define_subagent` with a stable phase name such as `{phase}`, pass the complete `SKILL.md` content as the `system_prompt` parameter after dynamically appending the CodeGraph Guidance (delimited by `<!-- gentle-ai:codegraph-guidance -->` and `<!-- /gentle-ai:codegraph-guidance -->` comment boundaries) and the Engram Tool protocols (delimited by `<!-- gentle-ai:engram-protocol -->` and `<!-- /gentle-ai:engram-protocol -->` comment boundaries). If the base prompt already contains these boundaries, replace the content inside the blocks instead of duplicating the markers. Set `enable_mcp_tools: true` so phase agents can use configured MCP tools such as Engram.
+3. **Define the phase subagent**: call `define_subagent` with a stable phase name such as `{phase}`, pass the complete `SKILL.md` content as the `system_prompt` parameter after dynamically appending the CodeGraph Guidance (delimited by `<!-- gentle-ai:codegraph-guidance -->` and `<!-- /gentle-ai:codegraph-guidance -->` comment boundaries) and the Engram Tool protocols (delimited by `<!-- gentle-ai:engram-protocol -->` and `<!-- /gentle-ai:engram-protocol -->` comment boundaries). If the base prompt already contains these boundaries, replace the content inside the blocks instead of duplicating the markers. Set `enable_mcp_tools: true` so phase agents can use configured MCP tools such as Engram. To enforce tool hardening, set `enable_subagent_tools: false` for all dynamic subagents, and set `enable_write_tools: false` for all read-only roles (including `sdd-explore`, `review-*` / `review-refuter`, and `jd-judge-*` / `jd-judge-a` / `jd-judge-b`).
 4. **Invoke the phase subagent**: call `invoke_subagent` with the dynamically defined subagent name and a compact task containing approved scope, artifact references, constraints, validation expectations, expected result shape, and the forwarded workspace skills directory path (`workspace_skills_path` set to `.agents/skills/`, checking for primary `.agents/skills/` first and falling back to legacy `.agent/skills/` if the primary is missing). Prefer the same workspace for normal SDD phase execution; use an isolated Git worktree only when the user explicitly approves parallel write isolation.
 5. **Synthesize**: read the child result, update DAG/state when applicable, summarize only decisions/outcomes/risks, and ask for approval when interactive mode or review workload guards require it.
 6. **Nesting depth limit**: dynamic delegation MUST NOT exceed 10 levels deep.
@@ -190,9 +190,10 @@ Root Antigravity permissions are the security ceiling inherited by all dynamic s
 Use the narrowest useful tool scope for each role:
 
 - `sdd-explore`: read/search/CodeGraph/Engram only; no source writes.
-- `sdd-spec`, `sdd-design`, `sdd-tasks`: artifact reads/writes only; no source edits.
+- `sdd-propose`, `sdd-spec`, `sdd-design`, `sdd-tasks`: artifact reads/writes only; no source edits.
 - `sdd-apply`: source edits and targeted verification commands allowed; no commit, push, PR creation, publishing, or destructive git operations.
 - `sdd-verify`: read plus test/build commands; no source edits unless the user explicitly approves a narrow verification-harness fix.
+- `sdd-archive`, `sdd-onboard`, `sdd-init`: read plus scoped writes.
 - `review-*` (including `review-refuter`) and `jd-judge-*`: read-only; emit ledger rows or verdicts only.
 - `jd-fix-agent`: edit only confirmed ledger findings passed by the orchestrator; do not discover, fix, or log new findings.
 
