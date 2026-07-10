@@ -38,6 +38,14 @@ var piCodeGraphEffectiveMCPProbe PiCodeGraphEffectiveMCPProbe = probePiCodeGraph
 // verification remains separate capability evidence.
 var ErrPiCodeGraphAdapterHealthUnavailable = errors.New("Pi MCP adapter health is not machine-verifiable")
 
+const piCodeGraphAdapterHealthUnavailableManualAction = "Pi CodeGraph integration is pending: Pi 0.80.6 has no supported machine-verifiable adapter health signal. CodeGraph capability was not reported as configured."
+
+// PiCodeGraphAdapterHealthUnavailableResult returns the manual-action result used
+// when optional Pi CodeGraph wiring cannot be machine-verified during install.
+func PiCodeGraphAdapterHealthUnavailableResult() PiCodeGraphResult {
+	return PiCodeGraphResult{ManualActions: []string{piCodeGraphAdapterHealthUnavailableManualAction}}
+}
+
 // piCodeGraphAdapterRuntimeRunner is the Pi subprocess boundary. It captures
 // combined stdout/stderr so exit status alone cannot be mistaken for adapter
 // health.
@@ -516,7 +524,7 @@ func probePiCodeGraphAdapterRuntime(agentDir, mcpPath string) (PiCodeGraphMCPPro
 	args := []string{"--mcp-config", mcpPath, "--mode", "json", "--no-session", "--offline", "--print", "/mcp status"}
 	output, err := piCodeGraphAdapterRuntimeRunner("pi", args, append(os.Environ(), "PI_CODING_AGENT_DIR="+agentDir))
 	if err != nil {
-		return PiCodeGraphMCPProbeResult{}, fmt.Errorf("run Pi MCP adapter for %q: %w: %s", mcpPath, err, strings.TrimSpace(string(output)))
+		return PiCodeGraphMCPProbeResult{}, fmt.Errorf("run Pi MCP adapter for %q: %w: %w: %s", mcpPath, ErrPiCodeGraphAdapterHealthUnavailable, err, strings.TrimSpace(string(output)))
 	}
 	if err := validatePiCodeGraphAdapterRuntimeOutput(output); err != nil {
 		return PiCodeGraphMCPProbeResult{}, err

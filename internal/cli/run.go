@@ -558,6 +558,13 @@ type piCodeGraphReconcileStep struct {
 func (s piCodeGraphReconcileStep) ID() string { return s.id }
 func (s piCodeGraphReconcileStep) Run() error {
 	result, err := communitytool.ReconcilePiCodeGraph(communitytool.PiCodeGraphOptions{HomeDir: s.homeDir, WorkspaceDir: s.workspaceDir, Selected: s.selected})
+	if errors.Is(err, communitytool.ErrPiCodeGraphAdapterHealthUnavailable) {
+		pending := communitytool.PiCodeGraphAdapterHealthUnavailableResult()
+		if s.state != nil {
+			s.state.piCodeGraph = &pending
+		}
+		return nil
+	}
 	if err == nil && s.state != nil {
 		s.state.piCodeGraph = &result
 	}

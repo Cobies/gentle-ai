@@ -201,7 +201,8 @@ func reconcileDetectedPiCodeGraph(homeDir, workspaceDir string) (*PiCodeGraphRes
 	}
 	result, err := ReconcilePiCodeGraph(PiCodeGraphOptions{HomeDir: homeDir, WorkspaceDir: workspaceDir, Selected: true})
 	if errors.Is(err, ErrPiCodeGraphAdapterHealthUnavailable) {
-		return &PiCodeGraphResult{ManualActions: []string{"Pi CodeGraph integration is pending: Pi 0.80.6 has no supported machine-verifiable adapter health signal. CodeGraph capability was not reported as configured."}}, nil
+		pending := PiCodeGraphAdapterHealthUnavailableResult()
+		return &pending, nil
 	}
 	return &result, err
 }

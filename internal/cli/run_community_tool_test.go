@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -146,6 +147,48 @@ func TestPiCodeGraphReconcileStepRollbackRemovesDynamicPackageOverlay(t *testing
 	}
 	if _, err := os.Stat(overlay); !os.IsNotExist(err) {
 		t.Fatalf("dynamic package overlay remains after later pipeline rollback: %v", err)
+	}
+}
+
+func TestPiCodeGraphReconcileStepLeavesManualActionWhenAdapterProbeUnavailable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("signal-killed adapter probe simulation requires POSIX shell semantics")
+	}
+	home := t.TempDir()
+	writePiInstallFixture(t, home)
+	mustWriteFile(t, filepath.Join(home, ".pi", "agent", "npm", "node_modules", "pi-mcp-adapter", "index.ts"), []byte("export default {}\n"))
+
+	binDir := t.TempDir()
+	piPath := filepath.Join(binDir, "pi")
+	mustWriteFile(t, piPath, []byte("#!/bin/sh\necho 'adapter output before kill' >&2\nkill -9 $$\n"))
+	if err := os.Chmod(piPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	state := &runtimeState{}
+	step := piCodeGraphReconcileStep{id: "community-tool:pi-codegraph-reconcile", homeDir: home, selected: true, state: state}
+	if err := step.Run(); err != nil {
+		t.Fatalf("Run() error = %v, want pending manual action", err)
+	}
+	if state.piCodeGraph == nil || len(state.piCodeGraph.ManualActions) != 1 || !strings.Contains(state.piCodeGraph.ManualActions[0], "pending") {
+		t.Fatalf("state.piCodeGraph = %#v, want pending manual action", state.piCodeGraph)
+	}
+}
+
+func TestPiCodeGraphReconcileStepFailsHardOnNonSentinelError(t *testing.T) {
+	home := t.TempDir()
+	writePiInstallFixture(t, home)
+	mustWriteFile(t, filepath.Join(home, ".pi", "agent", "mcp.json"), []byte(`{"mcpServers":{"codegraph":{"command":"other"}}}`))
+
+	state := &runtimeState{}
+	step := piCodeGraphReconcileStep{id: "community-tool:pi-codegraph-reconcile", homeDir: home, selected: true, state: state}
+	err := step.Run()
+	if err == nil || !strings.Contains(err.Error(), "misconfigured") {
+		t.Fatalf("Run() error = %v, want non-sentinel misconfiguration failure", err)
+	}
+	if state.piCodeGraph != nil {
+		t.Fatalf("state.piCodeGraph = %#v, want no successful result on hard failure", state.piCodeGraph)
 	}
 }
 

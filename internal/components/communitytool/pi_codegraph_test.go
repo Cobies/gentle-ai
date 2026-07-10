@@ -597,6 +597,52 @@ func TestPiCodeGraphProbeUsesAgentRuntimeForProjectMCPOverride(t *testing.T) {
 	}
 }
 
+func TestPiCodeGraphAdapterRuntimeRunnerErrorMatchesHealthUnavailable(t *testing.T) {
+	agentDir := t.TempDir()
+	mcpPath := filepath.Join(agentDir, "mcp.json")
+	previous := piCodeGraphAdapterRuntimeRunner
+	piCodeGraphAdapterRuntimeRunner = func(string, []string, []string) ([]byte, error) {
+		return []byte("adapter output before kill"), errors.New("signal: killed")
+	}
+	t.Cleanup(func() { piCodeGraphAdapterRuntimeRunner = previous })
+
+	result, err := probePiCodeGraphAdapterRuntime(agentDir, mcpPath)
+	if !errors.Is(err, ErrPiCodeGraphAdapterHealthUnavailable) {
+		t.Fatalf("probe result = %#v, error = %v, want ErrPiCodeGraphAdapterHealthUnavailable", result, err)
+	}
+	for _, want := range []string{"run Pi MCP adapter", mcpPath, "signal: killed", "adapter output before kill"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error = %q, want detail %q", err.Error(), want)
+		}
+	}
+}
+
+func TestReconcileDetectedPiCodeGraphLeavesManualActionWhenAdapterProbeIsKilled(t *testing.T) {
+	home := t.TempDir()
+	writePiFile(t, filepath.Join(home, ".pi", "agent", "settings.json"), `{}`)
+	writePiFile(t, filepath.Join(home, ".pi", "agent", "npm", "node_modules", "pi-mcp-adapter", "index.ts"), "export default {}\n")
+	writePiFile(t, filepath.Join(home, ".pi", "agent", "subagents", "worker.md"), "---\ntools: bash\n---\nwork\n")
+
+	previousRunner := piCodeGraphAdapterRuntimeRunner
+	previousProbe := piCodeGraphEffectiveMCPProbe
+	piCodeGraphAdapterRuntimeRunner = func(string, []string, []string) ([]byte, error) {
+		return []byte("adapter output before kill"), errors.New("signal: killed")
+	}
+	piCodeGraphEffectiveMCPProbe = probePiCodeGraphMCP
+	t.Cleanup(func() {
+		piCodeGraphAdapterRuntimeRunner = previousRunner
+		piCodeGraphEffectiveMCPProbe = previousProbe
+	})
+
+	result, err := reconcileDetectedPiCodeGraph(home, "")
+	if err != nil {
+		t.Fatalf("reconcileDetectedPiCodeGraph() error = %v, want pending manual action", err)
+	}
+	if result == nil || len(result.ManualActions) != 1 || !strings.Contains(result.ManualActions[0], "pending") {
+		t.Fatalf("result = %#v, want pending manual action", result)
+	}
+}
+
 func TestPiCodeGraphAdapterRuntimeFailsClosedWithoutPositiveCapabilityEvidence(t *testing.T) {
 	agentDir := t.TempDir()
 	mcpPath := filepath.Join(agentDir, "mcp.json")
