@@ -96,6 +96,7 @@ Full 4R is reserved for tier 3; a standard diff never fans out to multiple lense
 - `review-resilience`
 - `review-readability`
 - `review-reliability`
+- `review-refuter`
 - `jd-judge-a`
 - `jd-judge-b`
 - `jd-fix-agent`
@@ -108,6 +109,7 @@ For each review/JD agent, first look for a dedicated `SKILL.md` using the same w
 | `review-resilience` | Shell/process integration, partial failure, recovery, degraded dependency, and operational edge-case review. Emit ledger rows only. |
 | `review-readability` | Naming, structure, maintainability, reviewer cognitive load, and small-refactor clarity review. Emit ledger rows only. |
 | `review-reliability` | Behavior, state, tests, determinism, and regression review. Emit ledger rows only. |
+| `review-refuter` | Adversarial verifier. Attack and refute findings in the candidate list through the assigned lens (general, correctness, exploitability-impact, or reproducibility) with concrete counter-evidence. Emit verdicts only. |
 | `jd-judge-a` | First blind Judgment Day judge. Re-read the target independently, challenge assumptions, and emit ledger rows only. |
 | `jd-judge-b` | Second blind Judgment Day judge. Work independently from Judge A, challenge assumptions, and emit ledger rows only. |
 | `jd-fix-agent` | Fix only confirmed ledger findings passed by the orchestrator; do not discover or log new findings. |
@@ -192,7 +194,7 @@ Use the narrowest useful tool scope for each role:
 - `sdd-spec`, `sdd-design`, `sdd-tasks`: artifact reads/writes only; no source edits.
 - `sdd-apply`: source edits and targeted verification commands allowed; no commit, push, PR creation, publishing, or destructive git operations.
 - `sdd-verify`: read plus test/build commands; no source edits unless the user explicitly approves a narrow verification-harness fix.
-- `review-*` and `jd-judge-*`: read-only; emit ledger rows only.
+- `review-*` (including `review-refuter`) and `jd-judge-*`: read-only; emit ledger rows or verdicts only.
 - `jd-fix-agent`: edit only confirmed ledger findings passed by the orchestrator; do not discover, fix, or log new findings.
 
 Dynamic subagents MUST NOT use broad repository search (`grep -R`, `find` sweeps, full-tree reads) until CodeGraph has failed or returned insufficient results. Web/internet search is denied by default for code implementation, review, and verification phases unless the task explicitly requires external research.

@@ -139,6 +139,7 @@ func TestAntigravitySddAgentsRoleAllowed(t *testing.T) {
 		"sdd-explore", "sdd-spec", "sdd-design", "sdd-tasks", "sdd-apply",
 		"sdd-verify", "sdd-archive", "sdd-onboard", "sdd-init", "sdd-propose",
 		"review-risk", "review-resilience", "review-readability", "review-reliability",
+		"review-refuter",
 		"jd-judge-a", "jd-judge-b", "jd-fix-agent",
 	}
 	for _, role := range allowed {
