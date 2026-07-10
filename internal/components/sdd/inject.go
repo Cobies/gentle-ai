@@ -758,6 +758,13 @@ func Inject(homeDir string, adapter agents.Adapter, sddMode model.SDDModeID, opt
 		}
 		changed = changed || sddAgentsChanged
 		files = append(files, sddAgentsFiles...)
+
+		trustChanged, trustFiles, trustErr := trustWorkspaceInAntigravitySettings(homeDir, opts.WorkspaceDir, adapter)
+		if trustErr != nil {
+			return InjectionResult{}, trustErr
+		}
+		changed = changed || trustChanged
+		files = append(files, trustFiles...)
 	}
 
 	// 5. Post-injection verification — catch silent failures.

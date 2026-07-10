@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/gentleman-programming/gentle-ai/internal/agents"
 	"github.com/gentleman-programming/gentle-ai/internal/components/filemerge"
 )
 
@@ -267,4 +268,114 @@ func HasAntigravitySddAgentsHardeningContract(homeDir string) bool {
 		}
 	}
 	return true
+}
+
+// trustWorkspaceInAntigravitySettings adds workspaceDir to the trustedWorkspaces list
+// in the Antigravity settings.json if it is not already present and if workspaceDir is not empty.
+//
+// The function is fail-closed against silent user-config data loss: if the
+// existing settings.json cannot be parsed as a JSON object, or if the existing
+// trustedWorkspaces key is present but not an array of strings, the function
+// returns an error and does NOT write. Unrelated top-level keys are preserved
+// on the merge path because we unmarshal into a map and only mutate the
+// trustedWorkspaces key.
+func trustWorkspaceInAntigravitySettings(homeDir, workspaceDir string, adapter agents.Adapter) (bool, []string, error) {
+	if strings.TrimSpace(workspaceDir) == "" {
+		return false, nil, nil
+	}
+
+	settingsPath := adapter.SettingsPath(homeDir)
+	if settingsPath == "" {
+		return false, nil, nil
+	}
+
+	// Clean the workspace directory path to make it standard
+	workspaceDir = filepath.Clean(workspaceDir)
+
+	baseJSON, err := os.ReadFile(settingsPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			baseJSON = []byte("{}")
+		} else {
+			return false, nil, fmt.Errorf("read settings file %q: %w", settingsPath, err)
+		}
+	}
+
+	if strings.TrimSpace(string(baseJSON)) == "" {
+		return false, nil, fmt.Errorf("settings file %q is empty (want JSON object); refusing to write to avoid silent data loss", settingsPath)
+	}
+
+	var data map[string]any
+	if len(baseJSON) > 0 {
+		if err := json.Unmarshal(baseJSON, &data); err != nil {
+			return false, nil, fmt.Errorf("parse settings file %q: %w", settingsPath, err)
+		}
+		// A successful unmarshal with non-empty input that produces a nil map
+		// means the top-level value was JSON `null` (the only JSON value that
+		// decodes into a nil Go map[string]interface{} without an error).
+		// That is not a JSON object — refusing to write protects the user's
+		// existing null-sentinel value from being silently overwritten.
+		if data == nil {
+			return false, nil, fmt.Errorf("settings file %q has top-level value %q (want JSON object); refusing to write to avoid silent data loss", settingsPath, string(baseJSON))
+		}
+	}
+	if data == nil {
+		data = make(map[string]interface{})
+	}
+
+	// Fail-closed: if trustedWorkspaces exists but is not an array of strings,
+	// refuse to write. Silently overwriting it with a fresh array would destroy
+	// the user's existing trust configuration.
+	if tVal, ok := data["trustedWorkspaces"]; ok {
+		trusted, ok := tVal.([]any)
+		if !ok {
+			return false, nil, fmt.Errorf("settings file %q has %q with unexpected type %T (want array of strings); refusing to write to avoid silent data loss", settingsPath, "trustedWorkspaces", tVal)
+		}
+		for i, v := range trusted {
+			if _, ok := v.(string); !ok {
+				return false, nil, fmt.Errorf("settings file %q has %q[%d] with unexpected type %T (want string); refusing to write to avoid silent data loss", settingsPath, "trustedWorkspaces", i, v)
+			}
+		}
+
+		existing := make(map[string]bool)
+		for _, val := range trusted {
+			existing[filepath.Clean(val.(string))] = true
+		}
+
+		if existing[workspaceDir] {
+			return false, nil, nil
+		}
+
+		trusted = append(trusted, workspaceDir)
+		data["trustedWorkspaces"] = trusted
+
+		newJSON, err := json.MarshalIndent(data, "", "  ")
+		if err != nil {
+			return false, nil, fmt.Errorf("marshal settings file %q: %w", settingsPath, err)
+		}
+
+		writeResult, err := filemerge.WriteFileAtomic(settingsPath, newJSON, 0o644)
+		if err != nil {
+			return false, nil, fmt.Errorf("write settings file %q: %w", settingsPath, err)
+		}
+
+		return writeResult.Changed, []string{settingsPath}, nil
+	}
+
+	// No existing trustedWorkspaces — create it. Unrelated keys are preserved
+	// because data is a map of the unmarshaled JSON.
+	trusted := []any{workspaceDir}
+	data["trustedWorkspaces"] = trusted
+
+	newJSON, err := json.MarshalIndent(data, "", "  ")
+	if err != nil {
+		return false, nil, fmt.Errorf("marshal settings file %q: %w", settingsPath, err)
+	}
+
+	writeResult, err := filemerge.WriteFileAtomic(settingsPath, newJSON, 0o644)
+	if err != nil {
+		return false, nil, fmt.Errorf("write settings file %q: %w", settingsPath, err)
+	}
+
+	return writeResult.Changed, []string{settingsPath}, nil
 }
