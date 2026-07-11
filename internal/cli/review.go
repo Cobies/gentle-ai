@@ -9,6 +9,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/gentleman-programming/gentle-ai/internal/reviewtransaction"
@@ -82,6 +85,7 @@ type ReviewStepInput struct {
 	Release         *reviewtransaction.ReleaseEvidence        `json:"release"`
 	JudgeProofs     []reviewtransaction.JudgeProof            `json:"judge_proofs"`
 	JudgeAgreement  string                                    `json:"judge_agreement_hash"`
+	LensResult      *reviewtransaction.LensResult             `json:"lens_result"`
 }
 
 func RunReviewStep(args []string, stdout io.Writer) error {
@@ -118,6 +122,11 @@ func RunReviewStep(args []string, stdout io.Writer) error {
 	}
 	tx := chain.Records[len(chain.Records)-1].Transaction
 	switch *operation {
+	case "record-lens-result":
+		if input.LensResult == nil {
+			return errors.New("record-lens-result requires lens_result")
+		}
+		err = tx.RecordLensResult(*input.LensResult)
 	case "record-judge-proofs":
 		err = tx.RecordJudgeProofs(input.JudgeProofs, input.JudgeAgreement)
 	case "freeze-findings":
@@ -132,7 +141,14 @@ func RunReviewStep(args []string, stdout io.Writer) error {
 		if input.Snapshot == nil {
 			return errors.New("complete-fix requires snapshot")
 		}
-		err = tx.CompleteFix(*input.Snapshot, input.FixDeltaHash, input.LedgerIDs)
+		derived, buildErr := (reviewtransaction.SnapshotBuilder{Repo: *cwd}).Build(context.Background(), reviewtransaction.Target{
+			Kind: reviewtransaction.TargetFixDiff, BaseRef: tx.FinalCandidateTree,
+			IntendedUntracked: input.Snapshot.IntendedUntracked, LedgerIDs: input.LedgerIDs,
+		})
+		if buildErr != nil {
+			return fmt.Errorf("derive correction snapshot: %w", buildErr)
+		}
+		err = tx.CompleteFix(derived, input.FixDeltaHash, input.LedgerIDs)
 	case "validate-fix":
 		if input.Validation == nil {
 			return errors.New("validate-fix requires validation")
@@ -156,6 +172,9 @@ func RunReviewStep(args []string, stdout io.Writer) error {
 	operationName := "review/" + *operation
 	if *operation == "bind-release" {
 		operationName = "review/bind-release-evidence"
+	}
+	if *operation == "validate-fix" {
+		operationName = "review/validate-targeted-fix"
 	}
 	revision, err := store.Append(chain.HeadRevision, reviewtransaction.Record{Operation: operationName, Transaction: tx})
 	if err != nil {
@@ -195,8 +214,10 @@ func RunReviewStart(args []string, stdout io.Writer) error {
 	machineTransactionOut := flags.String("machine-transaction-out", "", "optional non-authoritative transaction JSON output path")
 	var intended repeatedString
 	var ledgerIDs repeatedString
+	var selectedLenses repeatedString
 	flags.Var(&intended, "intended-untracked", "repository-relative intended untracked path; repeatable")
 	flags.Var(&ledgerIDs, "ledger-id", "frozen ledger finding ID for fix-diff; repeatable and comma-safe")
+	flags.Var(&selectedLenses, "lens", "selected ordinary bounded review lens; repeatable in canonical 4R order")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -234,9 +255,16 @@ func RunReviewStart(args []string, stdout io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("build review target: %w", err)
 	}
+	riskLevel := reviewtransaction.RiskLevel("")
+	if reviewtransaction.Mode(*mode) == reviewtransaction.ModeOrdinaryBounded {
+		riskLevel, err = classifyReviewSnapshot(context.Background(), *cwd, snapshot)
+		if err != nil {
+			return fmt.Errorf("classify immutable review target: %w", err)
+		}
+	}
 	transaction, err := reviewtransaction.NewTransaction(reviewtransaction.Start{
 		LineageID: *lineage, Mode: reviewtransaction.Mode(*mode), Generation: *generation,
-		Snapshot: snapshot, PolicyHash: policyHash,
+		Snapshot: snapshot, PolicyHash: policyHash, RiskLevel: riskLevel, SelectedLenses: []string(selectedLenses),
 	})
 	if err != nil {
 		return fmt.Errorf("create review transaction: %w", err)
@@ -266,6 +294,78 @@ func RunReviewStart(args []string, stdout io.Writer) error {
 		}
 	}
 	return encodeReviewJSON(stdout, result)
+}
+
+func classifyReviewSnapshot(ctx context.Context, repo string, snapshot reviewtransaction.Snapshot) (reviewtransaction.RiskLevel, error) {
+	command := exec.CommandContext(ctx, "git", "-C", repo, "diff", "--numstat", "--no-renames", snapshot.BaseTree, snapshot.CandidateTree, "--")
+	output, err := command.Output()
+	if err != nil {
+		return "", err
+	}
+	stats := make([]reviewtransaction.DiffStat, 0, len(snapshot.Paths))
+	onlyNonExecutable := true
+	touchesConfiguration := false
+	seenPaths := make(map[string]struct{}, len(snapshot.Paths))
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		if line == "" {
+			continue
+		}
+		fields := strings.Split(line, "\t")
+		if len(fields) != 3 {
+			return "", fmt.Errorf("unexpected immutable diff stat %q", line)
+		}
+		stat := reviewtransaction.DiffStat{Path: fields[2]}
+		if fields[0] == "-" && fields[1] == "-" {
+			stat.Binary = true
+		} else {
+			stat.Additions, err = strconv.Atoi(fields[0])
+			if err != nil {
+				return "", fmt.Errorf("parse additions for %q: %w", stat.Path, err)
+			}
+			stat.Deletions, err = strconv.Atoi(fields[1])
+			if err != nil {
+				return "", fmt.Errorf("parse deletions for %q: %w", stat.Path, err)
+			}
+		}
+		stats = append(stats, stat)
+		seenPaths[stat.Path] = struct{}{}
+		onlyNonExecutable = onlyNonExecutable && isNonExecutableReviewPath(stat.Path)
+		touchesConfiguration = touchesConfiguration || isConfigurationReviewPath(stat.Path)
+	}
+	for _, path := range snapshot.Paths {
+		if _, ok := seenPaths[path]; !ok {
+			return "", fmt.Errorf("immutable snapshot path %q is missing from tree diff stats", path)
+		}
+	}
+	if len(seenPaths) != len(snapshot.Paths) {
+		return "", errors.New("immutable tree diff contains paths outside the review snapshot")
+	}
+	return reviewtransaction.ClassifyRisk(reviewtransaction.RiskInput{
+		Stats: stats, OnlyNonExecutableChanges: onlyNonExecutable, TouchesConfiguration: touchesConfiguration,
+	})
+}
+
+func isNonExecutableReviewPath(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".md", ".mdx", ".rst", ".adoc", ".png", ".jpg", ".jpeg", ".gif", ".svg":
+		return true
+	default:
+		return false
+	}
+}
+
+func isConfigurationReviewPath(path string) bool {
+	base := strings.ToLower(filepath.Base(path))
+	switch base {
+	case "go.mod", "go.sum", "package.json", "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "dockerfile", "makefile":
+		return true
+	}
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".json", ".yaml", ".yml", ".toml", ".ini", ".env":
+		return true
+	default:
+		return false
+	}
 }
 
 func RunReviewResume(args []string, stdout io.Writer) error {
