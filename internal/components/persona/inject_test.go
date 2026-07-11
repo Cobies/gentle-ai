@@ -511,6 +511,157 @@ func TestInjectAntigravityGentlemanWritesMarkedPersonaSection(t *testing.T) {
 	}
 }
 
+func TestInjectAntigravity_WorkspaceRules(t *testing.T) {
+	defer func() {
+		os.Unsetenv("GEMINI_MODEL")
+		os.Unsetenv("ANTIGRAVITY_MODEL")
+	}()
+
+	t.Run("rules file exists", func(t *testing.T) {
+		home := t.TempDir()
+		cwd := t.TempDir()
+
+		originalGetwd := getwd
+		defer func() { getwd = originalGetwd }()
+		getwd = func() (string, error) {
+			return cwd, nil
+		}
+
+		rulesDir := filepath.Join(cwd, ".agents", "rules")
+		if err := os.MkdirAll(rulesDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		rulesFile := filepath.Join(rulesDir, "sdd-workflow.md")
+		rulesContent := "# Special CWD Rules\nRule 1: Always write tests."
+		if err := os.WriteFile(rulesFile, []byte(rulesContent), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		promptPath := filepath.Join(home, ".gemini", "GEMINI.md")
+		if err := os.MkdirAll(filepath.Dir(promptPath), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(promptPath, []byte("# Preamble\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		os.Unsetenv("GEMINI_MODEL")
+		os.Unsetenv("ANTIGRAVITY_MODEL")
+
+		result, err := Inject(home, antigravityAdapter(), model.PersonaGentleman)
+		if err != nil {
+			t.Fatalf("Inject() error = %v", err)
+		}
+		if !result.Changed {
+			t.Fatal("Inject() changed = false")
+		}
+
+		content, err := os.ReadFile(promptPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := string(content)
+
+		if !strings.Contains(text, "<!-- gentle-ai:workspace-rules -->") {
+			t.Fatal("missing workspace-rules markers")
+		}
+		if !strings.Contains(text, rulesContent) {
+			t.Fatalf("workspace rules content not injected, got:\n%s", text)
+		}
+	})
+
+	t.Run("rules file missing", func(t *testing.T) {
+		home := t.TempDir()
+		cwd := t.TempDir()
+
+		originalGetwd := getwd
+		defer func() { getwd = originalGetwd }()
+		getwd = func() (string, error) {
+			return cwd, nil
+		}
+
+		promptPath := filepath.Join(home, ".gemini", "GEMINI.md")
+		if err := os.MkdirAll(filepath.Dir(promptPath), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(promptPath, []byte("# Preamble\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		os.Unsetenv("GEMINI_MODEL")
+		os.Unsetenv("ANTIGRAVITY_MODEL")
+
+		_, err := Inject(home, antigravityAdapter(), model.PersonaGentleman)
+		if err != nil {
+			t.Fatalf("Inject() error = %v", err)
+		}
+
+		content, err := os.ReadFile(promptPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := string(content)
+
+		if strings.Contains(text, "<!-- gentle-ai:workspace-rules -->") {
+			t.Fatal("expected no workspace-rules markers since rules file is missing")
+		}
+	})
+
+	t.Run("low-tier model warning prepended", func(t *testing.T) {
+		home := t.TempDir()
+		cwd := t.TempDir()
+
+		originalGetwd := getwd
+		defer func() { getwd = originalGetwd }()
+		getwd = func() (string, error) {
+			return cwd, nil
+		}
+
+		rulesDir := filepath.Join(cwd, ".agents", "rules")
+		if err := os.MkdirAll(rulesDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		rulesFile := filepath.Join(rulesDir, "sdd-workflow.md")
+		rulesContent := "# Special CWD Rules"
+		if err := os.WriteFile(rulesFile, []byte(rulesContent), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		promptPath := filepath.Join(home, ".gemini", "GEMINI.md")
+		if err := os.MkdirAll(filepath.Dir(promptPath), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(promptPath, []byte("# Preamble\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		os.Setenv("GEMINI_MODEL", "gemini-1.5-flash")
+		os.Unsetenv("ANTIGRAVITY_MODEL")
+
+		_, err := Inject(home, antigravityAdapter(), model.PersonaGentleman)
+		if err != nil {
+			t.Fatalf("Inject() error = %v", err)
+		}
+
+		content, err := os.ReadFile(promptPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := string(content)
+
+		if !strings.Contains(text, "<!-- gentle-ai:workspace-rules -->") {
+			t.Fatal("missing workspace-rules markers")
+		}
+		warningContent := "ACTIVE MODEL CLASSIFIED AS LOW-TIER."
+		if !strings.Contains(text, warningContent) {
+			t.Fatalf("low-tier warning not injected, got:\n%s", text)
+		}
+		if !strings.Contains(text, rulesContent) {
+			t.Fatalf("workspace rules content not injected, got:\n%s", text)
+		}
+	})
+}
+
 func TestInjectOpenCodeGentlemanDoesNotCreateSDDConductor(t *testing.T) {
 	home := t.TempDir()
 

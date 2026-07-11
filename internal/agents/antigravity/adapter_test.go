@@ -325,3 +325,113 @@ func TestIdentity(t *testing.T) {
 		t.Fatalf("Tier() = %q, want %q", got, model.TierFull)
 	}
 }
+
+func TestAdapter_DetectLowModel(t *testing.T) {
+	defer func() {
+		os.Unsetenv("GEMINI_MODEL")
+		os.Unsetenv("ANTIGRAVITY_MODEL")
+	}()
+
+	t.Run("EnvVar GEMINI_MODEL Small", func(t *testing.T) {
+		os.Setenv("GEMINI_MODEL", "gemini-1.5-flash")
+		os.Unsetenv("ANTIGRAVITY_MODEL")
+		a := NewAdapter()
+		if !a.DetectLowModel(t.TempDir()) {
+			t.Fatal("expected DetectLowModel to return true for small GEMINI_MODEL")
+		}
+	})
+
+	t.Run("EnvVar GEMINI_MODEL Capable", func(t *testing.T) {
+		os.Setenv("GEMINI_MODEL", "gpt-4o")
+		os.Unsetenv("ANTIGRAVITY_MODEL")
+		a := NewAdapter()
+		if a.DetectLowModel(t.TempDir()) {
+			t.Fatal("expected DetectLowModel to return false for capable GEMINI_MODEL")
+		}
+	})
+
+	t.Run("EnvVar ANTIGRAVITY_MODEL Small", func(t *testing.T) {
+		os.Unsetenv("GEMINI_MODEL")
+		os.Setenv("ANTIGRAVITY_MODEL", "gpt-4o-mini")
+		a := NewAdapter()
+		if !a.DetectLowModel(t.TempDir()) {
+			t.Fatal("expected DetectLowModel to return true for small ANTIGRAVITY_MODEL")
+		}
+	})
+
+	t.Run("Settings JSON model", func(t *testing.T) {
+		os.Unsetenv("GEMINI_MODEL")
+		os.Unsetenv("ANTIGRAVITY_MODEL")
+		home := t.TempDir()
+		cliDir := filepath.Join(home, ".gemini", "antigravity-cli")
+		if err := os.MkdirAll(cliDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		a := &Adapter{statPath: makeStatFn(cliDir)}
+		settingsPath := a.SettingsPath(home)
+		content := `{"model": "claude-3-5-haiku"}`
+		if err := os.WriteFile(settingsPath, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		if !a.DetectLowModel(home) {
+			t.Fatal("expected DetectLowModel to return true for small model in settings.json model field")
+		}
+	})
+
+	t.Run("Settings JSON modelId", func(t *testing.T) {
+		os.Unsetenv("GEMINI_MODEL")
+		os.Unsetenv("ANTIGRAVITY_MODEL")
+		home := t.TempDir()
+		cliDir := filepath.Join(home, ".gemini", "antigravity-cli")
+		if err := os.MkdirAll(cliDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		a := &Adapter{statPath: makeStatFn(cliDir)}
+		settingsPath := a.SettingsPath(home)
+		content := `{"modelId": "gpt-4o-mini"}`
+		if err := os.WriteFile(settingsPath, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		if !a.DetectLowModel(home) {
+			t.Fatal("expected DetectLowModel to return true for small modelId in settings.json")
+		}
+	})
+}
+
+func TestAdapter_GetWorkspaceRules(t *testing.T) {
+	t.Run("rules file exists", func(t *testing.T) {
+		cwd := t.TempDir()
+		rulesDir := filepath.Join(cwd, ".agents", "rules")
+		if err := os.MkdirAll(rulesDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		rulesFile := filepath.Join(rulesDir, "sdd-workflow.md")
+		expectedContent := "# Workspace Workflow Rules\nStrict mode enabled."
+		if err := os.WriteFile(rulesFile, []byte(expectedContent), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		a := NewAdapter()
+		rules, err := a.GetWorkspaceRules(cwd)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if rules != expectedContent {
+			t.Fatalf("got rules = %q, want %q", rules, expectedContent)
+		}
+	})
+
+	t.Run("rules file missing", func(t *testing.T) {
+		cwd := t.TempDir()
+		a := NewAdapter()
+		rules, err := a.GetWorkspaceRules(cwd)
+		if err != nil {
+			t.Fatalf("unexpected error for missing rules: %v", err)
+		}
+		if rules != "" {
+			t.Fatalf("expected empty rules, got: %q", rules)
+		}
+	})
+}

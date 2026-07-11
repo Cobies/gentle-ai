@@ -2,6 +2,7 @@ package antigravity
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 
@@ -148,6 +149,49 @@ func (a *Adapter) SupportsSystemPrompt() bool {
 
 func (a *Adapter) SupportsMCP() bool {
 	return true
+}
+
+// DetectLowModel returns true if the active model is classified as low-tier.
+// It checks GEMINI_MODEL and ANTIGRAVITY_MODEL environment variables, falling back to settings.json.
+func (a *Adapter) DetectLowModel(homeDir string) bool {
+	// 1. Check env vars
+	for _, env := range []string{"GEMINI_MODEL", "ANTIGRAVITY_MODEL"} {
+		if val := os.Getenv(env); val != "" {
+			return model.ModelCapability(val) == "small"
+		}
+	}
+	// 2. Fall back to settings.json
+	settingsPath := a.SettingsPath(homeDir)
+	if data, err := os.ReadFile(settingsPath); err == nil {
+		var cfg struct {
+			Model   string `json:"model"`
+			ModelID string `json:"modelId"`
+		}
+		if err := json.Unmarshal(data, &cfg); err == nil {
+			m := cfg.Model
+			if m == "" {
+				m = cfg.ModelID
+			}
+			if m != "" {
+				return model.ModelCapability(m) == "small"
+			}
+		}
+	}
+	return false
+}
+
+// GetWorkspaceRules loads the workspace-specific workflow rules from .agents/rules/sdd-workflow.md.
+// If the file is missing, it returns an empty string without an error.
+func (a *Adapter) GetWorkspaceRules(cwd string) (string, error) {
+	rulesPath := filepath.Join(cwd, ".agents", "rules", "sdd-workflow.md")
+	data, err := os.ReadFile(rulesPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	return string(data), nil
 }
 
 type AgentNotInstallableError struct {

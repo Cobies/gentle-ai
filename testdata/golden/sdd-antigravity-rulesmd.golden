@@ -366,14 +366,14 @@ Do NOT skip this check. Do not ask the user about init itself once preflight is 
 
 This is collected by `SDD Session Preflight`. If it is missing, enforce `SDD Session Preflight and Execution Mode (HARD GATE)` before any phase work.
 
-- **Automatic** (`auto` / `automatic`): Run dependency-ready phases sequentially without asking between phases, while still running the automatic gatekeeper validation after every phase before invoking the next dynamic subagent. The user only sees an interruption when the gatekeeper catches a real problem or a review workload guard requires a delivery decision.
+- **Automatic** (`auto` / `automatic`): Run dependency-ready phases sequentially without asking between phases, while still running the automatic gatekeeper validation after every phase before invoking the next dynamic subagent. The user only sees an interruption when the gatekeeper catches a real problem, a review workload guard requires a delivery decision, or before transitioning to the `sdd-apply` phase. **CRITICAL GATE**: The transition to the `sdd-apply` (implementation) phase is NEVER automatic; the orchestrator MUST pause, present the proposed tasks/changes, and obtain explicit user approval before launching `sdd-apply` in all modes.
 - **Interactive** (`interactive`): Pause after every dynamic phase subagent returns. Summarize the phase, ask whether to continue/adjust/stop, then STOP and wait for the user's answer before invoking the next dynamic subagent.
 
 If the user does not specify an execution mode during preflight, default to **Interactive**.
 
 Cache the mode choice for the session — do not ask again unless the user explicitly requests a mode change.
 
-For this agent (dynamic subagent execution): **Interactive** means the orchestrator pauses between dynamic phase invocations. **Automatic** means the orchestrator may invoke dependency-ready phase subagents back-to-back only after each automatic gatekeeper check passes.
+For this agent (dynamic subagent execution): **Interactive** means the orquestador pauses between dynamic phase invocations. **Automatic** means the orchestrator may invoke dependency-ready phase subagents back-to-back (except for `sdd-apply`, which always requires confirmation) only after each automatic gatekeeper check passes.
 
 ### Automatic Mode Gatekeeper (MANDATORY)
 

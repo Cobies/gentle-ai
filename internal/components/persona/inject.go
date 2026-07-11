@@ -259,6 +259,33 @@ func injectInternal(homeDir string, adapter agents.Adapter, persona model.Person
 		healed = filemerge.StripLegacyATLBlock(healed)
 		updated := filemerge.InjectMarkdownSection(healed, "persona", content)
 
+		if loader, ok := adapter.(interface {
+			GetWorkspaceRules(string) (string, error)
+		}); ok {
+			cwd, err := getwd()
+			if err == nil {
+				rules, err := loader.GetWorkspaceRules(cwd)
+				if err == nil {
+					if detector, ok := adapter.(interface {
+						DetectLowModel(string) bool
+					}); ok {
+						if detector.DetectLowModel(homeDir) {
+							warning := "> [!IMPORTANT]\n" +
+								"> ACTIVE MODEL CLASSIFIED AS LOW-TIER.\n" +
+								"> You MUST NOT execute SDD phases (sdd-explore, sdd-propose, sdd-spec, sdd-design, sdd-tasks, sdd-apply, sdd-verify) inline within the parent thread.\n" +
+								"> You MUST define and invoke dynamic subagents using define_subagent and invoke_subagent for each phase. Inline execution is strictly forbidden.\n"
+							if rules != "" {
+								rules = warning + "\n" + rules
+							} else {
+								rules = warning
+							}
+						}
+					}
+					updated = filemerge.InjectMarkdownSection(updated, "workspace-rules", rules)
+				}
+			}
+		}
+
 		writeResult, err := filemerge.WriteFileAtomic(promptPath, []byte(updated), 0o644)
 		if err != nil {
 			return InjectionResult{}, err
@@ -573,6 +600,8 @@ func mergeJSONFileToleratingMalformed(path string, overlay []byte) (filemerge.Wr
 	}
 	return filemerge.WriteResult{}, err
 }
+
+var getwd = os.Getwd
 
 var osReadFile = func(path string) ([]byte, error) {
 	content, err := os.ReadFile(path)
