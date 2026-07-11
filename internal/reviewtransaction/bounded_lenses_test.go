@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -54,7 +55,7 @@ func TestOrdinaryBoundedRecordsEachSelectedLensExactlyOnceBeforeFreeze(t *testin
 		t.Fatal(err)
 	}
 	_ = tx.StartReview()
-	if err := tx.FreezeFindings([]Finding{}, hash("0")); err == nil {
+	if err := freezeTestFindings(tx, []Finding{}); err == nil {
 		t.Fatal("FreezeFindings() accepted incomplete selected lenses")
 	}
 	for _, result := range []LensResult{
@@ -75,7 +76,7 @@ func TestOrdinaryBoundedRecordsEachSelectedLensExactlyOnceBeforeFreeze(t *testin
 			t.Fatalf("RecordLensResult(%q) accepted duplicate", lens)
 		}
 	}
-	if err := tx.FreezeFindings([]Finding{}, hash("9")); err != nil {
+	if err := freezeTestFindings(tx, []Finding{}); err != nil {
 		t.Fatalf("FreezeFindings() error = %v", err)
 	}
 }
@@ -97,10 +98,13 @@ func TestZeroLensOrdinaryBoundedRequiresExplicitEmptyLedger(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = tx.StartReview()
-	if err := tx.FreezeFindings(nil, hash("1")); err == nil {
+	if tx.OriginalChangedLines == nil || *tx.OriginalChangedLines != 0 || tx.CorrectionBudget == nil || *tx.CorrectionBudget != 0 {
+		t.Fatalf("empty low-risk candidate lines/budget = %v/%v", tx.OriginalChangedLines, tx.CorrectionBudget)
+	}
+	if err := tx.FreezeFindings(nil, []byte(CanonicalEmptyLedger), ""); err == nil {
 		t.Fatal("FreezeFindings(nil) accepted an implicit zero-lens ledger")
 	}
-	if err := tx.FreezeFindings([]Finding{}, hash("1")); err != nil {
+	if err := freezeTestFindings(tx, []Finding{}); err != nil {
 		t.Fatalf("FreezeFindings(explicit empty) error = %v", err)
 	}
 }
@@ -120,7 +124,7 @@ func TestOrdinaryBoundedLensStateRoundTripsAndLegacyJSONRemainsAdditive(t *testi
 	if err != nil {
 		t.Fatalf("ParseTransaction() error = %v", err)
 	}
-	if len(parsed.SelectedLenses) != 1 || len(parsed.LensResults) != 1 || parsed.Counters.ReliabilityExecutions != 1 {
+	if len(parsed.SelectedLenses) != 1 || len(parsed.LensResults) != 1 || parsed.Counters.ReliabilityExecutions != 1 || parsed.OriginalChangedLines == nil || *parsed.OriginalChangedLines != 2 || parsed.CorrectionBudget == nil || *parsed.CorrectionBudget != 1 {
 		t.Fatalf("round-tripped bounded state = %#v", parsed)
 	}
 
@@ -130,7 +134,7 @@ func TestOrdinaryBoundedLensStateRoundTripsAndLegacyJSONRemainsAdditive(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, additiveField := range []string{"risk_level", "selected_lenses", "lens_results", "risk_executions", "resilience_executions", "readability_executions", "reliability_executions"} {
+	for _, additiveField := range []string{"risk_level", "selected_lenses", "lens_results", "original_changed_lines", "correction_budget", "proposed_correction_lines", "actual_correction_lines", "risk_executions", "resilience_executions", "readability_executions", "reliability_executions"} {
 		if strings.Contains(string(legacyPayload), additiveField) {
 			t.Fatalf("legacy ordinary_4r JSON unexpectedly contains %q", additiveField)
 		}
@@ -178,7 +182,7 @@ func TestStoreValidatesContentAddressedLensResultSuccessorsAndReplay(t *testing.
 	if chain.HeadRevision != completed || len(got.LensResults) != 1 || got.Counters.ReliabilityExecutions != 1 {
 		t.Fatalf("replayed chain = %#v", chain)
 	}
-	if err := tx.FreezeFindings([]Finding{}, hash("3")); err != nil {
+	if err := freezeTestFindings(tx, []Finding{}); err != nil {
 		t.Fatal(err)
 	}
 	completed, err = store.Append(completed, Record{Operation: "review/freeze-findings", Transaction: *tx})
@@ -288,6 +292,38 @@ func TestOrdinaryBoundedDerivesLensIdentityFromStructuredContent(t *testing.T) {
 	}
 }
 
+func TestOrdinaryBoundedCanonicalizesModelLensOutputInGo(t *testing.T) {
+	tx, err := NewTransaction(boundedStart(t, []string{LensReliability}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = tx.StartReview()
+	input := LensResult{
+		Findings: []Finding{{
+			Location: " internal/example.go:12 ", Severity: " critical ",
+			Claim: " candidate skips rollback ", ProofRefs: []string{" focused test fails on candidate only "},
+		}},
+		Evidence: []string{" reviewed candidate diff and focused test output "},
+	}
+	if err := tx.RecordLensResult(input); err != nil {
+		t.Fatalf("RecordLensResult(model output) error = %v", err)
+	}
+	got := tx.LensResults[0]
+	wantFinding := Finding{
+		ID: "R3-001", Lens: "reliability", Location: "internal/example.go:12", Severity: "CRITICAL",
+		Claim: "candidate skips rollback", ProofRefs: []string{"focused test fails on candidate only"},
+	}
+	if len(got.Findings) != 1 || !reflect.DeepEqual(got.Findings[0], wantFinding) || !equalStrings(got.Evidence, []string{"reviewed candidate diff and focused test output"}) {
+		t.Fatalf("canonical lens result = %#v", got)
+	}
+	if got.ResultHash != LensResultHash(got) {
+		t.Fatalf("result hash = %q, want Go-derived hash", got.ResultHash)
+	}
+	if input.Lens != "" || input.Findings[0].ID != "" || input.Findings[0].Lens != "" || input.Findings[0].Severity != " critical " {
+		t.Fatalf("RecordLensResult mutated caller input: %#v", input)
+	}
+}
+
 func TestStoreRejectsForgedIncompleteLensFreezeBeforeAppend(t *testing.T) {
 	store := Store{Dir: filepath.Join(t.TempDir(), "review-store")}
 	tx, err := NewTransaction(boundedStart(t, []string{LensReliability}))
@@ -330,7 +366,7 @@ func TestStoreRequiresExactNativeFreezeOperation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := tx.FreezeFindings([]Finding{}, hash("2")); err != nil {
+	if err := freezeTestFindings(tx, []Finding{}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.Append(completed, Record{Operation: "review/complete-final-verification", Transaction: *tx}); !errors.Is(err, ErrInvalidSuccessor) {
@@ -341,15 +377,18 @@ func TestStoreRequiresExactNativeFreezeOperation(t *testing.T) {
 func boundedStart(t *testing.T, lenses []string) Start {
 	t.Helper()
 	template := newTestTransaction(t, ModeOrdinary4R)
+	originalChangedLines := 2
 	riskLevel := RiskHigh
 	if len(lenses) == 0 {
 		riskLevel = RiskLow
+		originalChangedLines = 0
 	} else if len(lenses) == 1 {
 		riskLevel = RiskMedium
 	}
 	return Start{
 		LineageID: "bounded-lineage", Mode: ModeOrdinaryBounded, Generation: 1,
 		Snapshot: template.Snapshot, PolicyHash: hash("d"), RiskLevel: riskLevel, SelectedLenses: append([]string(nil), lenses...),
+		OriginalChangedLines: &originalChangedLines,
 	}
 }
 

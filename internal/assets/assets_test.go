@@ -16,7 +16,7 @@ func TestOrchestratorsRequireNonSkippableGeneralDelegationTriggers(t *testing.T)
 	requiredControls := []string{
 		"Mandatory Delegation Triggers",
 		"non-skippable hard gates",
-		"TOTALMENTE obligatorio",
+		"fully mandatory",
 		"4-file rule",
 		"Multi-file write rule",
 		"Lifecycle receipt rule",
@@ -45,10 +45,15 @@ func TestOrchestratorsRequireNonSkippableGeneralDelegationTriggers(t *testing.T)
 
 		lifecycleLine := markdownLineContaining(triggerSection, "**Lifecycle receipt rule**")
 		if !lineContainsAll(
-			"before commit, push, PR, or release",
+			"before commit",
+			"stage every reviewed path",
+			"without changing content or mode",
+			"gentle-ai review validate --gate pre-commit --cwd <repo>",
+			"before push, PR, or release",
 			"content-bound receipt",
-			"`review-validate`",
-			"never launch a lens",
+			"gentle-ai review validate --gate <gate> --cwd <repo>",
+			"facade discover authority and artifacts",
+			"launch a lens",
 			"Judgment Day",
 			"new budget at the gate",
 		)(lifecycleLine) {
@@ -1644,12 +1649,17 @@ func boundedReviewRoutingProblems(content string) []string {
 		{
 			label: "Lifecycle receipt rule",
 			matcher: lineContainsAll(
-				"before commit, push, PR, or release",
+				"before commit",
+				"before push, PR, or release",
 				"content-bound receipt",
-				"`review-validate`",
+				"gentle-ai review validate --gate pre-commit --cwd <repo>",
+				"gentle-ai review validate --gate <gate> --cwd <repo>",
+				"facade discover authority and artifacts",
 				"never launch a lens",
 				"Judgment Day",
 				"new budget at the gate",
+				"stage every reviewed path",
+				"without changing content or mode",
 			),
 			contract: "must validate the content-bound receipt without launching a lens, Judgment Day, or a new budget",
 		},

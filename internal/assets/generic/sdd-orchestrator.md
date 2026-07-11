@@ -13,8 +13,8 @@ Keep orchestrator synthesis short by default: report the decision, outcome, and 
 
 - The active persona controls direct user/orchestrator conversation only. Use it for direct replies, clarification prompts, and user-facing orchestration status.
 - Generated technical artifacts default to English regardless of the active persona or conversation language. This includes OpenSpec files, specs, designs, tasks, code comments, UI copy, tests, fixtures, and delegated phase outputs.
-- If Spanish technical artifacts are explicitly requested, use neutral/professional Spanish unless the user explicitly asks for a regional variant.
-- Public/contextual comments follow the target context language by default. Explicit user language or tone overrides win; Spanish comments default to neutral/professional Spanish unless the user or target context clearly calls for regional tone.
+- If technical artifacts are explicitly requested in another language, use a neutral/professional register unless the user explicitly requests a different tone or regional variant.
+- Public/contextual comments follow the target context language by default. Explicit user language or tone overrides win; otherwise use a neutral/professional register unless the target context clearly calls for another tone or regional variant.
 - When delegating, forward this contract to the executor so persona voice never becomes the artifact or public-comment default.
 
 ### Delegation Rules
@@ -47,7 +47,7 @@ These are parent-orchestrator stop rules. Once any trigger fires, the orchestrat
 
 1. **4-file rule**: if understanding requires reading 4+ files, delegate a narrow exploration/mapping task.
 2. **Multi-file write rule**: if implementation will touch 2+ non-trivial files, delegate one writer and run the selected concrete review lens(es) before completion.
-3. **Lifecycle receipt rule**: before commit, push, PR, or release, validate the same content-bound receipt with native `review-validate`; follow missing/scope-changed/invalidated/escalated action and never launch a lens, Judgment Day, or new budget at the gate.
+3. **Lifecycle receipt rule**: before commit, stage every reviewed path without changing content or mode, then run native `gentle-ai review validate --gate pre-commit --cwd <repo>` for the same content-bound receipt; before push, PR, or release, run the corresponding native `gentle-ai review validate --gate <gate> --cwd <repo>`. Let the facade discover authority and artifacts, follow missing/scope-changed/invalidated/escalated action, and never launch a lens, Judgment Day, or new budget at the gate.
 4. **Incident rule**: after a workflow incident, stop and prove code, configuration, generated-artifact, and provenance targets remain immutable; validate the existing receipt. Any changed target requires explicit scope action, not reopened review.
 5. **Long-session rule**: after roughly 20 tool calls, 5 exploratory file reads, or 2 non-mechanical edits without delegation and growing complexity, pause and delegate instead of silently continuing monolithically.
 6. **Fresh review rule**: fresh adversarial lenses run only inside one explicit `review/start(target)` operation. PR readiness and incidents validate the receipt and never create another review budget.

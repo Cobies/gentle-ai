@@ -206,6 +206,8 @@ func RunInstall(args []string, detection system.DetectionResult) (InstallResult,
 	claudePhaseState := claudePhaseAssignmentsToState(input.Selection.ClaudePhaseAssignments)
 	newState := state.InstallState{
 		InstalledAgents:             agentIDs,
+		CommunityTools:              communityToolIDsToStrings(input.Selection.CommunityTools),
+		CommunityToolsConfigured:    true,
 		ClaudeModelAssignments:      claudeLegacyAssignmentsForState(input.Selection.ClaudeModelAssignments, claudePhaseState),
 		ClaudePhaseAssignments:      claudePhaseState,
 		KiroModelAssignments:        kiroAliasesToStrings(input.Selection.KiroModelAssignments),
@@ -223,8 +225,9 @@ func RunInstall(args []string, detection system.DetectionResult) (InstallResult,
 		}
 		newState = merged
 	}
-	// Non-fatal: a state write failure must not break an otherwise successful install.
-	_ = state.Write(homeDir, newState)
+	if err := state.Write(homeDir, newState); err != nil {
+		return result, fmt.Errorf("persist install state: %w", err)
+	}
 
 	return result, nil
 }
@@ -520,7 +523,7 @@ func (r *installRuntime) stagePlan() pipeline.StagePlan {
 	}
 
 	for _, tool := range r.selection.CommunityTools {
-		apply = append(apply, communityToolInstallStep{id: "community-tool:" + string(tool), tool: tool, workspaceDir: r.workspaceDir, homeDir: r.homeDir})
+		apply = append(apply, communityToolInstallStep{id: "community-tool:" + string(tool), tool: tool, workspaceDir: r.workspaceDir, homeDir: r.homeDir, state: r.state})
 	}
 
 	for _, component := range r.resolved.OrderedComponents {
@@ -555,16 +558,12 @@ type piCodeGraphReconcileStep struct {
 	state                     *runtimeState
 }
 
+var reconcilePiCodeGraph = communitytool.ReconcilePiCodeGraph
+
 func (s piCodeGraphReconcileStep) ID() string { return s.id }
 func (s piCodeGraphReconcileStep) Run() error {
-	result, err := communitytool.ReconcilePiCodeGraph(communitytool.PiCodeGraphOptions{HomeDir: s.homeDir, WorkspaceDir: s.workspaceDir, Selected: s.selected})
-	if errors.Is(err, communitytool.ErrPiCodeGraphAdapterHealthUnavailable) {
-		pending := communitytool.PiCodeGraphAdapterHealthUnavailableResult()
-		if s.state != nil {
-			s.state.piCodeGraph = &pending
-		}
-		return nil
-	}
+	result, err := reconcilePiCodeGraph(communitytool.PiCodeGraphOptions{HomeDir: s.homeDir, WorkspaceDir: s.workspaceDir, Selected: s.selected})
+	result, err = communitytool.PreservePiCodeGraphPending(result, err)
 	if err == nil && s.state != nil {
 		s.state.piCodeGraph = &result
 	}
@@ -762,14 +761,18 @@ type communityToolInstallStep struct {
 	tool         model.CommunityToolID
 	workspaceDir string
 	homeDir      string
+	state        *runtimeState
 }
 
 func (s communityToolInstallStep) ID() string { return s.id }
 
 func (s communityToolInstallStep) Run() error {
-	_, err := installCommunityToolWithHome(s.tool, s.workspaceDir, s.homeDir, communitytool.RunnerFunc(runCommand), communitytool.DetectorFunc(cmdLookPath))
+	result, err := installCommunityToolWithHome(s.tool, s.workspaceDir, s.homeDir, communitytool.RunnerFunc(runCommand), communitytool.DetectorFunc(cmdLookPath))
 	if err != nil {
 		return fmt.Errorf("install community tool %q: %w", s.tool, err)
+	}
+	if result.PiCodeGraph != nil && s.state != nil {
+		s.state.piCodeGraph = result.PiCodeGraph
 	}
 	return nil
 }
@@ -804,25 +807,14 @@ func computeSlugSlimVerdicts(agentIDs []model.AgentID, isSlim func(model.AgentID
 }
 
 // resolveAdapters creates adapters for each agent ID, skipping unsupported ones.
-// It ensures that Antigravity is processed last so that if another agent (like Gemini CLI)
-// shares its prompt file surface (GEMINI.md), Antigravity's prompt rules (which include
-// dynamic subagent delegation protocols) take precedence and are not overwritten.
 func resolveAdapters(agentIDs []model.AgentID) []agents.Adapter {
 	adapters := make([]agents.Adapter, 0, len(agentIDs))
-	var hasAntigravity agents.Adapter
 	for _, id := range agentIDs {
 		adapter, err := agents.NewAdapter(id)
 		if err != nil {
 			continue
 		}
-		if id == model.AgentAntigravity {
-			hasAntigravity = adapter
-			continue
-		}
 		adapters = append(adapters, adapter)
-	}
-	if hasAntigravity != nil {
-		adapters = append(adapters, hasAntigravity)
 	}
 	return adapters
 }
@@ -1379,7 +1371,7 @@ func backupTargets(homeDir, workspaceDir string, scope InstallScope, selection m
 		}
 	}
 	if selection.HasCommunityTool(model.CommunityToolCodeGraph) {
-		for _, path := range communitytool.CodeGraphGuidancePaths(homeDir) {
+		for _, path := range communitytool.CodeGraphManagedPaths(homeDir) {
 			paths[path] = struct{}{}
 		}
 	}
@@ -1609,15 +1601,18 @@ func shouldInjectCodeGraphGuidanceForSDD(homeDir string, selected []model.Commun
 			return true
 		}
 	}
-	detector := communitytool.DetectorFunc(cmdLookPath)
-	if communitytool.HasConfiguredCodeGraph(homeDir, detector) {
-		return true
+	return false
+}
+
+func communityToolIDsToStrings(tools []model.CommunityToolID) []string {
+	if tools == nil {
+		return nil
 	}
-	if !communitytool.HasLegacyCodeGraphGuidance(homeDir) {
-		return false
+	result := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		result = append(result, string(tool))
 	}
-	_, err := cmdLookPath("codegraph")
-	return err == nil
+	return result
 }
 
 type openClawWorkspaceConfig struct {

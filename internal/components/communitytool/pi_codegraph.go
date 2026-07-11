@@ -38,13 +38,7 @@ var piCodeGraphEffectiveMCPProbe PiCodeGraphEffectiveMCPProbe = probePiCodeGraph
 // verification remains separate capability evidence.
 var ErrPiCodeGraphAdapterHealthUnavailable = errors.New("Pi MCP adapter health is not machine-verifiable")
 
-const piCodeGraphAdapterHealthUnavailableManualAction = "Pi CodeGraph integration is pending: Pi 0.80.6 has no supported machine-verifiable adapter health signal. CodeGraph capability was not reported as configured."
-
-// PiCodeGraphAdapterHealthUnavailableResult returns the manual-action result used
-// when optional Pi CodeGraph wiring cannot be machine-verified during install.
-func PiCodeGraphAdapterHealthUnavailableResult() PiCodeGraphResult {
-	return PiCodeGraphResult{ManualActions: []string{piCodeGraphAdapterHealthUnavailableManualAction}}
-}
+const piCodeGraphPendingAction = "Pi CodeGraph integration is pending: Pi 0.80.6 has no supported machine-verifiable adapter health signal. CodeGraph capability was not reported as configured."
 
 // piCodeGraphAdapterRuntimeRunner is the Pi subprocess boundary. It captures
 // combined stdout/stderr so exit status alone cannot be mistaken for adapter
@@ -106,6 +100,40 @@ type PiCodeGraphMCPProbeResult struct {
 	AdapterAvailable bool
 	Initialized      bool
 	Tools            []PiCodeGraphMCPTool
+}
+
+// PreservePiCodeGraphPending converts only unavailable adapter-health evidence
+// into the manual action used while Pi has no verifiable health signal.
+func PreservePiCodeGraphPending(result PiCodeGraphResult, err error) (PiCodeGraphResult, error) {
+	if !isExclusivePiCodeGraphPending(err) {
+		return result, err
+	}
+	if !slices.Contains(result.ManualActions, piCodeGraphPendingAction) {
+		result.ManualActions = append(result.ManualActions, piCodeGraphPendingAction)
+	}
+	return result, nil
+}
+
+func isExclusivePiCodeGraphPending(err error) bool {
+	if err == ErrPiCodeGraphAdapterHealthUnavailable {
+		return true
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		children := joined.Unwrap()
+		if len(children) == 0 {
+			return false
+		}
+		for _, child := range children {
+			if !isExclusivePiCodeGraphPending(child) {
+				return false
+			}
+		}
+		return true
+	}
+	if wrapped, ok := err.(interface{ Unwrap() error }); ok {
+		return isExclusivePiCodeGraphPending(wrapped.Unwrap())
+	}
+	return false
 }
 
 // PiCodeGraphEffectiveMCPProbe initializes the configured MCP server through
@@ -237,11 +265,15 @@ func ReconcilePiCodeGraph(options PiCodeGraphOptions) (result PiCodeGraphResult,
 		}
 	}
 	if err = verifyPiCodeGraphWithProbe(effectiveMCPPath, result.Children, probe); err != nil {
-		return result, err
-	}
-	result.MCP, err = verifyPiMCPWithProbe(effectiveMCPPath, probe)
-	if err != nil {
-		return result, err
+		result, err = PreservePiCodeGraphPending(result, err)
+		if err != nil {
+			return result, err
+		}
+	} else {
+		result.MCP, err = verifyPiMCPWithProbe(effectiveMCPPath, probe)
+		if err != nil {
+			return result, err
+		}
 	}
 	encoded, marshalErr := json.MarshalIndent(manifest, "", "  ")
 	if marshalErr != nil {
@@ -524,7 +556,7 @@ func probePiCodeGraphAdapterRuntime(agentDir, mcpPath string) (PiCodeGraphMCPPro
 	args := []string{"--mcp-config", mcpPath, "--mode", "json", "--no-session", "--offline", "--print", "/mcp status"}
 	output, err := piCodeGraphAdapterRuntimeRunner("pi", args, append(os.Environ(), "PI_CODING_AGENT_DIR="+agentDir))
 	if err != nil {
-		return PiCodeGraphMCPProbeResult{}, fmt.Errorf("run Pi MCP adapter for %q: %w: %w: %s", mcpPath, ErrPiCodeGraphAdapterHealthUnavailable, err, strings.TrimSpace(string(output)))
+		return PiCodeGraphMCPProbeResult{}, fmt.Errorf("run Pi MCP adapter for %q: %w: %s", mcpPath, err, strings.TrimSpace(string(output)))
 	}
 	if err := validatePiCodeGraphAdapterRuntimeOutput(output); err != nil {
 		return PiCodeGraphMCPProbeResult{}, err
@@ -553,6 +585,11 @@ func validatePiCodeGraphAdapterRuntimeOutput(output []byte) error {
 		"adapter load error",
 		"error loading mcp",
 		"mcp adapter error",
+		"not ready",
+		"not running",
+		"unloaded",
+		"inactive",
+		"broken",
 		"not connected",
 		"disconnected",
 	}
@@ -1020,19 +1057,8 @@ func (j *piJournal) validate(path string) error {
 	if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSymlink != 0 {
 		return fmt.Errorf("refuse symlink Pi CodeGraph path %q", path)
 	}
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return err
-	}
-	for _, root := range j.roots {
-		rootAbs, rootErr := filepath.Abs(root)
-		if rootErr != nil {
-			continue
-		}
-		rel, relErr := filepath.Rel(rootAbs, abs)
-		if relErr == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			return nil
-		}
+	if piCodeGraphPathWithinRoots(path, j.roots) {
+		return nil
 	}
 	return fmt.Errorf("Pi CodeGraph path %q escapes allowed roots", path)
 }

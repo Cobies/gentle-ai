@@ -21,6 +21,7 @@ import (
 	windsurfagent "github.com/gentleman-programming/gentle-ai/internal/agents/windsurf"
 	"github.com/gentleman-programming/gentle-ai/internal/assets"
 	"github.com/gentleman-programming/gentle-ai/internal/model"
+	opencodemodel "github.com/gentleman-programming/gentle-ai/internal/opencode"
 	// agents/cursor, agents/gemini, agents/vscode used via agents.NewAdapter()
 )
 
@@ -632,7 +633,7 @@ func TestInjectOpenCodePreservesExistingOrchestratorPromptWhenRequested(t *testi
 	for _, wanted := range []string{
 		"### SDD Session Preflight (HARD GATE)",
 		"### Mandatory Delegation Triggers (Non-Skippable)",
-		"TOTALMENTE obligatorio",
+		"fully mandatory",
 		"Semantic guard",
 		"execution, not delegation",
 		"not a substitute for delegation",
@@ -744,7 +745,7 @@ func TestInjectOpenCodeMigratesPreservedLegacyOrchestratorPromptReferences(t *te
 		"business rules, implications, impact, edge cases",
 		"Never launch `sdd-apply` just because the user asked to implement a feature",
 		"### Mandatory Delegation Triggers (Non-Skippable)",
-		"TOTALMENTE obligatorio",
+		"fully mandatory",
 		"4-file rule",
 		"Multi-file write rule",
 		"Lifecycle receipt rule",
@@ -786,10 +787,11 @@ func TestInjectOpenCodeUpgradesV1DelegationLensTable(t *testing.T) {
 		t.Fatalf("MkdirAll(settings dir) error = %v", err)
 	}
 
-	const v1Block = "CUSTOM_PROMPT_HEAD\n\n" +
+	const userContent = "CUSTOM_PROMPT_HEAD\nUser-authored wording must remain " + legacyMandatoryWording + "."
+	const v1Block = userContent + "\n\n" +
 		"<!-- gentle-ai:delegation-hard-gates-migration -->\n" +
 		"### Mandatory Delegation Triggers (Non-Skippable)\n\n" +
-		"These gates are non-skippable hard gates, not recommendations. They are TOTALMENTE obligatorio: do not skip them.\n\n" +
+		"These gates are non-skippable hard gates, not recommendations. They are " + legacyMandatoryWording + ": do not skip them.\n\n" +
 		"Semantic guard: delegate means using OpenCode's native Task tool. Running local scripts is execution, not delegation.\n\n" +
 		"1. **4-file rule**: delegate.\n" +
 		"2. **Multi-file write rule**: a fresh review is required after delegated implementation, not a substitute for delegation.\n" +
@@ -833,10 +835,20 @@ func TestInjectOpenCodeUpgradesV1DelegationLensTable(t *testing.T) {
 	}
 	text := string(settingsBytes)
 
-	if !strings.Contains(text, "CUSTOM_PROMPT_HEAD") {
-		t.Fatal("opencode.json lost the user's custom prompt content outside the migration block")
+	var settings struct {
+		Agent map[string]struct {
+			Prompt string `json:"prompt"`
+		} `json:"agent"`
+	}
+	if err := json.Unmarshal(settingsBytes, &settings); err != nil {
+		t.Fatalf("Unmarshal(opencode.json) error = %v", err)
+	}
+	prompt := settings.Agent["gentle-orchestrator"].Prompt
+	if !strings.HasPrefix(prompt, userContent+"\n\n") {
+		t.Fatalf("user-authored content outside the migration block changed:\n%s", prompt)
 	}
 	for _, wanted := range []string{
+		"fully mandatory",
 		"triage the diff deterministically",
 		"**Trivial diff**",
 		"zero executable code and zero configuration changes",
@@ -860,8 +872,31 @@ func TestInjectOpenCodeUpgradesV1DelegationLensTable(t *testing.T) {
 			t.Fatalf("opencode.json retained stale v1 lens-selection text %q", stale)
 		}
 	}
+	managedStart := strings.Index(prompt, "<!-- gentle-ai:delegation-hard-gates-migration -->")
+	managedEnd := strings.Index(prompt, "<!-- /gentle-ai:delegation-hard-gates-migration -->")
+	if managedStart < 0 || managedEnd < managedStart {
+		t.Fatal("opencode.json missing delegation hard-gates migration block")
+	}
+	managedBlock := prompt[managedStart:managedEnd]
+	if strings.Contains(managedBlock, legacyMandatoryWording) {
+		t.Fatalf("managed delegation block retained legacy wording %q", legacyMandatoryWording)
+	}
+	if !strings.Contains(managedBlock, "fully mandatory") {
+		t.Fatal("managed delegation block missing migrated wording \"fully mandatory\"")
+	}
 	if strings.Count(text, "#### Review Lens Selection") != 1 {
 		t.Fatalf("opencode.json must contain exactly one Review Lens Selection section; got %d", strings.Count(text, "#### Review Lens Selection"))
+	}
+}
+
+func TestEnsurePreservedOpenCodeDelegationHardGatesMigratesCanonicalReviewCommand(t *testing.T) {
+	legacy := "before commit, push, or PR after code changes, run the concrete review lens(es) selected by Review Lens Selection unless the diff is trivial (tier 1)"
+	got := ensurePreservedOpenCodeDelegationHardGates(legacy)
+	if !strings.Contains(got, "`gentle-ai review validate --gate <gate> --cwd <repo>`") {
+		t.Fatalf("migrated delegation gates missing canonical review command:\n%s", got)
+	}
+	if strings.Contains(got, "native review validate --gate") {
+		t.Fatalf("migrated delegation gates retained non-existent command:\n%s", got)
 	}
 }
 
@@ -2753,10 +2788,23 @@ func TestInjectOpenClawRejectsAmbiguousWorkspacePath(t *testing.T) {
 func TestInjectOpenCodeMultiModeWithModelAssignments(t *testing.T) {
 	mockNoPackageManager(t)
 	home := t.TempDir()
+	settingsPath := filepath.Join(home, ".config", "opencode", "opencode.json")
+	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	seed := `{"$schema":"https://opencode.ai/config.json","username":"review-user","agent":{"custom":{"model":"custom/provider-model","description":"preserve me"}}}`
+	if err := os.WriteFile(settingsPath, []byte(seed), 0o644); err != nil {
+		t.Fatalf("WriteFile(opencode.json) error = %v", err)
+	}
 
 	assignments := map[string]model.ModelAssignment{
-		"sdd-init":  {ProviderID: "anthropic", ModelID: "claude-sonnet-4-20250514"},
-		"sdd-apply": {ProviderID: "openai", ModelID: "gpt-4o"},
+		"sdd-init":           {ProviderID: "anthropic", ModelID: "claude-sonnet-4-20250514"},
+		"sdd-apply":          {ProviderID: "openai", ModelID: "gpt-4o"},
+		"review-risk":        {ProviderID: "anthropic", ModelID: "claude-sonnet-4"},
+		"review-readability": {ProviderID: "openai", ModelID: "gpt-5-mini"},
+		"review-reliability": {ProviderID: "openai", ModelID: "gpt-5"},
+		"review-resilience":  {ProviderID: "anthropic", ModelID: "claude-sonnet-4"},
+		"review-refuter":     {ProviderID: "openai", ModelID: "gpt-5", Effort: "high"},
 	}
 
 	result, err := Inject(home, opencodeAdapter(), "multi", InjectOptions{OpenCodeModelAssignments: assignments})
@@ -2767,7 +2815,6 @@ func TestInjectOpenCodeMultiModeWithModelAssignments(t *testing.T) {
 		t.Fatal("Inject(multi, assignments) changed = false")
 	}
 
-	settingsPath := filepath.Join(home, ".config", "opencode", "opencode.json")
 	content, err := os.ReadFile(settingsPath)
 	if err != nil {
 		t.Fatalf("ReadFile(opencode.json) error = %v", err)
@@ -2781,6 +2828,13 @@ func TestInjectOpenCodeMultiModeWithModelAssignments(t *testing.T) {
 	agentMap, ok := root["agent"].(map[string]any)
 	if !ok {
 		t.Fatal("opencode.json missing agent map")
+	}
+	if root["$schema"] != "https://opencode.ai/config.json" || root["username"] != "review-user" {
+		t.Fatalf("unrelated config was not preserved: %v", root)
+	}
+	custom := agentMap["custom"].(map[string]any)
+	if custom["model"] != "custom/provider-model" || custom["description"] != "preserve me" {
+		t.Fatalf("unrelated custom agent changed: %v", custom)
 	}
 
 	// Verify sdd-init has the assigned model.
@@ -2799,6 +2853,21 @@ func TestInjectOpenCodeMultiModeWithModelAssignments(t *testing.T) {
 	}
 	if m, _ := applyAgent["model"].(string); m != "openai/gpt-4o" {
 		t.Fatalf("sdd-apply model = %q, want %q", m, "openai/gpt-4o")
+	}
+	for agent, want := range map[string]string{
+		"review-risk":        "anthropic/claude-sonnet-4",
+		"review-readability": "openai/gpt-5-mini",
+		"review-reliability": "openai/gpt-5",
+		"review-resilience":  "anthropic/claude-sonnet-4",
+		"review-refuter":     "openai/gpt-5",
+	} {
+		definition := agentMap[agent].(map[string]any)
+		if got := definition["model"]; got != want {
+			t.Fatalf("%s model = %q, want %q", agent, got, want)
+		}
+	}
+	if got := agentMap["review-refuter"].(map[string]any)["variant"]; got != "high" {
+		t.Fatalf("review-refuter variant = %q, want high", got)
 	}
 
 	// Unassigned phases should NOT have a model field — the overlay no longer
@@ -4885,8 +4954,8 @@ func TestInjectWritesNativeReviewAgentFiles(t *testing.T) {
 				t.Fatalf("Inject(%s) changed = false", tt.name)
 			}
 
-			for _, agent := range reviewAgentNames {
-				assertNativeAgentFile(t, filepath.Join(tt.agentsDir(home), agent+".md"), "No findings.")
+			for _, agent := range opencodemodel.ReviewLensPhases() {
+				assertNativeAgentFile(t, filepath.Join(tt.agentsDir(home), agent+".md"), `"findings":[]`)
 				for _, ext := range tt.extraExts {
 					want := tt.extraContains[ext]
 					if ext == ".yaml" {
@@ -4895,13 +4964,13 @@ func TestInjectWritesNativeReviewAgentFiles(t *testing.T) {
 					assertNativeAgentFile(t, filepath.Join(tt.agentsDir(home), agent+ext), want)
 				}
 			}
-			assertNativeAgentFile(t, filepath.Join(tt.agentsDir(home), reviewRefuterAgentName+".md"), "complete merged list of BLOCKER/CRITICAL candidates")
+			assertNativeAgentFile(t, filepath.Join(tt.agentsDir(home), opencodemodel.ReviewRefuterAgent+".md"), "complete merged list of BLOCKER/CRITICAL candidates")
 			for _, ext := range tt.extraExts {
 				want := tt.extraContains[ext]
 				if ext == ".yaml" {
-					want += reviewRefuterAgentName + ".md"
+					want += opencodemodel.ReviewRefuterAgent + ".md"
 				}
-				assertNativeAgentFile(t, filepath.Join(tt.agentsDir(home), reviewRefuterAgentName+ext), want)
+				assertNativeAgentFile(t, filepath.Join(tt.agentsDir(home), opencodemodel.ReviewRefuterAgent+ext), want)
 			}
 		})
 	}

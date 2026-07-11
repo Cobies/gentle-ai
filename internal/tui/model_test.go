@@ -277,6 +277,30 @@ func TestProfileCreateSeparatorIsIgnoredAndSkipped(t *testing.T) {
 	}
 }
 
+func TestModelPickerNavigationSkipsReviewSeparator(t *testing.T) {
+	rows := screens.ModelPickerRows()
+	separator := -1
+	for i, row := range rows {
+		if row == "--- Review agents ---" {
+			separator = i
+			break
+		}
+	}
+	if separator < 1 {
+		t.Fatalf("review separator missing from rows: %v", rows)
+	}
+
+	m := NewModel(system.DetectionResult{}, "dev")
+	m.Screen = ScreenModelPicker
+	m.ModelPicker = screens.ModelPickerState{Mode: screens.ModePhaseList, AvailableIDs: []string{"openai"}}
+	m.Cursor = separator - 1
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	if got := updated.(Model).Cursor; got != separator+1 {
+		t.Fatalf("cursor after review separator = %d, want %d", got, separator+1)
+	}
+}
+
 func TestProfileCreateBackspaceClearsSelectedJDAssignment(t *testing.T) {
 	jdPhases := opencode.JDPhases()
 	if len(jdPhases) == 0 {
@@ -701,6 +725,34 @@ func TestInstallingDoneToComplete(t *testing.T) {
 
 	if state.Screen != ScreenComplete {
 		t.Fatalf("screen = %v, want ScreenComplete", state.Screen)
+	}
+}
+
+func TestCompletionViewShowsExecutionErrorWhenStepsSucceeded(t *testing.T) {
+	m := NewModel(system.DetectionResult{}, "dev")
+	m.Screen = ScreenInstalling
+	result := pipeline.ExecutionResult{
+		Apply: pipeline.StageResult{
+			Success: true,
+			Steps:   []pipeline.StepResult{{StepID: "install", Status: pipeline.StepStatusSucceeded}},
+		},
+		Err: errors.New("persist install state: atomic replacement refused"),
+	}
+
+	updated, _ := m.Update(PipelineDoneMsg{Result: result})
+	state := updated.(Model)
+	updated, _ = state.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	state = updated.(Model)
+	out := state.View()
+
+	if state.Screen != ScreenComplete {
+		t.Fatalf("screen = %v, want ScreenComplete", state.Screen)
+	}
+	if strings.Contains(out, "Done! Your AI agents are ready.") || strings.Contains(out, "completed successfully") {
+		t.Fatalf("completion output rendered success for execution error: %q", out)
+	}
+	if !strings.Contains(out, "Installation completed with errors.") || !strings.Contains(out, result.Err.Error()) {
+		t.Fatalf("completion output missing execution error: %q", out)
 	}
 }
 
@@ -4213,6 +4265,7 @@ func TestModelConfigOpenCodePrePopulatesAssignments(t *testing.T) {
 	preExisting := map[string]model.ModelAssignment{
 		"gentle-orchestrator": {ProviderID: "anthropic", ModelID: "claude-sonnet-4-20250514"},
 		"sdd-apply":           {ProviderID: "openai", ModelID: "gpt-4o"},
+		"review-refuter":      {ProviderID: "openai", ModelID: "gpt-5"},
 	}
 
 	// Override the read function to return pre-existing assignments
@@ -4254,6 +4307,9 @@ func TestModelConfigOpenCodePrePopulatesAssignments(t *testing.T) {
 	want2 := preExisting["sdd-apply"]
 	if got2 != want2 {
 		t.Errorf("sdd-apply assignment = %+v, want %+v", got2, want2)
+	}
+	if got := state.Selection.ModelAssignments["review-refuter"]; got != preExisting["review-refuter"] {
+		t.Errorf("review-refuter assignment = %+v, want %+v", got, preExisting["review-refuter"])
 	}
 }
 
@@ -5456,6 +5512,122 @@ func TestWelcomeView_LongAdvisoryStaysWithinWindowWidth(t *testing.T) {
 	}
 	if !foundAdvisory {
 		t.Fatalf("advisory text was not rendered\nview:\n%s", view)
+	}
+}
+
+func TestWelcomeAdvisory_BoundsAndScrollsOverflow(t *testing.T) {
+	const releaseURL = "https://github.com/Gentleman-Programming/gentle-ai/releases/tag/v1.49.0"
+	m := NewModel(system.DetectionResult{}, "dev")
+	m.Width = 60
+	m.Height = 50
+	updated, _ := m.Update(AdvisoryMsg{Advisory: update.Advisory{
+		Message: strings.Repeat("release detail ", 80),
+		URL:     releaseURL,
+	}})
+	state := updated.(Model)
+	initial := state.View()
+
+	if got := lipgloss.Height(initial); got > state.Height {
+		t.Fatalf("welcome height = %d, want <= terminal height %d", got, state.Height)
+	}
+	if !strings.Contains(initial, "PgUp/PgDn: scroll") {
+		t.Fatalf("overflowing advisory missing scroll affordance\nview:\n%s", initial)
+	}
+	if !strings.Contains(initial, "Latest release:") || !strings.Contains(initial, "v1.49.0") {
+		t.Fatalf("overflowing advisory did not keep release link visible\nview:\n%s", initial)
+	}
+	if !strings.Contains(initial, "Start installation") {
+		t.Fatalf("overflowing advisory crowded out primary action\nview:\n%s", initial)
+	}
+
+	updated, _ = state.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+	state = updated.(Model)
+	if state.AdvisoryScroll == 0 {
+		t.Fatal("Page Down did not advance advisory scroll")
+	}
+	if state.Cursor != 0 {
+		t.Fatalf("Page Down changed menu cursor to %d", state.Cursor)
+	}
+	if got := state.View(); got == initial {
+		t.Fatal("Page Down did not change visible advisory content")
+	}
+
+	updated, _ = state.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	if got := updated.(Model).AdvisoryScroll; got != 0 {
+		t.Fatalf("Page Up scroll = %d, want 0", got)
+	}
+}
+
+func TestWelcomeAdvisory_FittingContentShowsLatestReleaseWithoutScrollHint(t *testing.T) {
+	const releaseURL = "https://github.com/Gentleman-Programming/gentle-ai/releases/tag/v1.49.0"
+	m := NewModel(system.DetectionResult{}, "dev")
+	m.Width = 100
+	m.Height = 60
+	updated, _ := m.Update(AdvisoryMsg{Advisory: update.Advisory{
+		Message: "Maintenance improvements are available.",
+		URL:     releaseURL,
+	}})
+	state := updated.(Model)
+	view := state.View()
+
+	if state.AdvisoryURL != releaseURL || !strings.Contains(view, "Latest release: "+releaseURL) {
+		t.Fatalf("latest release link not carried through\nview:\n%s", view)
+	}
+	if strings.Contains(view, "PgUp/PgDn: scroll") {
+		t.Fatalf("fitting advisory unexpectedly shows scroll affordance\nview:\n%s", view)
+	}
+}
+
+func TestWelcomeAdvisory_SmallTerminalPreservesMenu(t *testing.T) {
+	m := NewModel(system.DetectionResult{}, "dev")
+	m.Width = 60
+	m.Height = 35
+	baselineHeight := lipgloss.Height(m.View())
+	updated, _ := m.Update(AdvisoryMsg{Advisory: update.Advisory{
+		Message: strings.Repeat("long advisory ", 80),
+		URL:     "https://github.com/Gentleman-Programming/gentle-ai/releases/tag/v1.49.0",
+	}})
+	view := updated.(Model).View()
+
+	if got := lipgloss.Height(view); got != baselineHeight {
+		t.Fatalf("small-terminal advisory added %d lines, want none", got-baselineHeight)
+	}
+	if !strings.Contains(view, "Start installation") {
+		t.Fatalf("small-terminal welcome lost primary action\nview:\n%s", view)
+	}
+}
+
+func TestWelcomeAdvisory_ResizeAndContentChangesClampScroll(t *testing.T) {
+	m := NewModel(system.DetectionResult{}, "dev")
+	m.Width = 45
+	m.Height = 60
+	updated, _ := m.Update(AdvisoryMsg{Advisory: update.Advisory{
+		Message: strings.Repeat("release detail ", 12),
+		URL:     "https://github.com/Gentleman-Programming/gentle-ai/releases/tag/v1.49.0",
+	}})
+	state := updated.(Model)
+	updated, _ = state.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+	state = updated.(Model)
+	if state.AdvisoryScroll == 0 {
+		t.Fatal("test setup did not produce advisory overflow")
+	}
+
+	updated, _ = state.Update(tea.WindowSizeMsg{Width: 120, Height: 80})
+	state = updated.(Model)
+	if state.AdvisoryScroll != 0 {
+		t.Fatalf("scroll after fitting resize = %d, want 0", state.AdvisoryScroll)
+	}
+	if strings.Contains(state.View(), "PgUp/PgDn: scroll") {
+		t.Fatal("scroll affordance remained after content fit")
+	}
+
+	updated, _ = state.Update(tea.WindowSizeMsg{Width: 45, Height: 60})
+	state = updated.(Model)
+	updated, _ = state.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+	state = updated.(Model)
+	updated, _ = state.Update(AdvisoryMsg{Advisory: update.Advisory{Message: "Short notice."}})
+	if got := updated.(Model).AdvisoryScroll; got != 0 {
+		t.Fatalf("scroll after advisory content change = %d, want 0", got)
 	}
 }
 

@@ -17,6 +17,7 @@ import (
 	"github.com/gentleman-programming/gentle-ai/internal/agents/codex"
 	"github.com/gentleman-programming/gentle-ai/internal/backup"
 	"github.com/gentleman-programming/gentle-ai/internal/model"
+	"github.com/gentleman-programming/gentle-ai/internal/planner"
 	"github.com/gentleman-programming/gentle-ai/internal/state"
 	"github.com/gentleman-programming/gentle-ai/internal/system"
 	"github.com/gentleman-programming/gentle-ai/internal/tui"
@@ -334,8 +335,8 @@ func TestRunArgsDispatchesNativeReviewOperationsBeforePlatformValidation(t *test
 		{command: "review-start", want: "review-start requires --cwd, --lineage, and --policy-file"},
 		{command: "review-resume", want: "review-resume requires --cwd and --lineage"},
 		{command: "review-bundle-export", want: "review-bundle-export requires --cwd, --lineage, and --out"},
-		{command: "review-bundle-import", want: "review-bundle-import requires --cwd, --bundle, and --request"},
-		{command: "review-validate", want: "review-validate requires --cwd, --receipt, and --request"},
+		{command: "review-bundle-import", want: "review-bundle-import requires --cwd and --bundle"},
+		{command: "review-validate", want: "review-validate requires --cwd and --receipt"},
 	} {
 		t.Run(test.command, func(t *testing.T) {
 			var output bytes.Buffer
@@ -344,6 +345,34 @@ func TestRunArgsDispatchesNativeReviewOperationsBeforePlatformValidation(t *test
 				t.Fatalf("RunArgs(%s) error = %v, want %q", test.command, err, test.want)
 			}
 		})
+	}
+}
+
+func TestRunArgsReviewSubcommandHelpExitsSuccessfully(t *testing.T) {
+	for _, command := range []string{"review-start", "review-step", "review-resume", "review-validate", "review-bundle-export", "review-bundle-import"} {
+		t.Run(command, func(t *testing.T) {
+			var output bytes.Buffer
+			if err := RunArgs([]string{command, "--help"}, &output); err != nil {
+				t.Fatalf("RunArgs(%s --help) error = %v", command, err)
+			}
+			if !strings.Contains(output.String(), "Usage: gentle-ai "+command+" [flags]") {
+				t.Fatalf("RunArgs(%s --help) output:\n%s", command, output.String())
+			}
+		})
+	}
+}
+
+func TestRunArgsDispatchesCompactReviewFacadeBeforePlatformValidation(t *testing.T) {
+	origEnsure := ensureCurrentOSSupported
+	t.Cleanup(func() { ensureCurrentOSSupported = origEnsure })
+	ensureCurrentOSSupported = func() error { return fmt.Errorf("unsupported platform") }
+
+	var output bytes.Buffer
+	if err := RunArgs([]string{"review", "--help"}, &output); err != nil {
+		t.Fatalf("RunArgs(review --help) error = %v", err)
+	}
+	if !strings.Contains(output.String(), "review <start|finalize|validate>") {
+		t.Fatalf("compact review help missing:\n%s", output.String())
 	}
 }
 
@@ -660,6 +689,45 @@ func TestTuiSyncClaudeModelConfigWritesSelectedAssignments(t *testing.T) {
 		if !strings.Contains(string(body), want) {
 			t.Fatalf("lazy SDD workflow missing %q; got:\n%s", want, body)
 		}
+	}
+}
+
+func TestTuiSyncModelConfigPropagatesAssignmentWriteFailure(t *testing.T) {
+	home := t.TempDir()
+	original := state.InstallState{
+		InstalledAgents:          []string{string(model.AgentClaudeCode)},
+		CommunityToolsConfigured: true,
+		ClaudeModelAssignments:   map[string]string{"sdd-apply": "haiku"},
+	}
+	if err := state.Write(home, original); err != nil {
+		t.Fatalf("state.Write: %v", err)
+	}
+
+	statePath := state.Path(home)
+	stateTarget := filepath.Join(home, ".gentle-ai", "persisted-state.json")
+	if err := os.Rename(statePath, stateTarget); err != nil {
+		t.Fatalf("Rename: %v", err)
+	}
+	if err := os.Symlink(stateTarget, statePath); err != nil {
+		t.Skipf("state symlink unavailable: %v", err)
+	}
+
+	_, err := tuiSync(home)(&model.SyncOverrides{
+		TargetAgents: []model.AgentID{model.AgentClaudeCode},
+		ClaudeModelAssignments: map[string]model.ClaudeModelAlias{
+			"sdd-apply": model.ClaudeModelSonnet,
+		},
+	})
+	if err == nil {
+		t.Fatal("tuiSync() error = nil, want assignment persistence failure")
+	}
+
+	got, readErr := state.Read(home)
+	if readErr != nil {
+		t.Fatalf("state.Read: %v", readErr)
+	}
+	if !reflect.DeepEqual(got, original) {
+		t.Fatalf("state after failed tuiSync() = %#v, want %#v", got, original)
 	}
 }
 
@@ -1392,6 +1460,27 @@ func setupMockHome(t *testing.T, home string) {
 	os.Setenv("USERPROFILE", home)
 }
 
+func TestTUIExecuteReturnsStatePersistenceFailure(t *testing.T) {
+	home := t.TempDir()
+	setupMockHome(t, home)
+	if err := state.Write(home, state.InstallState{}); err != nil {
+		t.Fatal(err)
+	}
+	statePath := state.Path(home)
+	target := filepath.Join(home, ".gentle-ai", "persisted-state.json")
+	if err := os.Rename(statePath, target); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, statePath); err != nil {
+		t.Skipf("state symlink unavailable: %v", err)
+	}
+
+	result := tuiExecute(model.Selection{CommunityTools: []model.CommunityToolID{}}, planner.ResolvedPlan{}, system.DetectionResult{}, nil)
+	if result.Err == nil || !strings.Contains(result.Err.Error(), "persist install state") {
+		t.Fatalf("tuiExecute() error = %v, want state persistence failure", result.Err)
+	}
+}
+
 // TestApplyOverrides_CodexModelAssignments verifies that a non-nil
 // CodexModelAssignments override sets the selection.
 func TestApplyOverrides_CodexModelAssignments(t *testing.T) {
@@ -1968,9 +2057,6 @@ func TestRunArgs_PendingSync_LeavesSetOnFailure(t *testing.T) {
 // error is printed to stdout and RunArgs does not return an error.
 // This guards against silently swallowed write failures (Issue 2).
 func TestRunArgs_PendingSync_ClearWriteFailureIsLogged(t *testing.T) {
-	if os.Getuid() == 0 {
-		t.Skip("cannot test permission errors as root")
-	}
 	home := t.TempDir()
 	setupMockHome(t, home)
 
@@ -1982,12 +2068,15 @@ func TestRunArgs_PendingSync_ClearWriteFailureIsLogged(t *testing.T) {
 		t.Fatalf("state.Write() error = %v", err)
 	}
 
-	// Make the state file read-only so state.Write (the clear-PendingSync write) fails.
+	// Keep state readable through a symlink while making atomic replacement refuse it.
 	stateFilePath := state.Path(home)
-	if err := os.Chmod(stateFilePath, 0o444); err != nil {
-		t.Fatalf("Chmod: %v", err)
+	stateTargetPath := filepath.Join(home, ".gentle-ai", "persisted-state.json")
+	if err := os.Rename(stateFilePath, stateTargetPath); err != nil {
+		t.Fatalf("Rename: %v", err)
 	}
-	t.Cleanup(func() { _ = os.Chmod(stateFilePath, 0o644) })
+	if err := os.Symlink(stateTargetPath, stateFilePath); err != nil {
+		t.Skipf("state symlink unavailable: %v", err)
+	}
 
 	origSelf := selfUpdateFn
 	origEnsure := ensureCurrentOSSupported
