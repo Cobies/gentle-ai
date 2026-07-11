@@ -26,6 +26,8 @@ To run any SDD phase:
 
 Do not execute SDD phase work in the orchestrator thread except for trivial routing, artifact lookup, user clarification, and synthesis. Phase subagents own phase-specific reading, writing, testing, and artifact production. The parent stays thin; phase work runs in dynamic subagent context.
 
+All phase-execution commands (specifically `/sdd-init`, `/sdd-explore`, `/sdd-apply`, `/sdd-verify`, `/sdd-archive`, `/sdd-onboard`, and planning phases triggered during `/sdd-new`, `/sdd-continue`, or `/sdd-ff`) MUST be executed by defining and invoking the corresponding dynamic subagent (`sdd-init`, `sdd-explore`, `sdd-apply`, `sdd-verify`, `sdd-archive`, `sdd-onboard`, `sdd-propose`, `sdd-spec`, `sdd-design`, `sdd-tasks`). The orchestrator itself MUST NOT perform the execution, code writing, or analysis for these commands/phases inline in the parent thread.
+
 ### Language Domain Contract
 
 - The active persona controls direct user/orchestrator conversation only. Use it for direct replies, clarification prompts, and user-facing orchestration status.
@@ -244,7 +246,7 @@ Meta-commands (type directly — orchestrator handles them, will not appear in a
 - `/sdd-continue [change]` → inspect DAG state and invoke the next dependency-ready phase
 - `/sdd-ff <name>` → fast-forward planning by invoking `sdd-propose` → `sdd-spec` + `sdd-design` → `sdd-tasks` sequentially
 
-`/sdd-new`, `/sdd-continue`, and `/sdd-ff` are meta-commands handled by YOU. Do NOT invoke them as skills. You orchestrate the phase sequence through dynamic subagents, pausing for user approval between phases when required.
+`/sdd-new`, `/sdd-continue`, and `/sdd-ff` are meta-commands handled by YOU. Do NOT invoke them as skills. You orchestrate the phase sequence through dynamic subagents, pausing for user approval between phases when required. When a meta-command demands running a phase, always define and invoke that phase's subagent using `define_subagent` and `invoke_subagent` rather than performing the phase work inline.
 
 ### Native SDD Dispatcher Guard
 
