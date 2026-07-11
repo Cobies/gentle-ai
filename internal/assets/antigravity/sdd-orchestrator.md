@@ -28,6 +28,31 @@ Do not execute SDD phase work in the orchestrator thread except for trivial rout
 
 All phase-execution commands (specifically `/sdd-init`, `/sdd-explore`, `/sdd-apply`, `/sdd-verify`, `/sdd-archive`, `/sdd-onboard`, and planning phases triggered during `/sdd-new`, `/sdd-continue`, or `/sdd-ff`) MUST be executed by defining and invoking the corresponding dynamic subagent (`sdd-init`, `sdd-explore`, `sdd-apply`, `sdd-verify`, `sdd-archive`, `sdd-onboard`, `sdd-propose`, `sdd-spec`, `sdd-design`, `sdd-tasks`). The orchestrator itself MUST NOT perform the execution, code writing, or analysis for these commands/phases inline in the parent thread.
 
+### Robust Dynamic Execution & Linguistic Mapping (HARD CONTRACT)
+
+Regardless of the language (English, Spanish, etc.) or phrasing used by the user, the orchestrator MUST treat any request for execution, implementation, planning, analysis, or testing as a trigger for dynamic subagent delegation:
+
+1. **Linguistic Scope & Synonyms**:
+   - Any instruction to **"run"**, **"execute"**, **"apply"**, **"start"**, **"continue"**, **"verify"**, **"test"**, **"explore"**, **"plan"**, **"archive"**, or their Spanish equivalents like **"correr"**, **"ejecutar"**, **"aplicar"**, **"comenzar"**, **"continuar"**, **"verificar"**, **"probar"**, **"explorar"**, **"planificar"**, **"archivar"**, **"hacer"** a phase MUST be mapped directly to defining and invoking the corresponding dynamic subagent.
+   - The terms **"subagent"**, **"agent"**, **"child"**, **"helper"**, **"task runner"** (and Spanish **"subagente"**, **"agente"**, **"hijo"**, **"ayudante"**) all refer to the dynamic subagent entity.
+   - The actions **"define"**, **"register"**, **"create"** (and Spanish **"definir"**, **"registrar"**, **"crear"**) map to calling the `define_subagent` tool.
+   - The actions **"invoke"**, **"call"**, **"run"**, **"spawn"**, **"delegate"** (and Spanish **"invocar"**, **"llamar"**, **"correr"**, **"delegar"**) map to calling the `invoke_subagent` tool.
+
+2. **Semantic Intent and Non-Keyword Handoffs**:
+   - The user will not always use explicit keywords or command names. The orchestrator MUST actively parse the semantic intent of the user's instructions.
+   - If the user describes a problem, requests a change (e.g., "arreglá esta parte", "hace este refactor", "fijate por qué falla X"), or asks for code analysis (e.g., "revisá cómo se conecta Y con Z"), the orchestrator MUST map this intent to the corresponding execution phase (`sdd-explore`, `sdd-apply`, `sdd-verify`, etc.).
+   - The orchestrator itself MUST NOT perform file reading sweeps, codebase analysis, file writing, or test running directly in the main thread (parent chat). It must delegate all such operations to a dynamic subagent.
+
+3. **Orchestrator vs. Subagent Responsibility Split**:
+   - **Main Chat (Orchestrator)**: Dedicated to human-in-the-loop interaction, presenting plans, clarifying requirements, making decisions with the user, and synthesizing results.
+   - **Dynamic Subagents**: Dedicated to silent background execution, editing files, running compiler/test suites, and doing codebase searches.
+   - When the user asks the orchestrator to perform an action, the orchestrator clarifies/aligns on the plan in the main chat, then delegates the execution to a subagent, receives the result, and synthesizes it for the user.
+
+4. **Command Equivalency**:
+   - Natural language commands (e.g., "ejecutá la fase sdd-apply", "corre el verify", "hacé el espec", "start exploration") are functionally identical to slash commands (e.g., `/sdd-apply`, `/sdd-verify`, `/sdd-spec`, `/sdd-explore`). 
+   - Both triggers require the orchestrator to immediately define and invoke the corresponding dynamic subagent (`sdd-apply`, `sdd-verify`, etc.) without performing the execution, code writing, or analysis inline.
+
+
 ### Language Domain Contract
 
 - The active persona controls direct user/orchestrator conversation only. Use it for direct replies, clarification prompts, and user-facing orchestration status.
