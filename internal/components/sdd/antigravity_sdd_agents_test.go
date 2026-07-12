@@ -13,6 +13,9 @@ import (
 
 func TestAntigravitySddAgentsPluginWritesManifestAndHooks(t *testing.T) {
 	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".gemini", "antigravity-cli"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	changed, files, err := installAntigravitySddAgentsPlugin(home)
 	if err != nil {
@@ -221,6 +224,9 @@ func TestAntigravitySddAgentsPluginDoesNotAffectOtherAgents(t *testing.T) {
 	// Sanity: installAntigravitySddAgentsPlugin must NEVER touch paths
 	// outside ~/.gemini/antigravity-cli/plugins/gentle-ai-sdd-agents.
 	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".gemini", "antigravity-cli"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	_, files, err := installAntigravitySddAgentsPlugin(home)
 	if err != nil {
 		t.Fatalf("installAntigravitySddAgentsPlugin() error = %v", err)
@@ -266,6 +272,9 @@ func TestAntigravitySddAgentsPluginScopingDynamic(t *testing.T) {
 
 func TestInjectAntigravityInstallsSddAgentsHardeningPlugin(t *testing.T) {
 	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".gemini", "antigravity-cli"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	adapter, err := agents.NewAdapter(model.AgentAntigravity)
 	if err != nil {
 		t.Fatalf("NewAdapter(antigravity) error = %v", err)
@@ -365,11 +374,13 @@ func TestInjectDoesNotInstallSddAgentsPluginForNonAntigravity(t *testing.T) {
 			if err := tc.invoke(home); err != nil {
 				t.Fatalf("Inject(%s) error = %v", tc.agentID, err)
 			}
-			// The antigravity-cli plugin path must NOT be created for other
+			// The plugin path must NOT be created for other
 			// agents — it is Antigravity-only.
-			pluginPath := filepath.Join(home, ".gemini", "antigravity-cli", "plugins", "gentle-ai-sdd-agents", "plugin.json")
-			if _, err := os.Stat(pluginPath); !os.IsNotExist(err) {
-				t.Fatalf("Inject(%s) wrote Antigravity-only plugin path %q; stat err = %v", tc.agentID, pluginPath, err)
+			for _, variant := range []string{"antigravity-cli", "antigravity-desktop", "antigravity"} {
+				pluginPath := filepath.Join(home, ".gemini", variant, "plugins", "gentle-ai-sdd-agents", "plugin.json")
+				if _, err := os.Stat(pluginPath); !os.IsNotExist(err) {
+					t.Fatalf("Inject(%s) wrote Antigravity-only plugin path %q; stat err = %v", tc.agentID, pluginPath, err)
+				}
 			}
 		})
 	}

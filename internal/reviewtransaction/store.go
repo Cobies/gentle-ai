@@ -141,7 +141,11 @@ func validateLineageID(lineageID string) error {
 }
 
 func (store Store) Append(expectedRevision string, record Record) (string, error) {
-	if store.readOnly {
+	return store.append(expectedRevision, record, false)
+}
+
+func (store Store) append(expectedRevision string, record Record, allowInvalidate bool) (string, error) {
+	if store.readOnly && !allowInvalidate {
 		return "", ErrLegacyReadOnly
 	}
 	if strings.TrimSpace(store.Dir) == "" {
@@ -273,6 +277,33 @@ func (store Store) Append(expectedRevision string, record Record) (string, error
 	return revision, nil
 }
 
+// InvalidatePristine is the sole legacy write compatibility path. It appends
+// exactly review/invalidate without remarshal or modification of prior events.
+func (store Store) InvalidatePristine(expectedRevision, reason string, snapshot Snapshot) (string, error) {
+	chain, err := store.LoadChain()
+	if err != nil {
+		return "", err
+	}
+	current := chain.Records[len(chain.Records)-1].Transaction
+	if current.State == StateInvalidated {
+		if len(chain.Revisions) == 2 && expectedRevision == chain.Revisions[0] && current.InvalidationReason == strings.TrimSpace(reason) && snapshotsEqual(current.Snapshot, snapshot) {
+			return chain.HeadRevision, nil
+		}
+		return "", ErrConcurrentUpdate
+	}
+	if chain.HeadRevision != expectedRevision || !snapshotsEqual(current.Snapshot, snapshot) {
+		return "", ErrConcurrentUpdate
+	}
+	if err := rebuildCurrentSnapshotEvidence(context.Background(), store.repo, snapshot); err != nil {
+		return "", err
+	}
+	next := current
+	if err := next.Invalidate(reason); err != nil {
+		return "", err
+	}
+	return store.append(expectedRevision, Record{Operation: "review/invalidate", Transaction: next}, true)
+}
+
 func (store Store) Load() (Record, string, error) {
 	chain, err := store.LoadChain()
 	if err != nil {
@@ -333,7 +364,7 @@ func (store Store) loadChain(headRevision string) (ValidatedChain, error) {
 		if records[index].PreviousRevision != revisions[index-1] {
 			return ValidatedChain{}, errors.New("review chain predecessor revision is discontinuous")
 		}
-		if err := validateSuccessor(records[index-1].Transaction, records[index].Transaction, records[index].Operation); err != nil {
+		if err := validatePersistedV1Successor(records[index-1].Transaction, records[index].Transaction, records[index].Operation, index); err != nil {
 			return ValidatedChain{}, fmt.Errorf("review chain successor %s: %w", revisions[index], err)
 		}
 	}
@@ -407,6 +438,13 @@ func (store Store) loadRevision(revision string) (Record, string, error) {
 }
 
 func validateSuccessor(previous, next Transaction, operation string) error {
+	if operation == "review/invalidate" {
+		expected := previous
+		if err := expected.Invalidate(next.InvalidationReason); err != nil || !transactionsEqual(expected, next) {
+			return fmt.Errorf("%w: invalidation must retain a pristine reviewing authority", ErrInvalidSuccessor)
+		}
+		return nil
+	}
 	if previous.LineageID != next.LineageID || previous.Generation != next.Generation || previous.Mode != next.Mode {
 		return fmt.Errorf("%w: lineage, generation, and mode are immutable", ErrInvalidSuccessor)
 	}
@@ -557,6 +595,54 @@ func validateSuccessor(previous, next Transaction, operation string) error {
 		}
 	} else if !reflect.DeepEqual(previous.OriginalCriteria, next.OriginalCriteria) || !reflect.DeepEqual(previous.CorrectionRegression, next.CorrectionRegression) {
 		return fmt.Errorf("%w: targeted validation checks changed outside exact validation transition", ErrInvalidSuccessor)
+	}
+	return nil
+}
+
+// validatePersistedV1Successor accepts only the two v1 encodings documented
+// in the historical lifecycle. It validates decoded semantics without
+// rewriting the content-addressed event payload.
+func validatePersistedV1Successor(previous, next Transaction, operation string, index int) error {
+	if err := validateSuccessor(previous, next, operation); err == nil {
+		return nil
+	}
+	if index < 1 {
+		return fmt.Errorf("%w: historical aliases cannot be genesis records", ErrInvalidSuccessor)
+	}
+	if operation == "review/validate-targeted-fix" &&
+		previous.Mode == ModeOrdinary4R && previous.State == StateFixValidating &&
+		(next.State == StateReadyFinalVerification || next.State == StateEscalated) &&
+		next.OriginalCriteria == nil && next.CorrectionRegression == nil {
+		return validateSuccessor(previous, next, "review/validate-fix-delta")
+	}
+	if operation == "review/freeze-findings" &&
+		(previous.Mode == ModeOrdinary4R || previous.Mode == ModeJudgmentDay) &&
+		(previous.State == StateReviewing || previous.State == StateJudgesConfirmed) &&
+		next.State == StateFindingsFrozen {
+		return validateHistoricalFreezeFindings(previous, next)
+	}
+	return fmt.Errorf("%w: unsupported historical v1 operation alias", ErrInvalidSuccessor)
+}
+
+// validateHistoricalFreezeFindings reproduces v1.49 findings-freeze semantics:
+// the event retained an external ledger hash and derived only the findings hash.
+func validateHistoricalFreezeFindings(previous, next Transaction) error {
+	if !validSHA256(next.LedgerHash) {
+		return fmt.Errorf("%w: historical findings freeze requires a ledger hash", ErrInvalidSuccessor)
+	}
+	expected := previous
+	expected.Findings = append([]Finding(nil), next.Findings...)
+	expected.Outcomes = cloneOutcomes(previous.Outcomes)
+	for _, finding := range expected.Findings {
+		if !isSevereSeverity(finding.Severity) {
+			expected.Outcomes[finding.ID] = OutcomeInfo
+		}
+	}
+	expected.LedgerHash = next.LedgerHash
+	expected.LedgerFindingsHash = findingsHash(expected.Findings)
+	expected.State = StateFindingsFrozen
+	if !transactionsEqual(expected, next) {
+		return fmt.Errorf("%w: historical findings freeze changed unrelated transaction state", ErrInvalidSuccessor)
 	}
 	return nil
 }

@@ -9,6 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gentleman-programming/gentle-ai/internal/agents"
+	"github.com/gentleman-programming/gentle-ai/internal/agents/claude"
+	"github.com/gentleman-programming/gentle-ai/internal/agents/opencode"
 	"github.com/gentleman-programming/gentle-ai/internal/model"
 )
 
@@ -32,7 +35,7 @@ func TestMain(m *testing.M) {
 					"type": "object",
 					"properties": map[string]any{
 						"query":       map[string]any{"type": "string"},
-						"maxFiles":    map[string]any{"type": "number"},
+						"maxFiles":    map[string]any{"type": "integer"},
 						"projectPath": map[string]any{"type": "string"},
 					},
 					"required": []any{"query"},
@@ -170,7 +173,6 @@ func TestInstallUsesPnpmWhenNpmIsUnavailable(t *testing.T) {
 	}
 	want := []string{
 		"pnpm add -g @colbymchenry/codegraph@latest",
-		"codegraph install --yes",
 	}
 	if !reflect.DeepEqual(commands, want) {
 		t.Fatalf("commands = %#v, want %#v", commands, want)
@@ -182,7 +184,9 @@ func TestInstallWithHomeReportsPiChildClassifications(t *testing.T) {
 	mustWrite(t, filepath.Join(home, ".pi", "agent", "settings.json"), `{}`)
 	mustWrite(t, filepath.Join(home, ".pi", "agent", "subagents", "worker.md"), "---\ntools: bash\n---\nwork\n")
 	installed := false
-	result, err := InstallWithHome(model.CommunityToolCodeGraph, "", home, RunnerFunc(func(string, ...string) error {
+	var commands []string
+	result, err := InstallWithHome(model.CommunityToolCodeGraph, "", home, RunnerFunc(func(name string, args ...string) error {
+		commands = append(commands, strings.Join(append([]string{name}, args...), " "))
 		installed = true
 		return nil
 	}), DetectorFunc(func(string) (string, error) {
@@ -196,6 +200,9 @@ func TestInstallWithHomeReportsPiChildClassifications(t *testing.T) {
 	}
 	if result.PiCodeGraph == nil || len(result.PiCodeGraph.Children) != 1 || result.PiCodeGraph.Children[0].Classification != PiChildCompatible {
 		t.Fatalf("PiCodeGraph classifications = %#v", result.PiCodeGraph)
+	}
+	if !reflect.DeepEqual(commands, []string{"npm install -g @colbymchenry/codegraph@latest"}) {
+		t.Fatalf("Pi-only commands = %#v, want package install without synthetic target", commands)
 	}
 }
 
@@ -310,7 +317,7 @@ func TestCodeGraphGuidanceInjectsForRepresentativeAgents(t *testing.T) {
 	result, err := InstallWithHome(model.CommunityToolCodeGraph, "/work/project", home, RunnerFunc(func(string, ...string) error {
 		installed = true
 		mustWrite(t, filepath.Join(home, ".config", "opencode", "opencode.json"), `{"mcp":{"codegraph":{"type":"local","command":["codegraph","serve","--mcp"],"enabled":true}}}`)
-		mustWrite(t, filepath.Join(home, ".claude", "mcp", "codegraph.json"), `{"command":"codegraph","args":["serve","--mcp"]}`)
+		mustWrite(t, filepath.Join(home, ".claude.json"), `{"mcpServers":{"codegraph":{"command":"codegraph","args":["serve","--mcp"]}}}`)
 		return nil
 	}), DetectorFunc(func(string) (string, error) {
 		if installed {
@@ -821,16 +828,12 @@ func TestInstallRunsCommandsAndReturnsLazyProjectIndexManualAction(t *testing.T)
 func TestInstallLeavesPiPendingWhenAdapterHealthIsNotMachineVerifiable(t *testing.T) {
 	home := t.TempDir()
 	mustWrite(t, filepath.Join(home, ".pi", "agent", "npm", "node_modules", "pi-mcp-adapter", "index.ts"), "export default {}\n")
-	previousRuntime := piCodeGraphAdapterRuntimeRunner
 	previousProbe := piCodeGraphEffectiveMCPProbe
-	piCodeGraphAdapterRuntimeRunner = func(string, []string, []string) ([]byte, error) {
-		return []byte(`{"type":"session","version":3}`), nil
-	}
-	piCodeGraphEffectiveMCPProbe = func(string) (PiCodeGraphMCPProbeResult, error) {
-		return PiCodeGraphMCPProbeResult{}, ErrPiCodeGraphAdapterHealthUnavailable
+	piCodeGraphEffectiveMCPProbe = func(path string) (PiCodeGraphMCPProbeResult, error) {
+		result, _ := piProbeForTest(path)
+		return result, ErrPiCodeGraphAdapterHealthUnavailable
 	}
 	t.Cleanup(func() {
-		piCodeGraphAdapterRuntimeRunner = previousRuntime
 		piCodeGraphEffectiveMCPProbe = previousProbe
 	})
 
@@ -861,7 +864,7 @@ func TestInstallLeavesPiPendingWhenAdapterHealthIsNotMachineVerifiable(t *testin
 
 func TestDetectStatusReportsCLIAndPerAgentWiring(t *testing.T) {
 	home := t.TempDir()
-	mustWrite(t, filepath.Join(home, ".claude", "mcp", "codegraph.json"), `{"command":"codegraph"}`)
+	mustWrite(t, filepath.Join(home, ".claude.json"), `{"mcpServers":{"codegraph":{"command":"codegraph"}}}`)
 	mustWrite(t, filepath.Join(home, ".claude", "CLAUDE.md"), strings.Join([]string{
 		"existing Claude guidance",
 		"<!-- gentle-ai:codegraph-guidance -->",
@@ -922,6 +925,28 @@ func TestDetectStatusRejectsDisabledOpenCodeWiring(t *testing.T) {
 	opencode := findAgentStatus(t, status, model.AgentOpenCode)
 	if opencode.Configured || opencode.Status != AgentStatusMissing {
 		t.Fatalf("opencode status = %#v, want disabled MCP reported missing", opencode)
+	}
+}
+
+func TestCodeGraphEffectiveWiringCapabilityIsOptional(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
+
+	var openCodeAdapter agents.Adapter = opencode.NewAdapter()
+	if _, ok := openCodeAdapter.(agents.EffectiveCodeGraphWiringDetector); !ok {
+		t.Fatal("OpenCode adapter does not expose effective CodeGraph wiring detection")
+	}
+
+	var claudeAdapter agents.Adapter = claude.NewAdapter()
+	if _, ok := claudeAdapter.(agents.EffectiveCodeGraphWiringDetector); ok {
+		t.Fatal("Claude adapter unexpectedly exposes OpenCode-specific wiring detection")
+	}
+	path := filepath.Join(home, ".claude.json")
+	mustWrite(t, path, `{"mcpServers":{"codegraph":{"command":"codegraph"}}}`)
+	if gotPath, configured := hasCodeGraphToolWiring(home, claudeAdapter); !configured || gotPath != path {
+		t.Fatalf("Claude global detection = (%q, %v), want (%q, true)", gotPath, configured, path)
 	}
 }
 
@@ -1005,12 +1030,12 @@ func TestInstallRecordsTargetedOpenCodeReconciliation(t *testing.T) {
 	home := t.TempDir()
 	settingsPath := filepath.Join(home, ".config", "opencode", "opencode.json")
 	mustWrite(t, settingsPath, `{}`)
-	mustWrite(t, filepath.Join(home, ".claude", "mcp", "codegraph.json"), `{"command":"codegraph","args":["serve","--mcp"]}`)
+	mustWrite(t, filepath.Join(home, ".claude.json"), `{"mcpServers":{"codegraph":{"command":"codegraph","args":["serve","--mcp"]}}}`)
 	mustWrite(t, filepath.Join(home, ".claude", "CLAUDE.md"), "<!-- gentle-ai:codegraph-guidance -->\nmanaged\n<!-- /gentle-ai:codegraph-guidance -->\n")
 
 	result, err := InstallWithHome(model.CommunityToolCodeGraph, "/work/project", home, RunnerFunc(func(string, ...string) error {
 		mustWrite(t, settingsPath, `{"mcp":{"codegraph":{"type":"local","command":["codegraph","serve","--mcp"],"enabled":true}}}`)
-		mustWrite(t, filepath.Join(home, ".claude", "mcp", "codegraph.json"), `{"command":"codegraph","args":["serve","--mcp"]}`)
+		mustWrite(t, filepath.Join(home, ".claude.json"), `{"mcpServers":{"codegraph":{"command":"codegraph","args":["serve","--mcp"]}}}`)
 		return nil
 	}), DetectorFunc(func(string) (string, error) { return "/bin/codegraph", nil }))
 	if err != nil {
@@ -1030,13 +1055,13 @@ func TestInstallRunsFullReconcileWhenAnotherAgentIsMissing(t *testing.T) {
 
 	result, err := InstallWithHome(model.CommunityToolCodeGraph, "/work/project", home, RunnerFunc(func(string, ...string) error {
 		mustWrite(t, settingsPath, `{"mcp":{"codegraph":{"type":"local","command":["codegraph","serve","--mcp"],"enabled":true}}}`)
-		mustWrite(t, filepath.Join(home, ".claude", "mcp", "codegraph.json"), `{"command":"codegraph","args":["serve","--mcp"]}`)
+		mustWrite(t, filepath.Join(home, ".claude.json"), `{"mcpServers":{"codegraph":{"command":"codegraph","args":["serve","--mcp"]}}}`)
 		return nil
 	}), DetectorFunc(func(string) (string, error) { return "/bin/codegraph", nil }))
 	if err != nil {
 		t.Fatalf("InstallWithHome() error = %v", err)
 	}
-	if !reflect.DeepEqual(result.CommandsRun, []string{"codegraph install --yes"}) {
+	if !reflect.DeepEqual(result.CommandsRun, []string{"codegraph install --target claude --location global --yes"}) {
 		t.Fatalf("CommandsRun = %#v, want full reconciliation", result.CommandsRun)
 	}
 }
@@ -1183,7 +1208,7 @@ func TestValidateCodeGraphInstallStatusFailsForDetectedMissingAgent(t *testing.T
 
 func TestInstallSkipsWhenCodeGraphAlreadyReconciled(t *testing.T) {
 	home := t.TempDir()
-	mustWrite(t, filepath.Join(home, ".claude", "mcp", "codegraph.json"), `{"command":"codegraph"}`)
+	mustWrite(t, filepath.Join(home, ".claude.json"), `{"mcpServers":{"codegraph":{"command":"codegraph"}}}`)
 
 	calls := 0
 	result, err := InstallWithHome(model.CommunityToolCodeGraph, "/work/project", home, RunnerFunc(func(string, ...string) error {
@@ -1242,7 +1267,7 @@ func TestInstallRefreshesOldCodeGraphGuidanceMarker(t *testing.T) {
 
 func TestInstallRepairsMissingCLIWhenAgentMarkerExists(t *testing.T) {
 	home := t.TempDir()
-	mustWrite(t, filepath.Join(home, ".claude", "mcp", "codegraph.json"), `{"command":"codegraph"}`)
+	mustWrite(t, filepath.Join(home, ".claude.json"), `{"mcpServers":{"codegraph":{"command":"codegraph"}}}`)
 
 	var commands []string
 	installed := false
@@ -1261,7 +1286,6 @@ func TestInstallRepairsMissingCLIWhenAgentMarkerExists(t *testing.T) {
 	}
 	want := []string{
 		"npm install -g @colbymchenry/codegraph@latest",
-		"codegraph install --yes",
 	}
 	if !reflect.DeepEqual(commands, want) {
 		t.Fatalf("commands = %#v, want %#v", commands, want)
@@ -1310,8 +1334,12 @@ func TestInstallFailurePaths(t *testing.T) {
 
 	t.Run("agent wiring failure preserves attempted commands", func(t *testing.T) {
 		boom := errors.New("install failed")
+		home := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+			t.Fatal(err)
+		}
 		calls := 0
-		result, err := InstallWithHome(model.CommunityToolCodeGraph, "/work/project", t.TempDir(), RunnerFunc(func(string, ...string) error {
+		result, err := InstallWithHome(model.CommunityToolCodeGraph, "/work/project", home, RunnerFunc(func(string, ...string) error {
 			calls++
 			if calls == 2 {
 				return boom
@@ -1330,7 +1358,7 @@ func TestInstallFailurePaths(t *testing.T) {
 			t.Fatalf("CommandsRun = %#v, want CLI install and failed agent wiring command", result.CommandsRun)
 		}
 		got := strings.Join(result.CommandsRun, "\n")
-		if !strings.Contains(got, "npm install -g @colbymchenry/codegraph@latest") || !strings.Contains(got, "codegraph install --yes") || strings.Contains(got, "codegraph init") {
+		if !strings.Contains(got, "npm install -g @colbymchenry/codegraph@latest") || !strings.Contains(got, "codegraph install --target claude") || strings.Contains(got, "codegraph init") {
 			t.Fatalf("CommandsRun = %#v, want CLI install and agent wiring commands only", result.CommandsRun)
 		}
 	})

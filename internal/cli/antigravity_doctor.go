@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/gentleman-programming/gentle-ai/internal/agents/antigravity"
 	"github.com/gentleman-programming/gentle-ai/internal/components/sdd"
 )
 
@@ -41,11 +42,7 @@ import (
 //     `invoke_subagent` is NOT shell-probable. Users are pointed to the
 //     in-runtime fail-closed contract as the source of truth.
 func antigravityActiveConfigDir(homeDir string) string {
-	desktop := filepath.Join(homeDir, ".gemini", "antigravity-desktop")
-	if info, err := os.Stat(desktop); err == nil && info.IsDir() {
-		return desktop
-	}
-	return filepath.Join(homeDir, ".gemini", "antigravity-cli")
+	return antigravity.NewAdapter().GlobalConfigDir(homeDir)
 }
 
 func checkAntigravityDynamicSubagentRuntime(homeDir string) []CheckResult {

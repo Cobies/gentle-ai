@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/gentleman-programming/gentle-ai/internal/agents"
+	opencodeagent "github.com/gentleman-programming/gentle-ai/internal/agents/opencode"
 	"github.com/gentleman-programming/gentle-ai/internal/backup"
 	"github.com/gentleman-programming/gentle-ai/internal/components/communitytool"
 	"github.com/gentleman-programming/gentle-ai/internal/components/engram"
@@ -254,22 +255,9 @@ func parseProfilePhaseFlag(raw string) (name, phase string, assignment model.Mod
 // parseModelSpec parses a "provider/model" or "provider:model" string into a
 // ModelAssignment. Returns an error if the spec is empty or has no separator.
 func parseModelSpec(spec string) (model.ModelAssignment, error) {
-	// Try slash separator first (common CLI format: anthropic/claude-haiku-3-5),
-	// then colon (opencode internal format: anthropic:claude-haiku-3-5).
-	sep := -1
-	for i, c := range spec {
-		if c == '/' || c == ':' {
-			sep = i
-			break
-		}
-	}
-	if sep <= 0 {
+	providerID, modelID, ok := model.SplitModelSpec(spec)
+	if !ok {
 		return model.ModelAssignment{}, fmt.Errorf("invalid model spec %q: expected provider/model or provider:model", spec)
-	}
-	providerID := spec[:sep]
-	modelID := spec[sep+1:]
-	if providerID == "" || modelID == "" {
-		return model.ModelAssignment{}, fmt.Errorf("invalid model spec %q: provider and model must both be non-empty", spec)
 	}
 	return model.ModelAssignment{ProviderID: providerID, ModelID: modelID}, nil
 }
@@ -665,7 +653,7 @@ func (r codeGraphHomeRunner) Run(name string, args ...string) error {
 	if filepath.Clean(r.homeDir) != filepath.Clean(actualHome) {
 		command.Env = overrideCommandEnvironment(os.Environ(), map[string]string{
 			"HOME":            r.homeDir,
-			"XDG_CONFIG_HOME": filepath.Join(r.homeDir, ".config"),
+			"XDG_CONFIG_HOME": codeGraphConfigHome(r.homeDir),
 		})
 	}
 	output, err := command.CombinedOutput()
@@ -676,6 +664,10 @@ func (r codeGraphHomeRunner) Run(name string, args ...string) error {
 		}
 	}
 	return err
+}
+
+func codeGraphConfigHome(homeDir string) string {
+	return filepath.Dir(opencodeagent.ConfigPath(homeDir))
 }
 
 func overrideCommandEnvironment(environment []string, overrides map[string]string) []string {
@@ -918,6 +910,15 @@ type syncFileSnapshot struct {
 	targetExists bool
 }
 
+var writeSyncFileAtomic = filemerge.WriteFileAtomic
+
+func syncRestoreWriteMode(mode os.FileMode) os.FileMode {
+	if mode.Perm() == 0 {
+		return 0o600
+	}
+	return mode
+}
+
 func snapshotSyncFiles(paths []string) (map[string]syncFileSnapshot, error) {
 	snapshots := make(map[string]syncFileSnapshot, len(paths))
 	for _, path := range dedupPaths(paths) {
@@ -1013,9 +1014,10 @@ func restoreSyncFiles(snapshots map[string]syncFileSnapshot) error {
 			continue
 		}
 		mode := snapshot.mode
+		writeMode := syncRestoreWriteMode(mode)
 		if snapshot.symlink {
 			if snapshot.targetExists {
-				if _, err := filemerge.WriteFileAtomic(snapshot.targetPath, snapshot.data, mode); err != nil {
+				if _, err := writeSyncFileAtomic(snapshot.targetPath, snapshot.data, writeMode); err != nil {
 					restoreErr = errors.Join(restoreErr, fmt.Errorf("restore sync symlink target %q: %w", snapshot.targetPath, err))
 					continue
 				}
@@ -1038,7 +1040,7 @@ func restoreSyncFiles(snapshots map[string]syncFileSnapshot) error {
 			}
 			continue
 		}
-		if _, err := filemerge.WriteFileAtomic(path, snapshot.data, mode); err != nil {
+		if _, err := writeSyncFileAtomic(path, snapshot.data, writeMode); err != nil {
 			restoreErr = errors.Join(restoreErr, fmt.Errorf("restore sync file %q: %w", path, err))
 			continue
 		}
