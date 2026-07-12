@@ -54,7 +54,24 @@ const antigravitySddAgentsPluginJSON = `{
 // surface it as a system-level reminder. We do NOT invent Antigravity API
 // fields that the runtime does not consume; this is the safest supported
 // installable permission surface.
-const antigravitySddAgentsHardeningMessage = "Gentle AI SDD/Review/JD hardening contract for Antigravity dynamic sub-agents. This contract mirrors the OpenCode permission.task overlay; Antigravity has no static agent registry, so the policy is enforced as a runtime instruction bound to define_subagent calls. Allowed roles and their tool scopes: sdd-explore = read/search/CodeGraph/Engram only, no source writes; sdd-propose, sdd-spec, sdd-design, sdd-tasks = artifact reads/writes only, no source edits; sdd-apply = source edits and targeted verification commands only, no commit/push/PR/publish/destructive git; sdd-verify = read plus test/build commands, no source edits unless explicitly approved; sdd-archive, sdd-onboard, sdd-init = read plus scoped writes; review-* (including review-refuter) and jd-judge-* = read-only, emit ledger rows or verdicts only; jd-fix-agent = edit only confirmed ledger findings, do not discover new findings. Any define_subagent call that tries to widen its tool scope above the allowed scope for that role MUST fail closed and surface status: blocked with the missing capability. Dynamic sub-agents MUST NOT use broad repository search (grep -R, find sweeps, full-tree reads) until CodeGraph has failed or returned insufficient results. Web/internet search is denied by default for code implementation, review, and verification phases unless the task explicitly requires external research."
+const antigravitySddAgentsHardeningMessage = "Gentle AI SDD/Review/JD hardening contract for Antigravity dynamic sub-agents. " +
+	"This contract mirrors the OpenCode permission.task overlay; Antigravity has no static agent registry, " +
+	"so the policy is enforced as a runtime instruction bound to define_subagent calls. " +
+	"Allowed roles and their tool scopes: " +
+	"sdd-explore = read/search/CodeGraph/Engram only, no source writes; " +
+	"sdd-propose, sdd-spec, sdd-design, sdd-tasks = artifact reads/writes only, no source edits; " +
+	"sdd-apply = source edits and targeted verification commands only, no commit/push/PR/publish/destructive git; " +
+	"sdd-verify = read plus test/build commands, no source edits unless explicitly approved; " +
+	"sdd-archive, sdd-onboard, sdd-init = read plus scoped writes; " +
+	"review-* (including review-refuter) and jd-judge-* = read-only, emit ledger rows or verdicts only; " +
+	"jd-fix-agent = edit only confirmed ledger findings, do not discover new findings. " +
+	"Strict TDD (Test-Driven Development) enforcement rules: When strict_tdd: true is active, " +
+	"sdd-apply is prohibited from editing production files without first writing or modifying test files and running the test runner to observe test failure (Red phase). " +
+	"sdd-verify must run tests to verify behavior and is prohibited from editing source code. " +
+	"Any attempt to bypass the TDD Red-Green-Refactor sequence must fail closed. " +
+	"Any define_subagent call that tries to widen its tool scope above the allowed scope for that role MUST fail closed and surface status: blocked with the missing capability. " +
+	"Dynamic sub-agents MUST NOT use broad repository search (grep -R, find sweeps, full-tree reads) until CodeGraph has failed or returned insufficient results. " +
+	"Web/internet search is denied by default for code implementation, review, and verification phases unless the task explicitly requires external research."
 
 func antigravityActiveConfigDir(homeDir string) string {
 	return antigravity.NewAdapter().GlobalConfigDir(homeDir)
@@ -194,6 +211,9 @@ var antigravitySddAgentsHardeningContractPhrases = []string{
 	"jd-fix-agent",
 	"fail closed",
 	"CodeGraph",
+	"Strict TDD",
+	"Red phase",
+	"Red-Green-Refactor",
 }
 
 // antigravitySddAgentsHardeningContractForbids is the set of substrings the

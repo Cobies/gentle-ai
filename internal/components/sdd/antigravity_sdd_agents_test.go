@@ -130,6 +130,12 @@ func TestAntigravitySddAgentsHardeningContractPhrases(t *testing.T) {
 			t.Errorf("hardening message missing required phrase %q", want)
 		}
 	}
+	// Assert TDD contract phrases specifically
+	for _, want := range []string{"Strict TDD", "Red phase", "Red-Green-Refactor"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("hardening message missing required TDD phrase %q", want)
+		}
+	}
 	for _, forbidden := range antigravitySddAgentsHardeningContractForbids {
 		if strings.Contains(msg, forbidden) {
 			t.Errorf("hardening message must not contain %q (it would fake a real Antigravity API)", forbidden)
@@ -805,5 +811,34 @@ func TestTrustWorkspaceInAntigravitySettings_PreservesUnrelatedKeysWithExistingA
 	}
 	if len(trusted) != 3 {
 		t.Fatalf("expected 3 trusted workspaces (A+B+new); got %d: %v", len(trusted), trusted)
+	}
+}
+
+func TestAntigravitySddAgentsDynamicRolesAndScopes(t *testing.T) {
+	expectedScopes := map[string]string{
+		"review-risk":        "read-only; emit ledger rows only",
+		"review-resilience":  "read-only; emit ledger rows only",
+		"review-readability": "read-only; emit ledger rows only",
+		"review-reliability": "read-only; emit ledger rows only",
+		"review-refuter":     "read-only; emit verdicts only",
+		"jd-judge-a":         "read-only; emit ledger rows only",
+		"jd-judge-b":         "read-only; emit ledger rows only",
+		"jd-fix-agent":       "edit only confirmed ledger findings; do not discover new findings",
+	}
+
+	for role, wantScope := range expectedScopes {
+		found := false
+		for _, entry := range antigravitySddAgentsRoleScopes {
+			if entry.Role == role {
+				found = true
+				if entry.Scope != wantScope {
+					t.Errorf("role %q has unexpected scope: want %q, got %q", role, wantScope, entry.Scope)
+				}
+				break
+			}
+		}
+		if !found {
+			t.Errorf("role %q is missing from the canonical role-scope validation table", role)
+		}
 	}
 }
