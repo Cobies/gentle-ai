@@ -37,7 +37,7 @@ Gentle-AI is NOT an AI agent installer. Most agents are easy to install. It is a
 | **VS Code Copilot** |        Full (runSubagent)        | Parallel execution                                              |
 | **Codex**           |            Solo-agent            | CLI-native, TOML config                                         |
 | **Windsurf**        |            Solo-agent            | Plan Mode, Code Mode, native workflows                          |
-| **Antigravity**     |   Solo-agent + Mission Control   | Built-in Browser/Terminal sub-agents                            |
+| **Antigravity**     | Full (dynamic subagents) + Mission Control | Dynamic runtime subagents via define_subagent/invoke_subagent   |
 | **Kimi Code**       |   Full (native custom agents)    | Modular prompt templates in `~/.kimi`                           |
 | **Kiro IDE**        |     Full (native subagents)      | Native `~/.kiro/agents/` + steering orchestration               |
 | **Qwen Code**       |     Full (native sub-agents)     | Slash commands, `~/.qwen/commands/`, `auto_edit` mode           |
