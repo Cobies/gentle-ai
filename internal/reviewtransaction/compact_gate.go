@@ -9,6 +9,8 @@ import (
 	"strings"
 )
 
+var finalCompactGateAllowHook = func() {}
+
 func EvaluateCompactGate(ctx context.Context, repo string, receipt CompactReceipt, input NativeGateRequestInput) NativeGateEvaluation {
 	invalid := func(reason string) NativeGateEvaluation {
 		return NativeGateEvaluation{Result: GateInvalidated, Reason: reason}
@@ -26,6 +28,16 @@ func EvaluateCompactGate(ctx context.Context, repo string, receipt CompactReceip
 	record, err := store.Load()
 	if err != nil {
 		return invalid("compact review authority cannot be loaded: " + err.Error())
+	}
+	if _, err := CompactAuthorityLeaves(ctx, repo); err != nil {
+		return invalid(err.Error())
+	}
+	superseded, err := CompactLineageSuperseded(ctx, repo, receipt.LineageID)
+	if err != nil {
+		return invalid(err.Error())
+	}
+	if superseded {
+		return invalid("compact receipt belongs to superseded historical authority")
 	}
 	authoritative, err := record.State.Receipt()
 	if err != nil || !compactReceiptEqual(authoritative, receipt) {
@@ -68,6 +80,12 @@ func EvaluateCompactGate(ctx context.Context, repo string, receipt CompactReceip
 	if request.Gate == GatePrePush && record.State.InitialSnapshot.Kind == TargetCurrentChanges && snapshot.BaseTree == snapshot.CandidateTree {
 		return invalid("pre-push current-changes receipt requires a delivered tree change")
 	}
+	if request.Gate == GatePrePush && (resolvedPrePR == nil || resolvedPrePR.DeliveredCommitCount < 1) {
+		return invalid("pre-push validation requires at least one delivered commit")
+	}
+	if request.Gate == GatePrePush && record.State.InitialSnapshot.Kind == TargetCurrentChanges && resolvedPrePR.DeliveredCommitCount != 1 {
+		return invalid("pre-push current-changes receipt requires exactly one delivery commit")
+	}
 	compatibleAdvance := false
 	var compatibility *BaseAdvanceCompatibility
 	if request.Gate == GatePrePR && snapshot.BaseTree != receipt.BaseTree {
@@ -109,10 +127,17 @@ func EvaluateCompactGate(ctx context.Context, repo string, receipt CompactReceip
 		release = &derived
 	}
 	gateContext.Release = release
+	lock, lockErr := acquireStoreLock(store.lockPath)
+	if lockErr != nil {
+		return invalid("compact authority changed during final authorization")
+	}
+	defer lock.release()
 	finalGateAuthorizationHook()
 	finalRecord, loadErr := store.Load()
 	finalSnapshot, finalRefs, snapshotErr := buildLifecycleSnapshot(ctx, repo, request)
-	if loadErr != nil || snapshotErr != nil || finalRecord.Revision != record.Revision || !reflect.DeepEqual(finalSnapshot, snapshot) || !sameResolvedPrePRRefs(finalRefs, resolvedPrePR) {
+	_, graphErr := CompactAuthorityLeaves(ctx, repo)
+	finalSuperseded, supersededErr := CompactLineageSuperseded(ctx, repo, receipt.LineageID)
+	if loadErr != nil || snapshotErr != nil || graphErr != nil || supersededErr != nil || finalSuperseded || finalRecord.Revision != record.Revision || !reflect.DeepEqual(finalSnapshot, snapshot) || !sameResolvedPrePRRefs(finalRefs, resolvedPrePR) {
 		return invalid("compact authority or repository target changed during final authorization")
 	}
 	if request.Gate == GateRelease {
@@ -122,6 +147,7 @@ func EvaluateCompactGate(ctx context.Context, repo string, receipt CompactReceip
 			return invalid("release evidence changed during final authorization")
 		}
 	}
+	finalCompactGateAllowHook()
 	return NativeGateEvaluation{Result: GateAllow, Reason: nativeGateReason(GateAllow), Context: gateContext}
 }
 
@@ -135,11 +161,12 @@ func buildCompactGateRequest(ctx context.Context, repo string, state CompactStat
 		}
 		request.Target = Target{Kind: TargetCurrentChanges, IntendedUntracked: intended}
 	case GatePrePush:
-		head, err := resolveCommit(ctx, repo, "HEAD")
+		deliveryBaseTree := map[TargetKind]string{TargetCurrentChanges: state.InitialSnapshot.BaseTree}[state.InitialSnapshot.Kind]
+		target, push, err := buildPushTarget(ctx, repo, input.BaseRef, deliveryBaseTree)
 		if err != nil {
 			return GateRequest{}, err
 		}
-		request.Target = Target{Kind: TargetExactRevision, Revision: head}
+		request.Target, request.Push = target, push
 	case GatePrePR:
 		target, prePR, err := buildPrePRTarget(ctx, repo, input.BaseRef, input.PrePRCIAttestation, state.InitialSnapshot.IntendedUntracked)
 		if err != nil {
