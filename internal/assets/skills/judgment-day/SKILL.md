@@ -9,7 +9,7 @@ metadata:
 
 ## Activation Contract
 
-Load only when the user explicitly requests Judgment Day or equivalent dual/adversarial review for a concrete target. Judgment Day replaces ordinary 4R for that target; never run both.
+Trigger automatically for hot paths (diffs touching auth/update/security/payments paths) or when the diff exceeds 400 changed lines, or when the user explicitly requests Judgment Day. Judgment Day replaces ordinary 4R for that target; never run both.
 
 ## Hard Rules
 
