@@ -1458,7 +1458,7 @@ func installSkillRegistryAutomation(homeDir string, adapter agents.Adapter) (Inj
 	}
 	if adapter.Agent() == model.AgentAntigravity {
 		// Antigravity skill-registry refresh hook is stored in the engram plugin's hooks.json
-		pluginDir := filepath.Join(homeDir, ".gemini", "antigravity-cli", "plugins", "gentle-ai-engram")
+		pluginDir := filepath.Join(adapter.GlobalConfigDir(homeDir), "plugins", "gentle-ai-engram")
 		hooksPath := filepath.Join(pluginDir, "hooks.json")
 		changed, err := ensureAntigravitySkillRegistryHook(hooksPath)
 		if err != nil {
@@ -1478,72 +1478,6 @@ func installSkillRegistryAutomation(homeDir string, adapter agents.Adapter) (Inj
 		return InjectionResult{}, fmt.Errorf("install Claude skill-registry hook: %w", err)
 	}
 	return InjectionResult{Changed: changed, Files: []string{settingsPath}}, nil
-}
-
-func ensureAntigravitySkillRegistryHook(hooksPath string) (bool, error) {
-	root := map[string]any{}
-	if data, err := os.ReadFile(hooksPath); err == nil && len(strings.TrimSpace(string(data))) > 0 {
-		if err := json.Unmarshal(data, &root); err != nil {
-			return false, fmt.Errorf("parse Antigravity hooks %q: %w", hooksPath, err)
-		}
-	} else if err != nil && !os.IsNotExist(err) {
-		return false, err
-	}
-
-	const command = `gentle-ai skill-registry refresh --quiet --no-gitignore --cwd "$PWD" || true`
-
-	pluginRaw, ok := root["gentle-ai-engram-tools"]
-	if !ok {
-		pluginRaw = map[string]any{}
-	}
-	pluginMap, _ := pluginRaw.(map[string]any)
-	if pluginMap == nil {
-		pluginMap = map[string]any{}
-	}
-
-	preInvRaw, ok := pluginMap["PreInvocation"]
-	if !ok {
-		preInvRaw = []any{}
-	}
-	preInvList, _ := preInvRaw.([]any)
-	if preInvList == nil {
-		preInvList = []any{}
-	}
-
-	exists := false
-	for _, item := range preInvList {
-		itemMap, ok := item.(map[string]any)
-		if ok && itemMap["command"] == command {
-			exists = true
-			break
-		}
-	}
-
-	if exists {
-		return false, nil
-	}
-
-	newPreInv := append([]any{map[string]any{
-		"type":    "command",
-		"command": command,
-	}}, preInvList...)
-
-	pluginMap["PreInvocation"] = newPreInv
-	root["gentle-ai-engram-tools"] = pluginMap
-
-	out, err := json.MarshalIndent(root, "", "  ")
-	if err != nil {
-		return false, err
-	}
-	out = append(out, '\n')
-	if err := os.MkdirAll(filepath.Dir(hooksPath), 0o755); err != nil {
-		return false, err
-	}
-	wr, err := filemerge.WriteFileAtomic(hooksPath, out, 0o644)
-	if err != nil {
-		return false, err
-	}
-	return wr.Changed, nil
 }
 
 func ensureCodexSkillRegistryHook(hooksPath string) (bool, error) {

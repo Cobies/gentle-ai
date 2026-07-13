@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/gentleman-programming/gentle-ai/internal/agents"
+	"github.com/gentleman-programming/gentle-ai/internal/agents/antigravity"
 	"github.com/gentleman-programming/gentle-ai/internal/components/filemerge"
 	"github.com/gentleman-programming/gentle-ai/internal/model"
 )
@@ -260,11 +261,7 @@ func mustJSONString(v any) string {
 }
 
 func antigravityActiveConfigDir(homeDir string) string {
-	desktop := filepath.Join(homeDir, ".gemini", "antigravity-desktop")
-	if info, err := os.Stat(desktop); err == nil && info.IsDir() {
-		return desktop
-	}
-	return filepath.Join(homeDir, ".gemini", "antigravity-cli")
+	return antigravity.NewAdapter().GlobalConfigDir(homeDir)
 }
 
 func hasAntigravityCLIConfigDir(homeDir string) bool {

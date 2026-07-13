@@ -63,7 +63,7 @@ const antigravitySddAgentsHardeningMessage = "Gentle AI SDD/Review/JD hardening 
 	"sdd-apply = source edits and targeted verification commands only, no commit/push/PR/publish/destructive git; " +
 	"sdd-verify = read plus test/build commands, no source edits unless explicitly approved; " +
 	"sdd-archive, sdd-onboard, sdd-init = read plus scoped writes; " +
-	"review-* (including review-refuter) and jd-judge-* = read-only, emit ledger rows or verdicts only; " +
+	"review-* (including review-risk, review-readability, review-reliability, review-resilience, and review-refuter) and jd-judge-* (including jd-judge-a, jd-judge-b) = read-only, emit ledger rows or verdicts only; " +
 	"jd-fix-agent = edit only confirmed ledger findings, do not discover new findings. " +
 	"Strict TDD (Test-Driven Development) enforcement rules: When strict_tdd: true is active, " +
 	"sdd-apply is prohibited from editing production files without first writing or modifying test files and running the test runner to observe test failure (Red phase). " +
@@ -214,6 +214,12 @@ var antigravitySddAgentsHardeningContractPhrases = []string{
 	"Strict TDD",
 	"Red phase",
 	"Red-Green-Refactor",
+	"review-risk",
+	"review-readability",
+	"review-reliability",
+	"review-resilience",
+	"jd-judge-a",
+	"jd-judge-b",
 }
 
 // antigravitySddAgentsHardeningContractForbids is the set of substrings the
@@ -395,4 +401,114 @@ func trustWorkspaceInAntigravitySettings(homeDir, workspaceDir string, adapter a
 	}
 
 	return writeResult.Changed, []string{settingsPath}, nil
+}
+
+var AntigravityCodeGraphToolWiringPathsFn = AntigravityCodeGraphToolWiringPaths
+var HasAntigravityCodeGraphToolWiringFn = HasAntigravityCodeGraphToolWiring
+
+func AntigravityCodeGraphToolWiringPaths(homeDir string, adapter agents.Adapter) []string {
+	return []string{
+		filepath.Join(homeDir, ".gemini", "config", "mcp_config.json"),
+		filepath.Join(homeDir, ".gemini", "antigravity", "mcp_config.json"),
+	}
+}
+
+func HasAntigravityCodeGraphToolWiring(homeDir string, adapter agents.Adapter) (string, bool) {
+	pluginPath := filepath.Join(adapter.GlobalConfigDir(homeDir), "plugins", "gentle-ai-codegraph", "mcp_config.json")
+	for _, path := range []string{
+		filepath.Join(homeDir, ".gemini", "config", "mcp_config.json"),
+		filepath.Join(homeDir, ".gemini", "antigravity", "mcp_config.json"),
+		pluginPath,
+	} {
+		data, err := os.ReadFile(path)
+		if err == nil && hasCanonicalCodeGraphServer(data) {
+			return path, true
+		}
+	}
+	path := filepath.Join(homeDir, ".gemini", "antigravity", "mcp_config.json")
+	if _, err := os.Stat(filepath.Join(homeDir, ".gemini", "config", ".migrated")); err == nil {
+		path = filepath.Join(homeDir, ".gemini", "config", "mcp_config.json")
+	}
+	data, err := os.ReadFile(path)
+	return path, err == nil && hasCanonicalCodeGraphServer(data)
+}
+
+func hasCanonicalCodeGraphServer(data []byte) bool {
+	var config struct {
+		MCPServers map[string]json.RawMessage `json:"mcpServers"`
+	}
+	if json.Unmarshal(data, &config) != nil {
+		return false
+	}
+	var server struct {
+		Command string `json:"command"`
+	}
+	raw, ok := config.MCPServers["codegraph"]
+	return ok && json.Unmarshal(raw, &server) == nil && server.Command == "codegraph"
+}
+
+func ensureAntigravitySkillRegistryHook(hooksPath string) (bool, error) {
+	root := map[string]any{}
+	if data, err := os.ReadFile(hooksPath); err == nil && len(strings.TrimSpace(string(data))) > 0 {
+		if err := json.Unmarshal(data, &root); err != nil {
+			return false, fmt.Errorf("parse Antigravity hooks %q: %w", hooksPath, err)
+		}
+	} else if err != nil && !os.IsNotExist(err) {
+		return false, err
+	}
+
+	const command = `gentle-ai skill-registry refresh --quiet --no-gitignore --cwd "$PWD" || true`
+
+	pluginRaw, ok := root["gentle-ai-engram-tools"]
+	if !ok {
+		pluginRaw = map[string]any{}
+	}
+	pluginMap, _ := pluginRaw.(map[string]any)
+	if pluginMap == nil {
+		pluginMap = map[string]any{}
+	}
+
+	preInvRaw, ok := pluginMap["PreInvocation"]
+	if !ok {
+		preInvRaw = []any{}
+	}
+	preInvList, _ := preInvRaw.([]any)
+	if preInvList == nil {
+		preInvList = []any{}
+	}
+
+	exists := false
+	for _, item := range preInvList {
+		itemMap, ok := item.(map[string]any)
+		if ok && itemMap["command"] == command {
+			exists = true
+			break
+		}
+	}
+
+	if exists {
+		return false, nil
+	}
+
+	newPreInv := append([]any{map[string]any{
+		"type":    "command",
+		"command": command,
+	}}, preInvList...)
+
+	pluginMap["PreInvocation"] = newPreInv
+	root["gentle-ai-engram-tools"] = pluginMap
+
+	out, err := json.MarshalIndent(root, "", "  ")
+	if err != nil {
+		return false, err
+	}
+	out = append(out, '\n')
+	if err := os.MkdirAll(filepath.Dir(hooksPath), 0o755); err != nil {
+		return false, err
+	}
+	wr, err := filemerge.WriteFileAtomic(hooksPath, out, 0o644)
+	if err != nil {
+		return false, err
+	}
+	return wr.Changed, nil
 }

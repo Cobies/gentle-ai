@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/gentleman-programming/gentle-ai/internal/agents"
+	"github.com/gentleman-programming/gentle-ai/internal/components/sdd"
 	"github.com/gentleman-programming/gentle-ai/internal/model"
 )
 
@@ -90,10 +91,7 @@ func codeGraphToolWiringPaths(homeDir string, adapter agents.Adapter) []string {
 	case model.AgentClaudeCode:
 		return []string{filepath.Join(homeDir, ".claude.json")}
 	case model.AgentAntigravity:
-		return []string{
-			filepath.Join(homeDir, ".gemini", "config", "mcp_config.json"),
-			filepath.Join(homeDir, ".gemini", "antigravity", "mcp_config.json"),
-		}
+		return sdd.AntigravityCodeGraphToolWiringPathsFn(homeDir, adapter)
 	case model.AgentKiroIDE:
 		return []string{filepath.Join(homeDir, ".kiro", "settings", "mcp.json")}
 	default:
@@ -115,23 +113,7 @@ func hasCodeGraphToolWiring(homeDir string, adapter agents.Adapter) (string, boo
 		return path, hasCanonicalCodeGraphServer(data)
 	}
 	if adapter.Agent() == model.AgentAntigravity {
-		pluginPath := filepath.Join(adapter.GlobalConfigDir(homeDir), "plugins", "gentle-ai-codegraph", "mcp_config.json")
-		for _, path := range []string{
-			filepath.Join(homeDir, ".gemini", "config", "mcp_config.json"),
-			filepath.Join(homeDir, ".gemini", "antigravity", "mcp_config.json"),
-			pluginPath,
-		} {
-			data, err := os.ReadFile(path)
-			if err == nil && hasCanonicalCodeGraphServer(data) {
-				return path, true
-			}
-		}
-		path := filepath.Join(homeDir, ".gemini", "antigravity", "mcp_config.json")
-		if _, err := os.Stat(filepath.Join(homeDir, ".gemini", "config", ".migrated")); err == nil {
-			path = filepath.Join(homeDir, ".gemini", "config", "mcp_config.json")
-		}
-		data, err := os.ReadFile(path)
-		return path, err == nil && hasCanonicalCodeGraphServer(data)
+		return sdd.HasAntigravityCodeGraphToolWiringFn(homeDir, adapter)
 	}
 	if detector, ok := adapter.(agents.EffectiveCodeGraphWiringDetector); ok {
 		return detector.EffectiveCodeGraphWiring(homeDir)
