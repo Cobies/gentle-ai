@@ -98,6 +98,8 @@ These are orchestrator stop rules for Antigravity. Once any trigger fires, the o
 5. **Long-session rule**: after roughly 20 tool calls, 5 exploratory file reads, or 2 non-mechanical edits without a phase boundary and growing complexity, pause and re-plan instead of silently continuing monolithically.
 6. **Fresh review rule**: fresh adversarial lenses run only inside one explicit `review/start(target)` operation. Final verification checks requirements/runtime independently and never reopens the code review.
 7. **Post-apply review rule**: after `sdd-apply` completes, if no valid content-bound receipt exists, explicitly start ordinary bounded review using the fresh review operation above before reporting the change ready for lifecycle gates. If a valid receipt exists, reuse it. This is a phase-boundary trigger, not a lifecycle gate; commit, push, PR, and release still validate the receipt only and never launch review actors.
+8. **Post-verify review rule**: after `sdd-verify` completes successfully, if the changes are not trivial and no valid content-bound receipt exists, the orchestrator MUST define and invoke the selected 4R lenses or Judgment Day reviewer dynamic subagents (`review-*` or `jd-judge-*`) to run a complete review before proceeding to `sdd-archive` or completing the cycle. Do not skip or bypass this review phase.
+
 
 #### Review Lens Selection
 
@@ -105,7 +107,7 @@ These are orchestrator stop rules for Antigravity. Once any trigger fires, the o
 
 1. **Trivial diff** (ONLY documentation, comments, formatting, or typo fixes in strings — zero executable code and zero configuration changes): run no lens. Any diff touching executable code or configuration is at least standard tier.
 2. **Standard diff**: run exactly ONE lens — the row in the table below that matches the dominant risk. If multiple rows match, pick the single highest-impact row; do not add lenses.
-3. **Hot path** (the diff touches auth/update/security/payments paths) **or >400 changed lines**: run the full 4R set — `review-risk`, `review-resilience`, `review-readability`, `review-reliability`.
+3. **Hot path** (the diff touches auth/update/security/payments paths) **or >400 changed lines**: run the full 4R set — `review-risk`, `review-resilience`, `review-readability`, `review-reliability` AND Judgment Day (blind dual review using `jd-judge-a` and `jd-judge-b`).
 
 | Risk signal | Review lens |
 | --- | --- |
@@ -330,13 +332,14 @@ Do NOT skip this check. Do not ask the user about init itself once preflight is 
 This is collected by `SDD Session Preflight`. If it is missing, enforce `SDD Session Preflight and Execution Mode (HARD GATE)` before any phase work.
 
 - **Automatic** (`auto` / `automatic`): Run dependency-ready phases sequentially without asking between phases, while still running the automatic gatekeeper validation after every phase before invoking the next dynamic subagent. The user only sees an interruption when the gatekeeper catches a real problem, a review workload guard requires a delivery decision, or before transitioning to the `sdd-apply` phase. **CRITICAL GATE**: The transition to the `sdd-apply` (implementation) phase is NEVER automatic; the orchestrator MUST pause, present the proposed tasks/changes, and obtain explicit user approval before launching `sdd-apply` in all modes.
-- **Interactive** (`interactive`): Pause after every dynamic phase subagent returns. Summarize the phase, ask whether to continue/adjust/stop, then STOP and wait for the user's answer before invoking the next dynamic subagent.
+- **Interactive** (`interactive`): The default mode. The orchestrator MUST pause after every dynamic phase subagent returns (including proposal, spec, design, and tasks). It MUST summarize the phase, ask whether to continue/adjust/stop, and STOP to wait for the user's explicit confirmation/greenlight before invoking the next dynamic subagent. It must only bypass intermediate pauses if the user explicitly requested `auto` mode or explicitly requested to only be notified before applying changes.
 
 If the user does not specify an execution mode during preflight, default to **Interactive**.
 
 Cache the mode choice for the session — do not ask again unless the user explicitly requests a mode change.
 
-For this agent (dynamic subagent execution): **Interactive** means the orquestador pauses between dynamic phase invocations. **Automatic** means the orchestrator may invoke dependency-ready phase subagents back-to-back (except for `sdd-apply`, which always requires confirmation) only after each automatic gatekeeper check passes.
+For this agent (dynamic subagent execution): **Interactive** means the orchestrator pauses between dynamic phase invocations. **Automatic** means the orchestrator may invoke dependency-ready phase subagents back-to-back (except for `sdd-apply`, which always requires confirmation) only after each automatic gatekeeper check passes.
+
 
 ### Automatic Mode Gatekeeper (MANDATORY)
 
