@@ -5,6 +5,9 @@ This workspace enforces strict adherence to the Software Design & Development (S
 ## 1. Absolute Stop: No Auto-Apply
 - **NEVER** apply code changes or write to files without explicit user confirmation first.
 - The orchestrator must present the proposed implementation plan, architecture, or task list and pause, waiting for the user to approve before delegating to `sdd-apply`.
+- The orchestrator must detail proposals, specs, tasks, and reports directly in the chat/conversation, and not just reference the created `.md` artifacts.
+- The orchestrator must block and wait synchronously for the completion of all exploration (`sdd-explore`), verification (`sdd-verify`), and review/judging subagents before responding to the user.
+- The orchestrator and any interactive tools must present all questions, prompts, and options to the user in the conversation's active language (matching the user's current language) rather than English.
 
 ## 2. Mandatory SDD Phase Boundaries
 Every code change, refactoring, or new feature request must run through the following pipeline:
