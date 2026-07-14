@@ -3913,3 +3913,54 @@ func TestRunSync_RestoresCodexPhaseModelAssignments(t *testing.T) {
 		t.Fatalf("AGENTS.md rendered carril table instead of Custom per-phase table; got:\n%s", text)
 	}
 }
+
+func TestRunSyncWithSelection_RobustSyncFailureHandling(t *testing.T) {
+	home := t.TempDir()
+	restoreCommand := runCommand
+	restoreLookPath := cmdLookPath
+	restorePiCodeGraph := refreshPiCodeGraphIfConfigured
+	t.Cleanup(func() {
+		runCommand = restoreCommand
+		cmdLookPath = restoreLookPath
+		refreshPiCodeGraphIfConfigured = restorePiCodeGraph
+	})
+
+	runCommand = func(string, ...string) error { return nil }
+	cmdLookPath = func(name string) (string, error) { return "/usr/local/bin/" + name, nil }
+
+	// Force the pi-codegraph step to fail
+	refreshPiCodeGraphIfConfigured = func(homeDir, workspaceDir string) (communitytool.PiCodeGraphResult, bool, error) {
+		return communitytool.PiCodeGraphResult{}, true, errors.New("pi-codegraph injection failed")
+	}
+
+	sel := model.Selection{
+		Agents:         []model.AgentID{model.AgentOpenCode},
+		Components:     []model.ComponentID{model.ComponentSDD},
+		SDDMode:        model.SDDModeSingle,
+		CommunityTools: []model.CommunityToolID{model.CommunityToolCodeGraph},
+	}
+
+	result, err := RunSyncWithSelection(home, sel)
+	if err != nil {
+		t.Fatalf("RunSyncWithSelection() should not return error on apply failures, got: %v", err)
+	}
+
+	// Verify that the step failed
+	foundFailedStep := false
+	for _, step := range result.Execution.Apply.Steps {
+		if step.StepID == "sync:community-tool:pi-codegraph" {
+			if step.Status == pipeline.StepStatusFailed {
+				foundFailedStep = true
+			}
+		}
+	}
+	if !foundFailedStep {
+		t.Errorf("Expected sync:community-tool:pi-codegraph to fail, but it did not. Steps: %+v", result.Execution.Apply.Steps)
+	}
+
+	// We expect verification to produce warnings because the files verify looks for
+	// might fail to exist or fail validation (and we marked them as Soft so they produce Warnings).
+	if !result.Verify.Ready {
+		t.Errorf("Expected result.Verify.Ready to be true (since failures should be warnings), got false")
+	}
+}

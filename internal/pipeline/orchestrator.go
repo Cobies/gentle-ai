@@ -53,7 +53,7 @@ func (o *Orchestrator) Execute(plan StagePlan) ExecutionResult {
 	}
 
 	result.Err = applyResult.Err
-	if o.policy.ShouldRollback(StageApply, applyResult.Err) {
+	if o.runner.FailurePolicy != ContinueOnError && o.policy.ShouldRollback(StageApply, applyResult.Err) {
 		result.Rollback = ExecuteRollback(applyResult.Steps, o.stepByID)
 		if !result.Rollback.Success {
 			result.Err = result.Rollback.Err

@@ -41,6 +41,10 @@ func (r Runner) Run(stage Stage, steps []Step) StageResult {
 			if r.FailurePolicy == StopOnError {
 				result.Err = err
 				return result
+			} else if r.FailurePolicy == ContinueOnError {
+				if rollbackStep, ok := step.(RollbackStep); ok {
+					_ = rollbackStep.Rollback()
+				}
 			}
 
 			continue

@@ -1207,10 +1207,13 @@ func RunSyncWithSelection(homeDir string, selection model.Selection) (SyncResult
 		return result, err
 	}
 
-	orchestrator := pipeline.NewOrchestrator(pipeline.DefaultRollbackPolicy())
+	orchestrator := pipeline.NewOrchestrator(
+		pipeline.DefaultRollbackPolicy(),
+		pipeline.WithFailurePolicy(pipeline.ContinueOnError),
+	)
 	result.Execution = orchestrator.Execute(stagePlan)
-	if result.Execution.Err != nil {
-		return result, fmt.Errorf("execute sync pipeline: %w", result.Execution.Err)
+	if result.Execution.Prepare.Err != nil {
+		return result, fmt.Errorf("execute sync pipeline prepare: %w", result.Execution.Prepare.Err)
 	}
 
 	// Capture how many managed assets were actually changed.
@@ -1232,9 +1235,6 @@ func RunSyncWithSelection(homeDir string, selection model.Selection) (SyncResult
 
 	// Post-apply verification reuses the same component paths as install.
 	result.Verify = runPostSyncVerification(homeDir, rt.workspaceDir, selection)
-	if !result.Verify.Ready {
-		return result, fmt.Errorf("post-sync verification failed:\n%s", verify.RenderReport(result.Verify))
-	}
 	if persistedStateErr == nil && !persistedState.CommunityToolsConfigured && selection.CommunityTools != nil {
 		persistedState.CommunityTools = communityToolIDsToStrings(selection.CommunityTools)
 		persistedState.CommunityToolsConfigured = true
@@ -1477,7 +1477,95 @@ func RenderSyncReport(result SyncResult) string {
 		}
 	}
 
-	if !result.Verify.Ready {
+	// Execution Summary Table
+	fmt.Fprintln(&b, "")
+	fmt.Fprintln(&b, "Execution Summary:")
+	fmt.Fprintln(&b, "--------------------------------------------------")
+	fmt.Fprintf(&b, "  %-28s | %s\n", "Component / Step", "Status")
+	fmt.Fprintln(&b, "--------------------------------------------------")
+
+	stepMap := make(map[string]pipeline.StepResult)
+	for _, sr := range result.Execution.Apply.Steps {
+		stepMap[sr.StepID] = sr
+	}
+
+	for _, c := range result.Selection.Components {
+		name := string(c)
+		stepID := "sync:component:" + name
+		status := "Skipped"
+		if sr, ok := stepMap[stepID]; ok {
+			switch sr.Status {
+			case pipeline.StepStatusSucceeded:
+				status = "Success"
+			case pipeline.StepStatusFailed:
+				status = "[FAILED]"
+			case pipeline.StepStatusSkipped:
+				status = "Skipped"
+			case pipeline.StepStatusRolledBack:
+				status = "RolledBack"
+			}
+		}
+		fmt.Fprintf(&b, "  %-28s | %s\n", name, status)
+	}
+
+	// Community tools if present
+	var hasCodeGraph bool
+	for _, tool := range result.Selection.CommunityTools {
+		if tool == model.CommunityToolCodeGraph {
+			hasCodeGraph = true
+		}
+	}
+	if hasCodeGraph {
+		for _, toolID := range []string{"codegraph-guidance", "pi-codegraph"} {
+			stepID := "sync:community-tool:" + toolID
+			status := "Skipped"
+			if sr, ok := stepMap[stepID]; ok {
+				switch sr.Status {
+				case pipeline.StepStatusSucceeded:
+					status = "Success"
+				case pipeline.StepStatusFailed:
+					status = "[FAILED]"
+				case pipeline.StepStatusSkipped:
+					status = "Skipped"
+				case pipeline.StepStatusRolledBack:
+					status = "RolledBack"
+				}
+			}
+			fmt.Fprintf(&b, "  %-28s | %s\n", toolID, status)
+		}
+	} else {
+		// Pi CodeGraph step runs unconditionally in runtime, so check if it is in the steps
+		for _, stepID := range []string{"sync:community-tool:pi-codegraph"} {
+			if sr, ok := stepMap[stepID]; ok {
+				status := "Skipped"
+				switch sr.Status {
+				case pipeline.StepStatusSucceeded:
+					status = "Success"
+				case pipeline.StepStatusFailed:
+					status = "[FAILED]"
+				case pipeline.StepStatusSkipped:
+					status = "Skipped"
+				case pipeline.StepStatusRolledBack:
+					status = "RolledBack"
+				}
+				fmt.Fprintf(&b, "  %-28s | %s\n", "pi-codegraph", status)
+			}
+		}
+	}
+
+	// Verification
+	verifyStatus := "Success"
+	if len(result.Verify.Checks) > 0 {
+		if result.Verify.Failed > 0 || result.Verify.Warnings > 0 {
+			verifyStatus = "[WARNING]"
+		}
+	} else {
+		verifyStatus = "Skipped"
+	}
+	fmt.Fprintf(&b, "  %-28s | %s\n", "Verification", verifyStatus)
+	fmt.Fprintln(&b, "--------------------------------------------------")
+
+	if result.Verify.Warnings > 0 || !result.Verify.Ready {
 		fmt.Fprintln(&b, "")
 		fmt.Fprintln(&b, "Post-sync verification:")
 		fmt.Fprint(&b, verify.RenderReport(result.Verify))
@@ -1498,6 +1586,7 @@ func runPostSyncVerification(homeDir, workspaceDir string, selection model.Selec
 				checks = append(checks, verify.Check{
 					ID:          "verify:sync:file:" + currentPath,
 					Description: "legacy OpenCode background agents plugin removed",
+					Soft:        true,
 					Run: func(context.Context) error {
 						if _, err := os.Stat(currentPath); err != nil {
 							if os.IsNotExist(err) {
@@ -1513,6 +1602,7 @@ func runPostSyncVerification(homeDir, workspaceDir string, selection model.Selec
 			checks = append(checks, verify.Check{
 				ID:          "verify:sync:file:" + currentPath,
 				Description: "synced file exists",
+				Soft:        true,
 				Run: func(context.Context) error {
 					if _, err := os.Stat(currentPath); err != nil {
 						return err

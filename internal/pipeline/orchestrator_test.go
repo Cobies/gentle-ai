@@ -96,7 +96,7 @@ func TestRunnerContinueOnErrorExecutesAllSteps(t *testing.T) {
 
 	result := runner.Run(StageApply, steps)
 
-	wantOrder := []string{"run:step-1", "run:step-2", "run:step-3"}
+	wantOrder := []string{"run:step-1", "run:step-2", "rollback:step-2", "run:step-3"}
 	if !reflect.DeepEqual(order, wantOrder) {
 		t.Fatalf("execution order = %v, want %v", order, wantOrder)
 	}
@@ -223,7 +223,7 @@ func TestRunnerProgressCallbackEmitsFailedEvents(t *testing.T) {
 	}
 }
 
-func TestOrchestratorContinueOnErrorWithRollback(t *testing.T) {
+func TestOrchestratorContinueOnErrorImmediateStepRollback(t *testing.T) {
 	order := []string{}
 	orchestrator := NewOrchestrator(
 		DefaultRollbackPolicy(),
@@ -238,11 +238,14 @@ func TestOrchestratorContinueOnErrorWithRollback(t *testing.T) {
 		},
 	})
 
-	// All 3 steps should run due to ContinueOnError.
-	wantRunOrder := []string{"run:apply-1", "run:apply-2", "run:apply-3"}
-	runOrder := order[:3]
-	if !reflect.DeepEqual(runOrder, wantRunOrder) {
-		t.Fatalf("run order = %v, want %v", runOrder, wantRunOrder)
+	// Expected order:
+	// 1. run:apply-1 (success)
+	// 2. run:apply-2 (fail) -> rollback:apply-2 immediately
+	// 3. run:apply-3 (success)
+	// There should be no rollback:apply-1 or rollback:apply-3.
+	wantOrder := []string{"run:apply-1", "run:apply-2", "rollback:apply-2", "run:apply-3"}
+	if !reflect.DeepEqual(order, wantOrder) {
+		t.Fatalf("execution order = %v, want %v", order, wantOrder)
 	}
 
 	if result.Err == nil {
@@ -253,9 +256,9 @@ func TestOrchestratorContinueOnErrorWithRollback(t *testing.T) {
 		t.Fatalf("expected apply stage to report failure")
 	}
 
-	// Rollback should fire because apply failed and policy is enabled.
-	if result.Rollback.Stage != StageRollback {
-		t.Fatalf("rollback stage = %q, want rollback", result.Rollback.Stage)
+	// No global rollback should have run or succeeded
+	if len(result.Rollback.Steps) != 0 {
+		t.Fatalf("expected no global rollback steps, got %d", len(result.Rollback.Steps))
 	}
 }
 
