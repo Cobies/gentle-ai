@@ -313,8 +313,8 @@ func TestCapabilities(t *testing.T) {
 	if a.SupportsSlashCommands() {
 		t.Fatal("SupportsSlashCommands() = true, want false")
 	}
-	if a.SupportsSubAgents() {
-		t.Fatal("SupportsSubAgents() = true, want false")
+	if !a.SupportsSubAgents() {
+		t.Fatal("SupportsSubAgents() = false, want true")
 	}
 	if got := a.OutputStyleDir("/tmp/home"); got != "" {
 		t.Fatalf("OutputStyleDir() = %q, want empty string", got)
@@ -322,11 +322,12 @@ func TestCapabilities(t *testing.T) {
 	if got := a.CommandsDir("/tmp/home"); got != "" {
 		t.Fatalf("CommandsDir() = %q, want empty string", got)
 	}
-	if got := a.SubAgentsDir("/tmp/home"); got != "" {
-		t.Fatalf("SubAgentsDir() = %q, want empty string", got)
+	expectedSubAgentsDir := filepath.Join("/tmp/home", ".gemini", "antigravity-cli", "plugins", "gentle-ai-sdd-agents", "agents")
+	if got := a.SubAgentsDir("/tmp/home"); got != expectedSubAgentsDir {
+		t.Fatalf("SubAgentsDir() = %q, want %q", got, expectedSubAgentsDir)
 	}
-	if got := a.EmbeddedSubAgentsDir(); got != "" {
-		t.Fatalf("EmbeddedSubAgentsDir() = %q, want empty string", got)
+	if got := a.EmbeddedSubAgentsDir(); got != "kiro/agents" {
+		t.Fatalf("EmbeddedSubAgentsDir() = %q, want %q", got, "kiro/agents")
 	}
 }
 

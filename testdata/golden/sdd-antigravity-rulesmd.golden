@@ -71,7 +71,7 @@ Core principle: **does this inflate my context without need?** If yes → run th
 | Read to decide/verify 1-3 files | ✅ | — |
 | Read to explore/understand 4+ files | — | ✅ `sdd-explore` |
 | Read as preparation for writing | — | ✅ same phase as the write |
-| Write atomic one-file mechanical change | ✅ | — |
+| Write atomic one-file mechanical change | — | ✅ `sdd-apply` |
 | Write with analysis or multiple files | — | ✅ `sdd-apply` |
 | Bash for state, e.g. `git status`, `gh issue view` | ✅ | — |
 | Bash for execution, tests, builds, installs | — | ✅ `sdd-verify` |
@@ -186,7 +186,7 @@ Before commit, stage all reviewed paths without content/mode changes, then valid
 - Keep exploration, apply, and verify concerns separated through dynamic subagent context even though Antigravity does not install static subagent files.
 - Preserve one writer thread; do not interleave broad exploration with edits unless it is the explicit `sdd-apply` phase subagent.
 - Start concrete review lenses only inside one explicit post-implementation `review/start(target)`; conflict and incident handling validate the existing receipt and immutable boundaries instead of reopening review.
-- Avoid extra phase ceremony for truly local one-file fixes, quick state checks, and already-understood mechanical edits.
+- Avoid extra phase ceremony for quick state checks and status queries only. All code changes and codebase explorations MUST delegate to dynamic subagents.
 
 ### Antigravity CodeGraph Guidance (MANDATORY)
 
@@ -195,7 +195,7 @@ When answering structural or codebase questions, use CodeGraph before broad file
 1. Resolve the project root with `git rev-parse --show-toplevel || pwd`.
 2. Confirm the root is a real project/workspace. Do not initialize CodeGraph in `$HOME`, temporary directories, or non-project folders.
 3. Check for `<project-root>/.codegraph/` before broad Read/Glob/Grep exploration.
-4. If `.codegraph/` is missing and the `codegraph` CLI is available, run `codegraph init <project-root>` once. If `.codegraph/` is already present, run `codegraph sync <project-root>` once at the start of the task/session to ensure the index is up-to-date.
+4. If `.codegraph/` is missing and CodeGraph is enabled/available, immediately run `gentle-ai codegraph init --cwd <project-root>` once. If `.codegraph/` is already present, run `codegraph sync <project-root>` once at the start of the task/session to ensure the index is up-to-date.
 5. Use `codegraph explore "..."` or the `codegraph_explore` MCP tool before broad `grep`, `find`, or multi-file read sweeps.
 6. Fall back to normal filesystem tools only after CodeGraph initialization or exploration fails, and briefly report that fallback.
 
@@ -339,6 +339,13 @@ If the user does not specify an execution mode during preflight, default to **In
 Cache the mode choice for the session — do not ask again unless the user explicitly requests a mode change.
 
 For this agent (dynamic subagent execution): **Interactive** means the orchestrator pauses between dynamic phase invocations. **Automatic** means the orchestrator may invoke dependency-ready phase subagents back-to-back (except for `sdd-apply`, which always requires confirmation) only after each automatic gatekeeper check passes.
+
+**Absolute Stop Rules (MANDATORY)**:
+- **NEVER** apply code changes or write to files without explicit user confirmation first.
+- The orchestrator must present the proposed implementation plan, architecture, or task list and pause, waiting for the user to approve before delegating to `sdd-apply`.
+- The orchestrator must detail proposals, specs, tasks, and reports directly in the chat/conversation, and not just reference the created `.md` artifacts.
+- The orchestrator must block and wait synchronously for the completion of all exploration (`sdd-explore`), verification (`sdd-verify`), and review/judging subagents before responding to the user.
+- The orchestrator and any interactive tools must present all questions, prompts, and options to the user in the conversation's active language (matching the user's current language) rather than English.
 
 
 ### Automatic Mode Gatekeeper (MANDATORY)

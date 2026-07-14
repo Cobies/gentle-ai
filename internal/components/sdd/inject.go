@@ -688,6 +688,12 @@ func Inject(homeDir string, adapter agents.Adapter, sddMode model.SDDModeID, opt
 			// Copy all files (not just .md) to support Kimi's YAML-based agents
 			contentStr := renderBoundedReviewAsset(embeddedDir + "/" + entry.Name())
 
+			if adapter.Agent() == model.AgentAntigravity {
+				contentStr = strings.ReplaceAll(contentStr, "{{KIRO_MODEL}}", "auto")
+				contentStr = strings.ReplaceAll(contentStr, "~/.kiro/skills", "~/.gemini/antigravity-cli/skills")
+				contentStr = strings.ReplaceAll(contentStr, "%USERPROFILE%\\.kiro\\skills", "%USERPROFILE%\\.gemini\\antigravity-cli\\skills")
+			}
+
 			// Resolve {{KIRO_MODEL}} placeholder for adapters that support it (e.g. Kiro).
 			// Non-Kiro adapters (Cursor, etc.) don't implement kiroModelResolver and are unaffected.
 			if kmr, ok := adapter.(kiroModelResolver); ok {
