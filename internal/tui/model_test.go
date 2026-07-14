@@ -1714,6 +1714,8 @@ func TestCommunityToolInstallationPreservesPartialResultOnError(t *testing.T) {
 	}
 
 	m := NewModel(system.DetectionResult{}, "dev")
+	m.Screen = ScreenCommunityToolInstalling
+	m.OperationRunning = true
 	m.Selection.CommunityTools = []model.CommunityToolID{model.CommunityToolCodeGraph}
 	cmd := m.startCommunityToolInstallation()
 	if cmd == nil {
@@ -1755,8 +1757,8 @@ func TestStandaloneOpenCodePluginsContinueRegistersSelectedPlugins(t *testing.T)
 
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	state := updated.(Model)
-	if state.Screen != ScreenOpenCodePluginResult {
-		t.Fatalf("screen = %v, want %v", state.Screen, ScreenOpenCodePluginResult)
+	if state.Screen != ScreenOpenCodePlugins {
+		t.Fatalf("screen = %v, want %v until registration completes", state.Screen, ScreenOpenCodePlugins)
 	}
 	if cmd == nil {
 		t.Fatal("expected registration command")
@@ -4102,6 +4104,17 @@ func TestCustomPresetSkillPickerBackGoesToStrictTDD(t *testing.T) {
 
 	if state.Screen != ScreenStrictTDD {
 		t.Fatalf("screen = %v, want ScreenStrictTDD after Esc on SkillPicker (custom preset + SDD)", state.Screen)
+	}
+}
+
+func TestSkillPickerToggleUsesCanonicalIndex(t *testing.T) {
+	all := screens.AllSkillsOrdered()
+	for i, skill := range all {
+		m := Model{Screen: ScreenSkillPicker, Cursor: i, SkillPicker: append([]model.SkillID(nil), all...)}
+		m.toggleCurrentSkill()
+		if slices.Contains(m.SkillPicker, skill) {
+			t.Errorf("cursor %d did not toggle canonical skill %q", i, skill)
+		}
 	}
 }
 

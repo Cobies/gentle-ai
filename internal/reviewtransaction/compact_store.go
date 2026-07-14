@@ -36,6 +36,26 @@ type CompactStore struct {
 	TracePath string
 }
 
+type CompactStartAction string
+
+const (
+	CompactStartCreated      CompactStartAction = "created"
+	CompactStartResumed      CompactStartAction = "resumed"
+	CompactStartReuseReceipt CompactStartAction = "reuse-receipt"
+	CompactStartBlocked      CompactStartAction = "blocked-scope-action"
+)
+
+type CompactStartRequest struct {
+	State     CompactState
+	TracePath string
+}
+
+type CompactStartResult struct {
+	Record         CompactRecord
+	Action         CompactStartAction
+	LensesRequired bool
+}
+
 type CompactTraceEntry struct {
 	Operation        string `json:"operation"`
 	PreviousRevision string `json:"previous_revision,omitempty"`
@@ -85,6 +105,9 @@ func RecoverCompactAuthority(ctx context.Context, repo string, request CompactRe
 	}
 	if predecessor.Revision != request.ExpectedPredecessorRevision {
 		return CompactRecord{}, fmt.Errorf("%w: expected predecessor revision %q, current %q", ErrConcurrentUpdate, request.ExpectedPredecessorRevision, predecessor.Revision)
+	}
+	if predecessor.State.InitialSnapshot.Projection != request.Successor.InitialSnapshot.Projection {
+		return CompactRecord{}, errors.New("recovery successor must retain the predecessor projection")
 	}
 	existing, existingErr := successorStore.Load()
 	if existingErr != nil && !os.IsNotExist(existingErr) {
@@ -178,7 +201,6 @@ func CompactAuthorityLeaves(ctx context.Context, repo string) ([]CompactStore, e
 	}
 	records := make(map[string]CompactRecord, len(stores))
 	storeByLineage := make(map[string]CompactStore, len(stores))
-	children := make(map[string]int)
 	for _, store := range stores {
 		record, loadErr := store.Load()
 		if loadErr != nil {
@@ -186,6 +208,11 @@ func CompactAuthorityLeaves(ctx context.Context, repo string) ([]CompactStore, e
 		}
 		records[record.State.LineageID], storeByLineage[record.State.LineageID] = record, store
 	}
+	return compactAuthorityLeaves(records, storeByLineage)
+}
+
+func compactAuthorityLeaves(records map[string]CompactRecord, storeByLineage map[string]CompactStore) ([]CompactStore, error) {
+	children := make(map[string]int)
 	for lineage, record := range records {
 		if record.State.Recovery == nil {
 			continue
@@ -288,6 +315,221 @@ func DiscoverCompactStores(ctx context.Context, repo string) ([]CompactStore, er
 	}
 	sort.Slice(stores, func(i, j int) bool { return stores[i].lineageID < stores[j].lineageID })
 	return stores, nil
+}
+
+// StartCompactAuthority serializes compact start discovery, equivalence
+// decisions, and the initial write under the repository-wide v2 lock.
+func StartCompactAuthority(ctx context.Context, repo string, request CompactStartRequest) (CompactStartResult, error) {
+	if err := request.State.Validate(); err != nil {
+		return CompactStartResult{}, fmt.Errorf("validate compact start: %w", err)
+	}
+	requestedStore, err := CompactAuthoritativeStore(ctx, repo, request.State.LineageID)
+	if err != nil {
+		return CompactStartResult{}, err
+	}
+	lock, err := acquireCompactStartLock(ctx, requestedStore.lockPath)
+	if err != nil {
+		return CompactStartResult{}, err
+	}
+	defer lock.release()
+
+	stores, err := DiscoverCompactStores(ctx, requestedStore.repo)
+	if err != nil {
+		return CompactStartResult{}, err
+	}
+	records := make(map[string]CompactRecord, len(stores))
+	storeByLineage := make(map[string]CompactStore, len(stores))
+	for _, store := range stores {
+		record, loadErr := store.Load()
+		if loadErr != nil {
+			return CompactStartResult{}, fmt.Errorf("load compact start authority: %w", loadErr)
+		}
+		records[record.State.LineageID], storeByLineage[record.State.LineageID] = record, store
+	}
+	leaves, err := compactAuthorityLeaves(records, storeByLineage)
+	if err != nil {
+		return CompactStartResult{}, err
+	}
+	claimants := make([]CompactStore, 0, len(leaves))
+	requestedClaims := false
+	for _, store := range leaves {
+		if compactStartClaimsTarget(ctx, requestedStore.repo, records[store.lineageID].State, request.State) {
+			claimants = append(claimants, store)
+			requestedClaims = requestedClaims || store.lineageID == request.State.LineageID
+		}
+	}
+	if existing, exists := records[request.State.LineageID]; exists && !requestedClaims {
+		return CompactStartResult{Record: existing, Action: CompactStartBlocked}, nil
+	}
+	if len(claimants) > 1 {
+		return CompactStartResult{Record: records[claimants[0].lineageID], Action: CompactStartBlocked}, nil
+	}
+	for _, store := range claimants {
+		record := records[store.lineageID]
+		switch record.State.State {
+		case StateReviewing:
+			if record.State.InitialSnapshot.CandidateTree != request.State.InitialSnapshot.CandidateTree {
+				continue
+			}
+			if !compactStartScopeEqual(record.State, request.State) {
+				return CompactStartResult{Record: record, Action: CompactStartBlocked}, nil
+			}
+		case StateCorrectionRequired:
+			if !compactStartCorrectionResume(ctx, requestedStore.repo, record.State, request.State) {
+				return CompactStartResult{Record: record, Action: CompactStartBlocked}, nil
+			}
+		case StateValidating:
+			if !compactStartLiveTargetMatches(ctx, requestedStore.repo, record.State, request.State, true) {
+				return CompactStartResult{Record: record, Action: CompactStartBlocked}, nil
+			}
+		case StateApproved:
+			if !compactStartLiveTargetMatches(ctx, requestedStore.repo, record.State, request.State, true) {
+				return CompactStartResult{Record: record, Action: CompactStartBlocked}, nil
+			}
+			payload, readErr := os.ReadFile(store.ReceiptPath())
+			if readErr != nil {
+				if os.IsNotExist(readErr) {
+					return CompactStartResult{Record: record, Action: CompactStartBlocked}, nil
+				}
+				return CompactStartResult{}, fmt.Errorf("load compact approved receipt: %w", readErr)
+			}
+			receipt, parseErr := ParseCompactReceipt(payload)
+			want, receiptErr := record.State.Receipt()
+			if parseErr != nil || receiptErr != nil || !compactReceiptEqual(receipt, want) {
+				return CompactStartResult{Record: record, Action: CompactStartBlocked}, nil
+			}
+			return CompactStartResult{Record: record, Action: CompactStartReuseReceipt}, nil
+		default:
+			return CompactStartResult{Record: record, Action: CompactStartBlocked}, nil
+		}
+		return CompactStartResult{Record: record, Action: CompactStartResumed,
+			LensesRequired: len(record.State.LensResults) < len(record.State.SelectedLenses)}, nil
+	}
+	if err := validateCompactRepositoryEvidence(ctx, requestedStore.repo, nil, request.State, "review/start"); err != nil {
+		return CompactStartResult{}, fmt.Errorf("validate compact start repository evidence: %w", err)
+	}
+	record, payload, err := makeCompactRecord(request.State)
+	if err != nil {
+		return CompactStartResult{}, err
+	}
+	if err := writeAtomic(requestedStore.StatePath(), payload, 0o644); err != nil {
+		return CompactStartResult{}, err
+	}
+	if request.TracePath != "" {
+		_ = appendCompactTrace(request.TracePath, CompactTraceEntry{
+			Operation: "review/start", Revision: record.Revision, State: request.State.State,
+			RecordedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		})
+	}
+	return CompactStartResult{
+		Record: record, Action: CompactStartCreated,
+		LensesRequired: len(request.State.SelectedLenses) > 0,
+	}, nil
+}
+
+func acquireCompactStartLock(ctx context.Context, path string) (*storeLock, error) {
+	for {
+		lock, err := acquireStoreLock(path)
+		if err == nil || !errors.Is(err, ErrConcurrentUpdate) {
+			return lock, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+}
+
+func compactStartClaimsTarget(ctx context.Context, repo string, existing, requested CompactState) bool {
+	if (SnapshotBuilder{Repo: repo}).ValidateEvidence(ctx, requested.InitialSnapshot) != nil {
+		return false
+	}
+	if existing.State == StateCorrectionRequired && compactStartCorrectionResume(ctx, repo, existing, requested) {
+		return true
+	}
+	if (existing.State == StateValidating || existing.State == StateApproved) &&
+		compactStartLiveTargetMatches(ctx, repo, existing, requested, true) {
+		return true
+	}
+	if !compactStartDeliveryScopeMatches(existing, requested) {
+		return false
+	}
+	candidate := requested.InitialSnapshot.CandidateTree
+	return candidate == existing.InitialSnapshot.CandidateTree || candidate == existing.CurrentSnapshot.CandidateTree
+}
+
+// compactStartDeliveryScopeMatches compares the immutable delivery boundary
+// without Snapshot.Identity because current-changes and base-diff have distinct
+// representations for the same base-to-candidate tree range.
+func compactStartDeliveryScopeMatches(existing, requested CompactState) bool {
+	original, live := existing.InitialSnapshot, requested.InitialSnapshot
+	return original.Projection == live.Projection &&
+		compactStartTargetKindsCompatible(original.Kind, live.Kind) &&
+		live.BaseTree == original.BaseTree &&
+		live.PathsDigest == original.PathsDigest &&
+		equalStrings(live.Paths, existing.GenesisPaths) &&
+		equalStrings(live.IntendedUntracked, original.IntendedUntracked) &&
+		live.IntendedUntrackedProof == original.IntendedUntrackedProof &&
+		equalStrings(live.LedgerIDs, original.LedgerIDs)
+}
+
+func compactStartTargetKindsCompatible(existing, requested TargetKind) bool {
+	if existing == requested {
+		return true
+	}
+	return existing == TargetCurrentChanges && requested == TargetBaseDiff ||
+		existing == TargetBaseDiff && requested == TargetCurrentChanges
+}
+
+func compactStartInitialSnapshotsEqual(existing, requested CompactState) bool {
+	return compactStartDeliveryScopeMatches(existing, requested) &&
+		existing.InitialSnapshot.CandidateTree == requested.InitialSnapshot.CandidateTree
+}
+
+func compactStartCorrectionResume(ctx context.Context, repo string, existing, requested CompactState) bool {
+	return compactStartLiveTargetMatches(ctx, repo, existing, requested, false) &&
+		(requested.InitialSnapshot.CandidateTree == existing.CurrentSnapshot.CandidateTree || compactStartCorrectionCandidateMatches(ctx, repo, existing, requested))
+}
+
+func compactStartCorrectionCandidateMatches(ctx context.Context, repo string, existing, requested CompactState) bool {
+	if existing.ProposedCorrectionLines == nil {
+		return false
+	}
+	fix, err := (SnapshotBuilder{Repo: repo}).Build(ctx, Target{Kind: TargetFixDiff,
+		Projection: existing.InitialSnapshot.Projection, BaseRef: existing.CurrentSnapshot.CandidateTree,
+		IntendedUntracked: existing.InitialSnapshot.IntendedUntracked, LedgerIDs: existing.FixFindingIDs})
+	if err != nil || fix.CandidateTree != requested.InitialSnapshot.CandidateTree || pathsAreSubset(fix.Paths, existing.GenesisPaths) != nil {
+		return false
+	}
+	lines, err := (SnapshotBuilder{Repo: repo}).ChangedLines(ctx, fix)
+	return err == nil && lines <= existing.CorrectionBudget-existing.CumulativeCorrectionLines
+}
+
+func compactStartLiveTargetMatches(ctx context.Context, repo string, existing, requested CompactState, requireCurrentCandidate bool) bool {
+	live := requested.InitialSnapshot
+	if existing.Generation != requested.Generation || existing.PolicyHash != requested.PolicyHash ||
+		!reflect.DeepEqual(existing.Recovery, requested.Recovery) ||
+		existing.InitialSnapshot.Projection != live.Projection ||
+		!compactStartTargetKindsCompatible(existing.InitialSnapshot.Kind, live.Kind) ||
+		live.BaseTree != existing.InitialSnapshot.BaseTree ||
+		(requireCurrentCandidate && live.CandidateTree != existing.CurrentSnapshot.CandidateTree) ||
+		pathsAreSubset(live.Paths, existing.GenesisPaths) != nil ||
+		!equalStrings(live.IntendedUntracked, existing.InitialSnapshot.IntendedUntracked) ||
+		live.IntendedUntrackedProof != existing.InitialSnapshot.IntendedUntrackedProof || len(live.LedgerIDs) != 0 {
+		return false
+	}
+	return (SnapshotBuilder{Repo: repo}).ValidateEvidence(ctx, live) == nil
+}
+
+func compactStartScopeEqual(existing, requested CompactState) bool {
+	return existing.Generation == requested.Generation &&
+		compactStartInitialSnapshotsEqual(existing, requested) &&
+		equalStrings(existing.GenesisPaths, requested.GenesisPaths) &&
+		existing.PolicyHash == requested.PolicyHash && existing.RiskLevel == requested.RiskLevel &&
+		equalStrings(existing.SelectedLenses, requested.SelectedLenses) &&
+		existing.OriginalChangedLines == requested.OriginalChangedLines &&
+		existing.CorrectionBudget == requested.CorrectionBudget && reflect.DeepEqual(existing.Recovery, requested.Recovery)
 }
 
 func (store CompactStore) StatePath() string { return filepath.Join(store.Dir, "review-state.json") }

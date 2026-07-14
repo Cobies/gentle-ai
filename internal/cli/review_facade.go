@@ -23,14 +23,24 @@ Only candidate-caused BLOCKER or CRITICAL findings may require correction. Pre-e
 `
 
 type ReviewFacadeStartResult struct {
-	Operation        string                      `json:"operation"`
-	LineageID        string                      `json:"lineage_id"`
-	State            reviewtransaction.State     `json:"state"`
-	RiskLevel        reviewtransaction.RiskLevel `json:"risk_level"`
-	SelectedLenses   []string                    `json:"selected_lenses"`
-	ChangedFiles     int                         `json:"changed_files"`
-	ChangedLines     int                         `json:"changed_lines"`
-	CorrectionBudget int                         `json:"correction_budget"`
+	Operation        string                       `json:"operation"`
+	Action           string                       `json:"action"`
+	LensesRequired   bool                         `json:"lenses_required"`
+	LineageID        string                       `json:"lineage_id"`
+	State            reviewtransaction.State      `json:"state"`
+	RiskLevel        reviewtransaction.RiskLevel  `json:"risk_level"`
+	SelectedLenses   []string                     `json:"selected_lenses"`
+	Projection       reviewtransaction.Projection `json:"projection"`
+	ChangedFiles     int                          `json:"changed_files"`
+	ChangedLines     int                          `json:"changed_lines"`
+	CorrectionBudget int                          `json:"correction_budget"`
+}
+
+func facadeProjection(projection reviewtransaction.Projection) reviewtransaction.Projection {
+	if projection == "" {
+		return reviewtransaction.ProjectionWorkspace
+	}
+	return projection
 }
 
 type ReviewFacadeFinalizeResult struct {
@@ -161,11 +171,15 @@ func RunReviewRecover(args []string, stdout io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("load recovery predecessor: %w", err)
 	}
-	intended, err := builder.DiscoverIntendedUntracked(context.Background())
-	if err != nil {
-		return err
+	projection := predecessorRecord.State.InitialSnapshot.Projection
+	intended := []string{}
+	if projection != reviewtransaction.ProjectionStaged {
+		intended, err = builder.DiscoverIntendedUntracked(context.Background())
+		if err != nil {
+			return err
+		}
 	}
-	snapshot, err := (reviewtransaction.SnapshotBuilder{Repo: root}).Build(context.Background(), reviewtransaction.Target{Kind: reviewtransaction.TargetCurrentChanges, IntendedUntracked: intended})
+	snapshot, err := (reviewtransaction.SnapshotBuilder{Repo: root}).Build(context.Background(), reviewtransaction.Target{Kind: reviewtransaction.TargetCurrentChanges, Projection: projection, IntendedUntracked: intended})
 	if err != nil {
 		return err
 	}
@@ -297,7 +311,9 @@ func RunReviewFacadeStart(args []string, stdout io.Writer) error {
 	lineage := flags.String("lineage", "", "optional explicit review lineage identifier")
 	policySource := flags.String("policy", "", "optional review policy file; the native bounded policy is used by default")
 	focus := flags.String("focus", "reliability", "dominant standard-risk focus: risk, resilience, readability, or reliability")
-	baseRef := flags.String("base-ref", "", "optional base revision for reviewing committed HEAD changes")
+	baseRef := flags.String("base-ref", "", "optional base revision for immutable base-to-HEAD review")
+	projection := flags.String("projection", string(reviewtransaction.ProjectionWorkspace), "candidate projection: workspace or staged; staged base-diff records post-commit delivery provenance")
+	committedOnly := flags.Bool("committed-only", false, "acknowledge that --base-ref excludes dirty tracked changes")
 	tracePath := flags.String("trace", "", "optional diagnostic operation metadata trace path")
 	if err := parseReviewFlags(flags, args); err != nil {
 		return err
@@ -313,11 +329,27 @@ func RunReviewFacadeStart(args []string, stdout io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("resolve review repository root: %w", err)
 	}
-	intended, err := builder.DiscoverIntendedUntracked(context.Background())
-	if err != nil {
-		return fmt.Errorf("discover intended untracked files: %w", err)
+	selectedProjection := reviewtransaction.Projection(strings.TrimSpace(*projection))
+	if selectedProjection != reviewtransaction.ProjectionWorkspace && selectedProjection != reviewtransaction.ProjectionStaged {
+		return fmt.Errorf("unsupported review projection %q", *projection)
 	}
-	target := reviewtransaction.Target{Kind: reviewtransaction.TargetCurrentChanges, IntendedUntracked: intended}
+	if strings.TrimSpace(*baseRef) != "" {
+		dirtyTracked, dirtyErr := (reviewtransaction.SnapshotBuilder{Repo: root}).HasDirtyTrackedChanges(context.Background())
+		if dirtyErr != nil {
+			return fmt.Errorf("detect dirty tracked changes for committed review: %w", dirtyErr)
+		}
+		if dirtyTracked && !*committedOnly {
+			return errors.New("review start with --base-ref omits dirty tracked changes; rerun with --committed-only to acknowledge committed-only review scope")
+		}
+	}
+	intended := []string{}
+	if selectedProjection != reviewtransaction.ProjectionStaged {
+		intended, err = builder.DiscoverIntendedUntracked(context.Background())
+		if err != nil {
+			return fmt.Errorf("discover intended untracked files: %w", err)
+		}
+	}
+	target := reviewtransaction.Target{Kind: reviewtransaction.TargetCurrentChanges, Projection: selectedProjection, IntendedUntracked: intended}
 	if strings.TrimSpace(*baseRef) != "" {
 		target.Kind = reviewtransaction.TargetBaseDiff
 		target.BaseRef = strings.TrimSpace(*baseRef)
@@ -337,16 +369,6 @@ func RunReviewFacadeStart(args []string, stdout io.Writer) error {
 	if strings.TrimSpace(*lineage) == "" {
 		*lineage = "review-" + strings.TrimPrefix(snapshot.Identity, "sha256:")[:16]
 	}
-	store, err := reviewtransaction.CompactAuthoritativeStore(context.Background(), root, *lineage)
-	if err != nil {
-		return fmt.Errorf("derive facade review store: %w", err)
-	}
-	store.TracePath = strings.TrimSpace(*tracePath)
-	if existing, loadErr := store.Load(); loadErr == nil {
-		return fmt.Errorf("review lineage %q already exists at revision %s; use gentle-ai review recover with an explicit predecessor and distinct successor lineage", *lineage, existing.Revision)
-	} else if !os.IsNotExist(loadErr) {
-		return fmt.Errorf("load existing compact review lineage: %w", loadErr)
-	}
 	legacy, err := reviewtransaction.AuthoritativeStore(context.Background(), root, *lineage)
 	if err == nil {
 		if _, loadErr := legacy.LoadChain(); loadErr == nil {
@@ -365,13 +387,19 @@ func RunReviewFacadeStart(args []string, stdout io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("create compact facade review: %w", err)
 	}
-	if _, err := store.Replace("", "review/start", state); err != nil {
-		return fmt.Errorf("persist compact facade review: %w", err)
+	started, err := reviewtransaction.StartCompactAuthority(context.Background(), root, reviewtransaction.CompactStartRequest{
+		State: state, TracePath: strings.TrimSpace(*tracePath),
+	})
+	if err != nil {
+		return fmt.Errorf("start compact facade review: %w", err)
 	}
+	authority := started.Record.State
 	return encodeReviewJSON(stdout, ReviewFacadeStartResult{
-		Operation: "review/start", LineageID: state.LineageID, State: state.State,
-		RiskLevel: state.RiskLevel, SelectedLenses: state.SelectedLenses,
-		ChangedFiles: len(state.InitialSnapshot.Paths), ChangedLines: changedLines, CorrectionBudget: state.CorrectionBudget,
+		Operation: "review/start", Action: string(started.Action), LensesRequired: started.LensesRequired,
+		LineageID: authority.LineageID, State: authority.State, RiskLevel: authority.RiskLevel,
+		SelectedLenses: authority.SelectedLenses, Projection: facadeProjection(authority.InitialSnapshot.Projection),
+		ChangedFiles: len(authority.InitialSnapshot.Paths),
+		ChangedLines: authority.OriginalChangedLines, CorrectionBudget: authority.CorrectionBudget,
 	})
 }
 
@@ -469,8 +497,9 @@ func RunReviewFacadeFinalize(args []string, stdout io.Writer) error {
 			return encodeCompactFacadeFinalize(stdout, state, record.Revision, store, "apply the bounded correction, then rerun with --validation and --evidence")
 		}
 		fixSnapshot, err := (reviewtransaction.SnapshotBuilder{Repo: root}).Build(context.Background(), reviewtransaction.Target{
-			Kind: reviewtransaction.TargetFixDiff, BaseRef: state.CurrentSnapshot.CandidateTree,
-			IntendedUntracked: state.InitialSnapshot.IntendedUntracked, LedgerIDs: state.FixFindingIDs,
+			Kind: reviewtransaction.TargetFixDiff, Projection: state.InitialSnapshot.Projection,
+			BaseRef: state.CurrentSnapshot.CandidateTree, IntendedUntracked: state.InitialSnapshot.IntendedUntracked,
+			LedgerIDs: state.FixFindingIDs,
 		})
 		if err != nil {
 			return fmt.Errorf("derive facade correction snapshot: %w", err)
@@ -771,7 +800,8 @@ func discoverCompactFacadeReview(ctx context.Context, repo, lineage string, term
 		matching := candidates[:0]
 		for _, candidate := range candidates {
 			snapshot, buildErr := (reviewtransaction.SnapshotBuilder{Repo: repo}).Build(ctx, reviewtransaction.Target{
-				Kind: reviewtransaction.TargetCurrentChanges, IntendedUntracked: candidate.record.State.InitialSnapshot.IntendedUntracked,
+				Kind: reviewtransaction.TargetCurrentChanges, Projection: candidate.record.State.InitialSnapshot.Projection,
+				IntendedUntracked: candidate.record.State.InitialSnapshot.IntendedUntracked,
 			})
 			if buildErr == nil && snapshot.CandidateTree == candidate.record.State.CurrentSnapshot.CandidateTree {
 				matching = append(matching, candidate)
@@ -856,7 +886,8 @@ func discoverFacadeReview(ctx context.Context, repo, lineage string, terminal bo
 		for _, candidate := range candidates {
 			tx := candidate.chain.Records[len(candidate.chain.Records)-1].Transaction
 			snapshot, err := (reviewtransaction.SnapshotBuilder{Repo: repo}).Build(ctx, reviewtransaction.Target{
-				Kind: reviewtransaction.TargetCurrentChanges, IntendedUntracked: tx.Snapshot.IntendedUntracked,
+				Kind: reviewtransaction.TargetCurrentChanges, Projection: tx.Snapshot.Projection,
+				IntendedUntracked: tx.Snapshot.IntendedUntracked,
 			})
 			if err == nil && snapshot.CandidateTree == tx.FinalCandidateTree {
 				matching = append(matching, candidate)
