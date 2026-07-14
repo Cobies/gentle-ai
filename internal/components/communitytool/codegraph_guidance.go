@@ -216,7 +216,7 @@ const antigravityCodeGraphPluginJSON = `{
 }
 `
 
-const antigravityCodeGraphHookMessage = "CodeGraph harness: For structural/codebase investigation, first resolve the project root with `git rev-parse --show-toplevel || pwd`; never initialize CodeGraph in $HOME, temp, or non-project folders; run `codegraph init <project-root>` if `.codegraph/` is missing, or `codegraph sync <project-root>` once when it exists; then use the `codegraph_explore` MCP tool or `codegraph explore` before broad grep/list/find/read sweeps. Fall back only after CodeGraph init/explore fails and report the fallback."
+const antigravityCodeGraphHookMessage = "CodeGraph harness: For structural/codebase investigation, first resolve the project root with `git rev-parse --show-toplevel || pwd`; never initialize CodeGraph in $HOME, temp, or non-project folders; run `gentle-ai codegraph init --cwd <project-root>` if `.codegraph/` is missing, or `codegraph sync <project-root>` once when it exists; then use the `codegraph_explore` MCP tool or `codegraph explore` before broad grep/list/find/read sweeps. Fall back only after CodeGraph init/explore fails and report the fallback."
 
 func antigravityCodeGraphMCPJSON() []byte {
 	return []byte(`{
