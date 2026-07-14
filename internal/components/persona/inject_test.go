@@ -1063,7 +1063,7 @@ func TestInjectForSyncNeutralCleansOnlyGentlemanAgent(t *testing.T) {
 				t.Fatalf("WriteFile(settings) error = %v", err)
 			}
 
-			result, err := InjectForSync(home, tc.adapter, model.PersonaNeutral)
+			result, err := InjectForSync(home, home, tc.adapter, model.PersonaNeutral)
 			if err != nil {
 				t.Fatalf("InjectForSync() error = %v", err)
 			}
@@ -1107,7 +1107,7 @@ func TestInjectForSyncNeutralToleratesMalformedOpenCodeSettings(t *testing.T) {
 		t.Fatalf("WriteFile(settings) error = %v", err)
 	}
 
-	if _, err := InjectForSync(home, opencodeAdapter(), model.PersonaNeutral); err != nil {
+	if _, err := InjectForSync(home, home, opencodeAdapter(), model.PersonaNeutral); err != nil {
 		t.Fatalf("InjectForSync() should tolerate malformed settings, got error: %v", err)
 	}
 	content, err := os.ReadFile(settingsPath)
@@ -2108,7 +2108,7 @@ func TestInjectForSync_OpenCodeNeutral_CleansAgentGentleman(t *testing.T) {
 		t.Fatalf("opencode.json missing gentleman agent after install; got:\n%s", string(before))
 	}
 
-	if _, err := InjectForSync(home, opencodeAdapter(), model.PersonaNeutral); err != nil {
+	if _, err := InjectForSync(home, home, opencodeAdapter(), model.PersonaNeutral); err != nil {
 		t.Fatalf("InjectForSync(neutral) error = %v", err)
 	}
 
@@ -2142,7 +2142,7 @@ func TestInjectForSync_ClaudeGentlemanToNeutral_CleansOutputStyle(t *testing.T) 
 		t.Fatal("settings.json missing outputStyle after install — precondition failed")
 	}
 
-	if _, err := InjectForSync(home, claudeAdapter(), model.PersonaNeutral); err != nil {
+	if _, err := InjectForSync(home, home, claudeAdapter(), model.PersonaNeutral); err != nil {
 		t.Fatalf("InjectForSync(neutral) error = %v", err)
 	}
 

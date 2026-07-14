@@ -40,7 +40,11 @@ var openCodeAgentOverlayJSON = []byte("{\n  \"agent\": {\n    \"gentleman\": {\n
 // the OpenCode/Kilocode `gentleman` agent definition in settings JSON, AND
 // the Claude Code output-style overlay. Used by `gentle-ai install`.
 func Inject(homeDir string, adapter agents.Adapter, persona model.PersonaID) (InjectionResult, error) {
-	return injectInternal(homeDir, adapter, persona, false)
+	wd := ""
+	if adapter.Agent() == model.AgentOpenClaw {
+		wd = homeDir
+	}
+	return injectInternal(homeDir, wd, adapter, persona, false)
 }
 
 // InjectForSync regenerates the persona assets that `gentle-ai sync` is
@@ -54,17 +58,17 @@ func Inject(homeDir string, adapter agents.Adapter, persona model.PersonaID) (In
 // SDD's gentle-orchestrator overlay, so running both in the same sync clobbers
 // each other's entries and breaks idempotency. That overlay remains an
 // install-only concern.
-func InjectForSync(homeDir string, adapter agents.Adapter, persona model.PersonaID) (InjectionResult, error) {
-	return injectInternal(homeDir, adapter, persona, true)
+func InjectForSync(homeDir, workspaceDir string, adapter agents.Adapter, persona model.PersonaID) (InjectionResult, error) {
+	return injectInternal(homeDir, workspaceDir, adapter, persona, true)
 }
 
 // syncManaged is the internal flag previously called `markdownOnly`.
 // When true the OpenCode/Kilocode agent overlay is skipped (see InjectForSync).
-func injectInternal(homeDir string, adapter agents.Adapter, persona model.PersonaID, syncManaged bool) (InjectionResult, error) {
+func injectInternal(homeDir, workspaceDir string, adapter agents.Adapter, persona model.PersonaID, syncManaged bool) (InjectionResult, error) {
 	if !adapter.SupportsSystemPrompt() {
 		return InjectionResult{}, nil
 	}
-	if err := validateOpenClawWorkspacePath(homeDir, adapter); err != nil {
+	if err := validateOpenClawWorkspacePath(workspaceDir, adapter); err != nil {
 		return InjectionResult{}, err
 	}
 
@@ -83,7 +87,7 @@ func injectInternal(homeDir string, adapter agents.Adapter, persona model.Person
 
 	// 1. Inject persona content based on system prompt strategy.
 	if adapter.Agent() == model.AgentOpenClaw {
-		return injectOpenClawSoulPersona(homeDir, content)
+		return injectOpenClawSoulPersona(workspaceDir, content)
 	}
 
 	switch adapter.SystemPromptStrategy() {
@@ -262,9 +266,14 @@ func injectInternal(homeDir string, adapter agents.Adapter, persona model.Person
 		if loader, ok := adapter.(interface {
 			GetWorkspaceRules(string) (string, error)
 		}); ok {
-			cwd, err := getwd()
-			if err == nil {
-				rules, err := loader.GetWorkspaceRules(cwd)
+			wd := workspaceDir
+			if wd == "" {
+				if cwd, err := getwd(); err == nil {
+					wd = cwd
+				}
+			}
+			if wd != "" {
+				rules, err := loader.GetWorkspaceRules(wd)
 				if err == nil {
 					if detector, ok := adapter.(interface {
 						DetectLowModel(string) bool
