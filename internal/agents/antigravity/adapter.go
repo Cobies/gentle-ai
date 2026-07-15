@@ -144,7 +144,7 @@ func (a *Adapter) CommandsDir(_ string) string {
 }
 
 func (a *Adapter) SupportsSubAgents() bool {
-	return true
+	return false
 }
 
 func (a *Adapter) SubAgentsDir(homeDir string) string {
