@@ -148,11 +148,11 @@ func (a *Adapter) SupportsSubAgents() bool {
 }
 
 func (a *Adapter) SubAgentsDir(homeDir string) string {
-	return filepath.Join(a.antigravityVariantDir(homeDir), "plugins", "gentle-ai-sdd-agents", "agents")
+	return ""
 }
 
 func (a *Adapter) EmbeddedSubAgentsDir() string {
-	return "kiro/agents"
+	return ""
 }
 
 func (a *Adapter) SupportsSkills() bool {
