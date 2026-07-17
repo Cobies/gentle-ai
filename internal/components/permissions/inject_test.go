@@ -378,9 +378,27 @@ func TestInjectAntigravityPermissions(t *testing.T) {
 		}
 
 		expected := map[string]bool{
-			"command(gentle-ai)": false,
-			"command(codegraph)": false,
-			"command(git)":       false,
+			"command(gentle-ai)":              false,
+			"command(codegraph)":              false,
+			"command(git)":                    false,
+			"mcp(engram/mem_capture_passive)": false,
+			"mcp(engram/mem_compare)":         false,
+			"mcp(engram/mem_context)":         false,
+			"mcp(engram/mem_current_project)": false,
+			"mcp(engram/mem_doctor)":          false,
+			"mcp(engram/mem_get_observation)": false,
+			"mcp(engram/mem_judge)":           false,
+			"mcp(engram/mem_pin)":             false,
+			"mcp(engram/mem_review)":          false,
+			"mcp(engram/mem_save)":            false,
+			"mcp(engram/mem_save_prompt)":     false,
+			"mcp(engram/mem_search)":          false,
+			"mcp(engram/mem_session_end)":     false,
+			"mcp(engram/mem_session_start)":   false,
+			"mcp(engram/mem_session_summary)": false,
+			"mcp(engram/mem_suggest_topic_key)": false,
+			"mcp(engram/mem_unpin)":           false,
+			"mcp(engram/mem_update)":          false,
 		}
 
 		for _, entry := range allowList {
@@ -397,8 +415,8 @@ func TestInjectAntigravityPermissions(t *testing.T) {
 				t.Errorf("missing expected command in allow list: %s", cmd)
 			}
 		}
-		if len(allowList) != 3 {
-			t.Errorf("expected exactly 3 commands in allow list, got %d", len(allowList))
+		if len(allowList) != 21 {
+			t.Errorf("expected exactly 21 commands in allow list, got %d", len(allowList))
 		}
 	})
 
@@ -474,10 +492,28 @@ func TestInjectAntigravityPermissions(t *testing.T) {
 		}
 
 		expected := map[string]bool{
-			"command(custom)":    false,
-			"command(gentle-ai)": false,
-			"command(codegraph)": false,
-			"command(git)":       false,
+			"command(custom)":                 false,
+			"command(gentle-ai)":              false,
+			"command(codegraph)":              false,
+			"command(git)":                    false,
+			"mcp(engram/mem_capture_passive)": false,
+			"mcp(engram/mem_compare)":         false,
+			"mcp(engram/mem_context)":         false,
+			"mcp(engram/mem_current_project)": false,
+			"mcp(engram/mem_doctor)":          false,
+			"mcp(engram/mem_get_observation)": false,
+			"mcp(engram/mem_judge)":           false,
+			"mcp(engram/mem_pin)":             false,
+			"mcp(engram/mem_review)":          false,
+			"mcp(engram/mem_save)":            false,
+			"mcp(engram/mem_save_prompt)":     false,
+			"mcp(engram/mem_search)":          false,
+			"mcp(engram/mem_session_end)":     false,
+			"mcp(engram/mem_session_start)":   false,
+			"mcp(engram/mem_session_summary)": false,
+			"mcp(engram/mem_suggest_topic_key)": false,
+			"mcp(engram/mem_unpin)":           false,
+			"mcp(engram/mem_update)":          false,
 		}
 
 		for _, entry := range allowList {
@@ -494,8 +530,8 @@ func TestInjectAntigravityPermissions(t *testing.T) {
 				t.Errorf("missing expected command in allow list: %s", cmd)
 			}
 		}
-		if len(allowList) != 4 {
-			t.Errorf("expected exactly 4 commands in allow list, got %d", len(allowList))
+		if len(allowList) != 22 {
+			t.Errorf("expected exactly 22 commands in allow list, got %d", len(allowList))
 		}
 	})
 

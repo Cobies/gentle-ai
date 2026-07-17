@@ -61,15 +61,25 @@ The orchestrator will give you:
 ### Step 1: Load Skills
 Follow **Section A** from `skills/_shared/sdd-phase-common.md`.
 
-### Step 2: Understand the Request
+### Step 2: Understand the Request & Retrieve Context
 
 Parse what the user wants to explore:
 - Is this a new feature? A bug fix? A refactor?
 - What domain does it touch?
 
-### Step 3: Investigate the Codebase
+Retrieve context:
+1. Search Engram (`mem_search`) for `sdd-init/{project}` to get project context.
+2. Search Engram (`mem_search`) for any past decisions, architecture records, bugs, or context relevant to the exploration topic, and fetch their full contents via `mem_get_observation`.
+3. If using `openspec` or `hybrid` mode, read `openspec/config.yaml` and `openspec/specs/`.
 
-Read relevant code to understand:
+### Step 3: Investigate the Codebase with CodeGraph
+
+For structural or codebase investigation, and when searching for or locating files and symbols, you **MUST** use CodeGraph first:
+1. Query CodeGraph using the `codegraph_explore` MCP tool (if available) before using broad grep, find, or multi-file read sweeps.
+2. If the MCP tool is not available but command execution tools are present, resolve the project root (using `git rev-parse --show-toplevel || pwd`), check for the `.codegraph/` directory in it, and run `gentle-ai codegraph init --cwd <resolved-project-root>` or `codegraph sync <resolved-project-root>` if needed.
+3. Fall back to normal filesystem tools (like ripgrep or standard file reads) only after CodeGraph exploration fails or returns insufficient results, and briefly report this fallback in your output.
+
+Read relevant code returned by CodeGraph to understand:
 - Current architecture and patterns
 - Files and modules that would be affected
 - Existing behavior that relates to the request

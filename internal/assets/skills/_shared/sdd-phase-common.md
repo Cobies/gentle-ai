@@ -34,6 +34,13 @@ mem_get_observation(id: {saved_id}) → full content (REQUIRED)
 
 Do NOT use search previews as source material.
 
+## B1. CodeGraph and Engram Context Search Protocol (MANDATORY)
+
+For any codebase investigation, searching, locating files, or retrieving relevant context (only for sub-agents whose tool scope permits search/CodeGraph access, such as `sdd-explore`):
+1. **Prior Memory Search**: Search Engram (`mem_search` followed by `mem_get_observation` on matched IDs) for the current task domain, topic, or relevant past decisions/bugs.
+2. **CodeGraph First**: You **MUST** query CodeGraph (`codegraph_explore` MCP tool, or the `codegraph explore` CLI command if command execution is available) to explore the workspace structure and locate symbols/files.
+3. **FS Fallback**: Only use standard filesystem search tools (like `grep_search` or list directory) as a fallback if CodeGraph is unavailable or fails to return sufficient context, and state this fallback in your report.
+
 ## C. Artifact Persistence
 
 Every phase that produces an artifact MUST persist it. Skipping this BREAKS the pipeline — downstream phases will not find your output.

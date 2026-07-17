@@ -517,7 +517,29 @@ func injectAntigravityPermissions(homeDir string, adapter agents.Adapter) (Injec
 		}
 	}
 
-	required := []string{"command(gentle-ai)", "command(codegraph)", "command(git)"}
+	required := []string{
+		"command(gentle-ai)",
+		"command(codegraph)",
+		"command(git)",
+		"mcp(engram/mem_capture_passive)",
+		"mcp(engram/mem_compare)",
+		"mcp(engram/mem_context)",
+		"mcp(engram/mem_current_project)",
+		"mcp(engram/mem_doctor)",
+		"mcp(engram/mem_get_observation)",
+		"mcp(engram/mem_judge)",
+		"mcp(engram/mem_pin)",
+		"mcp(engram/mem_review)",
+		"mcp(engram/mem_save)",
+		"mcp(engram/mem_save_prompt)",
+		"mcp(engram/mem_search)",
+		"mcp(engram/mem_session_end)",
+		"mcp(engram/mem_session_start)",
+		"mcp(engram/mem_session_summary)",
+		"mcp(engram/mem_suggest_topic_key)",
+		"mcp(engram/mem_unpin)",
+		"mcp(engram/mem_update)",
+	}
 	changed := false
 	for _, req := range required {
 		if !existing[req] {
