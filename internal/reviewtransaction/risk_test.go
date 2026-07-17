@@ -37,6 +37,33 @@ func TestClassifyRiskUsesDeterministicFirstMatch(t *testing.T) {
 			input: RiskInput{OnlyNonExecutableChanges: true, Stats: []DiffStat{{Path: "docs/guide.md", Additions: 400}}},
 			want:  RiskLow,
 		},
+		{
+			name: "large pure documentation is medium",
+			input: RiskInput{
+				OnlyNonExecutableChanges:     true,
+				OnlyPureDocumentationChanges: true,
+				Stats:                        []DiffStat{{Path: "docs/guide.md", Additions: 401}},
+			},
+			want: RiskMedium,
+		},
+		{
+			name: "large operational markdown remains high",
+			input: RiskInput{
+				OnlyNonExecutableChanges: true,
+				Stats:                    []DiffStat{{Path: "prompts/system.md", Additions: 401}},
+			},
+			want: RiskHigh,
+		},
+		{
+			name: "large pure documentation with a semantic signal remains high",
+			input: RiskInput{
+				OnlyNonExecutableChanges:     true,
+				OnlyPureDocumentationChanges: true,
+				Stats:                        []DiffStat{{Path: "docs/security/guide.md", Additions: 401}},
+			},
+			want: RiskHigh,
+		},
+		{name: "large code remains high", input: RiskInput{Stats: []DiffStat{{Path: "internal/app.go", Additions: 401}}}, want: RiskHigh},
 		{name: "configuration cannot be low", input: RiskInput{OnlyNonExecutableChanges: true, TouchesConfiguration: true}, want: RiskMedium},
 		{name: "remaining executable change is medium", input: RiskInput{Stats: []DiffStat{{Path: "internal/ui/view.go", Additions: 1}}}, want: RiskMedium},
 	}
@@ -49,6 +76,175 @@ func TestClassifyRiskUsesDeterministicFirstMatch(t *testing.T) {
 			}
 			if got != tt.want {
 				t.Fatalf("ClassifyRisk() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPureDocumentationReviewPathExcludesOperationalMarkdown(t *testing.T) {
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{path: "docs/guide.md", want: true},
+		{path: "README.md", want: true},
+		{path: "book/chapter.mdx", want: true},
+		{path: "docs/agents.md", want: false},
+		{path: "prompts/system.md", want: false},
+		{path: "docs/system-prompt.md", want: false},
+		{path: "docs/agent-rules.md", want: false},
+		{path: "docs/workflow.md", want: false},
+		{path: "docs/runtime.md", want: false},
+		{path: "internal/assets/claude/agents/review-risk.md", want: false},
+		{path: "AGENTS.md", want: false},
+		{path: "claude.md", want: false},
+		{path: "Gemini.md", want: false},
+		{path: "tools.md", want: false},
+		{path: ".github/workflows/release.md", want: false},
+		{path: "runtime/README.md", want: false},
+		{path: "docs/diagram.svg", want: false},
+		{path: "config/settings.yaml", want: false},
+		{path: "internal/app.go", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			if got := isPureDocumentationReviewPath(tt.path); got != tt.want {
+				t.Fatalf("isPureDocumentationReviewPath(%q) = %t, want %t", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPureDocumentationReviewStatRequiresRegularNonExecutableFiles(t *testing.T) {
+	for _, stat := range []DiffStat{
+		{Path: "docs/guide.md", OldMode: "100644", NewMode: "120000"},
+		{Path: "docs/guide.md", OldMode: "100755", NewMode: "100755"},
+		{Path: "docs/guide.md", OldMode: "160000", NewMode: "160000"},
+	} {
+		if isPureDocumentationReviewStat(stat) {
+			t.Fatalf("isPureDocumentationReviewStat(%#v) accepted an active file mode", stat)
+		}
+	}
+	if !isPureDocumentationReviewStat(DiffStat{Path: "docs/guide.md", OldMode: "100644", NewMode: "100644"}) {
+		t.Fatal("isPureDocumentationReviewStat() rejected a regular static document")
+	}
+}
+
+func TestStaticMDXDocumentRejectsRuntimeSyntaxOutsideCodeExamples(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{name: "plain prose", content: "# Chapter\n\nStatic prose.\n", want: true},
+		{name: "fenced example", content: "```tsx\nexport const Example = <Widget />\n```\n", want: true},
+		{name: "inline code example", content: "Use `<Widget value={1} />` here.\n", want: true},
+		{name: "double-backtick inline code", content: "Use ``<Widget value={1} />`` here.\n", want: true},
+		{name: "mismatched code span", content: "Use `<Widget />`` here.\n", want: false},
+		{name: "escaped opening backtick", content: "Use \\`<Widget />` here.\n", want: false},
+		{name: "escaped closing backtick", content: "Use `<Widget />\\` here.\n", want: false},
+		{name: "ESM import", content: "import Widget from './widget'\n", want: false},
+		{name: "comment-separated ESM import", content: "import/* runtime */Widget from './widget'\n", want: false},
+		{name: "comment-prefixed ESM import", content: "/* runtime */ import Widget from './widget'\n", want: false},
+		{name: "BOM-prefixed ESM import", content: "\uFEFFimport Widget from './widget'\n", want: false},
+		{name: "multiline ESM import", content: "import\nWidget from './widget'\n", want: false},
+		{name: "ESM export", content: "export const value = 1\n", want: false},
+		{name: "JSX component", content: "Read <Widget /> next.\n", want: false},
+		{name: "expression", content: "Current value: {value}\n", want: false},
+		{name: "comment delimiter prose", content: "C comments begin with /* and end with */.\n", want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isStaticMDXDocument([]byte(tt.content)); got != tt.want {
+				t.Fatalf("isStaticMDXDocument() = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLowRiskReviewPathPolicyUsesCanonicalPOSIXOperationalBoundaries(t *testing.T) {
+	tests := []struct {
+		name string
+		stat DiffStat
+		want bool
+	}{
+		{name: "ordinary Markdown", stat: DiffStat{Path: "docs/guide.md", Additions: 1, NewMode: "100644"}, want: true},
+		{name: "active SVG", stat: DiffStat{Path: "docs/diagram.svg", Additions: 1, NewMode: "100644"}},
+		{name: "AGENTS instructions", stat: DiffStat{Path: "AGENTS.md", Additions: 1, NewMode: "100644"}},
+		{name: "nested CLAUDE instructions", stat: DiffStat{Path: "docs/CLAUDE.md", Additions: 1, NewMode: "100644"}},
+		{name: "GEMINI instructions", stat: DiffStat{Path: "GEMINI.md", Additions: 1, NewMode: "100644"}},
+		{name: "KIMI instructions", stat: DiffStat{Path: "KIMI.md", Additions: 1, NewMode: "100644"}},
+		{name: "SKILL instructions", stat: DiffStat{Path: "skills/go/SKILL.md", Additions: 1, NewMode: "100644"}},
+		{name: "copilot instructions", stat: DiffStat{Path: ".github/copilot-instructions.md", Additions: 1, NewMode: "100644"}},
+		{name: "agent name", stat: DiffStat{Path: "docs/review-agent.md", Additions: 1, NewMode: "100644"}},
+		{name: "skill path", stat: DiffStat{Path: "skills/review/guide.md", Additions: 1, NewMode: "100644"}},
+		{name: "prompt path", stat: DiffStat{Path: "prompts/review.md", Additions: 1, NewMode: "100644"}},
+		{name: "instruction name", stat: DiffStat{Path: "docs/review-instructions.md", Additions: 1, NewMode: "100644"}},
+		{name: "orchestrator name", stat: DiffStat{Path: "docs/review-orchestrator.md", Additions: 1, NewMode: "100644"}},
+		{name: "workflow path", stat: DiffStat{Path: "workflows/release.md", Additions: 1, NewMode: "100644"}},
+		{name: "dot agent", stat: DiffStat{Path: ".agent/rules.md", Additions: 1, NewMode: "100644"}},
+		{name: "dot agents", stat: DiffStat{Path: ".agents/reviewer.md", Additions: 1, NewMode: "100644"}},
+		{name: "dot codex", stat: DiffStat{Path: ".codex/instructions.md", Additions: 1, NewMode: "100644"}},
+		{name: "dot cursor", stat: DiffStat{Path: ".cursor/rules.md", Additions: 1, NewMode: "100644"}},
+		{name: "Claude command", stat: DiffStat{Path: ".claude/commands/deploy.md", Additions: 1, NewMode: "100644"}},
+		{name: "dot opencode", stat: DiffStat{Path: ".opencode/agents.md", Additions: 1, NewMode: "100644"}},
+		{name: "GitHub agents", stat: DiffStat{Path: ".github/agents/reviewer.md", Additions: 1, NewMode: "100644"}},
+		{name: "Windsurf workflows", stat: DiffStat{Path: ".windsurf/workflows/release.md", Additions: 1, NewMode: "100644"}},
+		{name: "internal runtime", stat: DiffStat{Path: "internal/runtime/prompt.md", Additions: 1, NewMode: "100644"}},
+		{name: "internal assets", stat: DiffStat{Path: "internal/assets/agent.md", Additions: 1, NewMode: "100644"}},
+		{name: "internal templates", stat: DiffStat{Path: "internal/templates/review.md", Additions: 1, NewMode: "100644"}},
+		{name: "runtime policy", stat: DiffStat{Path: "runtime/policy.md", Additions: 1, NewMode: "100644"}},
+		{name: "OpenSpec", stat: DiffStat{Path: "openspec/changes/example/proposal.md", Additions: 1, NewMode: "100644"}},
+		{name: "MDX", stat: DiffStat{Path: "docs/guide.mdx", Additions: 1, NewMode: "100644"}},
+		{name: "source comment", stat: DiffStat{Path: "internal/view.go", Additions: 1, NewMode: "100644"}},
+		{name: "binary Markdown", stat: DiffStat{Path: "docs/guide.md", Binary: true, NewMode: "100644"}},
+		{name: "symlink Markdown", stat: DiffStat{Path: "docs/guide.md", Additions: 1, NewMode: "120000"}},
+		{name: "gitlink Markdown", stat: DiffStat{Path: "docs/guide.md", Additions: 1, NewMode: "160000"}},
+		{name: "executable Markdown", stat: DiffStat{Path: "docs/guide.md", Additions: 1, NewMode: "100755"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isLowRiskNonExecutableStat(tt.stat); got != tt.want {
+				t.Fatalf("isLowRiskNonExecutableStat(%#v) = %t, want %t", tt.stat, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestClassifyRiskPreservesFourHundredLineBoundary(t *testing.T) {
+	for _, tt := range []struct {
+		lines int
+		want  RiskLevel
+	}{{lines: 400, want: RiskLow}, {lines: 401, want: RiskHigh}} {
+		got, err := ClassifyRisk(RiskInput{
+			Stats:                    []DiffStat{{Path: "docs/ordinary-guide.md", Additions: tt.lines}},
+			OnlyNonExecutableChanges: true,
+		})
+		if err != nil || got != tt.want {
+			t.Fatalf("ClassifyRisk(%d Markdown lines) = %q, %v; want %q", tt.lines, got, err, tt.want)
+		}
+	}
+}
+
+func TestFallbackRiskReasonUsesTheSameLowRiskStatPolicy(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		stat DiffStat
+		want RiskReasonCode
+	}{
+		{name: "ordinary Markdown", stat: DiffStat{Path: "docs/guide.md", Additions: 1, NewMode: "100644"}, want: RiskReasonNonExecutableOnly},
+		{name: "active SVG", stat: DiffStat{Path: "docs/diagram.svg", Additions: 1, NewMode: "100644"}, want: RiskReasonExecutableChange},
+		{name: "binary Markdown", stat: DiffStat{Path: "docs/guide.md", Binary: true, NewMode: "100644"}, want: RiskReasonExecutableChange},
+		{name: "mode-only Markdown", stat: DiffStat{Path: "docs/guide.md", ModeOnly: true, OldMode: "100644", NewMode: "100644"}, want: RiskReasonExecutableChange},
+		{name: "operational Markdown", stat: DiffStat{Path: "AGENTS.md", Additions: 1, NewMode: "100644"}, want: RiskReasonExecutableChange},
+		{name: "Claude command", stat: DiffStat{Path: ".claude/commands/deploy.md", Additions: 1, NewMode: "100644"}, want: RiskReasonExecutableChange},
+		{name: "runtime policy", stat: DiffStat{Path: "runtime/policy.md", Additions: 1, NewMode: "100644"}, want: RiskReasonExecutableChange},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			reasons := deriveSnapshotRiskReasons([]DiffStat{tt.stat}, tt.stat.Additions+tt.stat.Deletions)
+			if len(reasons) != 1 || reasons[0].Code != tt.want {
+				t.Fatalf("risk reasons = %#v, want %q", reasons, tt.want)
 			}
 		})
 	}
