@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/gentleman-programming/gentle-ai/internal/reviewtransaction"
+	"github.com/gentleman-programming/gentle-ai/internal/sddstatus"
 )
 
 func TestNegotiatedReviewFailuresUseOneEnvelopeAcrossRoutes(t *testing.T) {
@@ -96,6 +97,7 @@ func TestNegotiatedReviewFailuresPreserveRequestedLineage(t *testing.T) {
 		{name: "reviewer preflight", runErr: reviewPreflightError(errors.New("invalid reviewer payload")), wantCode: "invalid_request"},
 		{name: "unknown native outcome", runErr: errors.New("transport interrupted"), wantCode: "operation_outcome_unknown"},
 		{name: "legacy read only", runErr: reviewtransaction.NewLegacyReadOnlyError("review/finalize", lineage), wantCode: reviewtransaction.LegacyReadOnlyErrorCode},
+		{name: "journal request mismatch", runErr: &reviewtransaction.FinalizeAttemptReplayMismatchError{LineageID: lineage}, wantCode: "finalize_request_mismatch"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -111,6 +113,31 @@ func TestNegotiatedReviewFailuresPreserveRequestedLineage(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+	}
+	bindingFailure := newReviewIntegrationFailure(
+		ReviewIntegrationOperationBindSDD,
+		[]string{"--cwd", ".", "--change", "thin", "--lineage", lineage, "--expected-binding-revision="},
+		&sddstatus.ReviewBindingPublicationError{Cause: errors.New("sync")},
+	)
+	if bindingFailure.Code != "binding_publication_pending" || bindingFailure.LineageID != lineage ||
+		bindingFailure.Replayability != reviewtransaction.ReplayabilityExactReplaySafe || bindingFailure.NextAction != ReviewIntegrationOperationBindSDD {
+		t.Fatalf("binding publication failure = %#v", bindingFailure)
+	}
+	if err := bindingFailure.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	receiptConflict := newReviewIntegrationFailure(
+		ReviewIntegrationOperationFinalize,
+		[]string{"--lineage", lineage},
+		newFacadeReceiptPublicationError(lineage, "", &reviewtransaction.ImmutablePublicationConflictError{Cause: errors.New("conflict")}),
+	)
+	if receiptConflict.Code != "receipt_publication_conflict" || receiptConflict.MutationOutcome != ReviewMutationCommitted ||
+		receiptConflict.Replayability != reviewtransaction.ReplayabilityManualActionRequired || receiptConflict.RetrySafe ||
+		receiptConflict.NextAction != "explicit-maintainer-action" {
+		t.Fatalf("receipt conflict failure = %#v", receiptConflict)
+	}
+	if err := receiptConflict.Validate(); err != nil {
+		t.Fatal(err)
 	}
 
 	_, negotiated, routed := reviewIntegrationFailureRoute([]string{
@@ -150,21 +177,23 @@ func TestNegotiatedFailureLineageUsesCanonicalFlagParsing(t *testing.T) {
 	}
 }
 
-func TestNegotiatedStartLockFailuresAreTypedNonRetryableAndPreMutation(t *testing.T) {
+func TestNegotiatedStartLockFailuresPreservePreMutationRetryTruth(t *testing.T) {
 	lineage := "review-lock-boundary"
 	for _, tt := range []struct {
-		name string
-		err  error
-		code string
+		name  string
+		err   error
+		code  string
+		retry bool
+		next  string
 	}{
-		{name: "timeout", err: &reviewtransaction.AuthorityLockTimeoutError{}, code: "authority_lock_timeout"},
-		{name: "cancelled", err: &reviewtransaction.AuthorityLockCancelledError{}, code: "authority_lock_cancelled"},
+		{name: "timeout", err: &reviewtransaction.AuthorityLockTimeoutError{}, code: "authority_lock_timeout", retry: true, next: "retry_with_bounded_backoff"},
+		{name: "cancelled", err: &reviewtransaction.AuthorityLockCancelledError{}, code: "authority_lock_cancelled", next: "stop"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			failure := newReviewIntegrationFailure("review.start", []string{"--lineage", lineage}, tt.err)
 			if failure.Code != tt.code || failure.Phase != "pre_native" || failure.MutationOutcome != ReviewMutationNotStarted ||
-				failure.RetrySafe || failure.Replayability != reviewtransaction.ReplayabilityManualActionRequired ||
-				failure.NextAction != "stop" || failure.LineageID != lineage {
+				failure.RetrySafe != tt.retry || failure.Replayability != reviewtransaction.ReplayabilityManualActionRequired ||
+				failure.NextAction != tt.next || failure.LineageID != lineage {
 				t.Fatalf("lock failure = %#v", failure)
 			}
 			if err := failure.Validate(); err != nil {
@@ -424,7 +453,9 @@ func TestNegotiatedFinalizePostTransitionGitTimeoutRequiresStatus(t *testing.T) 
 	}
 
 	output.Reset()
-	_ = RunReview(args, &output)
+	if err := RunReview(args, &output); err != nil {
+		t.Fatalf("exact replay after committed begin-fix: %v\n%s", err, output.String())
+	}
 	replayed, err := store.Load()
 	if err != nil {
 		t.Fatal(err)
@@ -439,6 +470,9 @@ func TestNegotiatedFinalizePostTransitionGitTimeoutRequiresStatus(t *testing.T) 
 	}
 	if !bytes.Equal(traceAfterReplay, traceBeforeReplay) {
 		t.Fatalf("exact replay duplicated a committed transition: before=%s after=%s", traceBeforeReplay, traceAfterReplay)
+	}
+	if pending, err := store.PendingFinalizeAttempt(); err != nil || pending != nil {
+		t.Fatalf("exact replay left pending finalize attempt: %#v, %v", pending, err)
 	}
 }
 
@@ -639,11 +673,16 @@ func TestReviewIntegrationFailureSchemaAndFixtureAreStrict(t *testing.T) {
 	if failure.Code != "gate_scope_changed" || failure.Context == nil || failure.Context.ScopeChange == nil {
 		t.Fatalf("failure fixture = %#v", failure)
 	}
+	failure.Context.ScopeChange.Expected.PathsDigest = "invalid"
+	if err := failure.Validate(); err == nil {
+		t.Fatal("failure validation accepted malformed scope-change evidence")
+	}
 	var raw map[string]any
 	if err := json.Unmarshal(fixture, &raw); err != nil {
 		t.Fatal(err)
 	}
-	raw["unknown"] = true
+	contextObject := raw["context"].(map[string]any)
+	contextObject["scope_change"].(map[string]any)["paths"] = []string{"private/path"}
 	malformed, err := json.Marshal(raw)
 	if err != nil {
 		t.Fatal(err)
@@ -651,7 +690,7 @@ func TestReviewIntegrationFailureSchemaAndFixtureAreStrict(t *testing.T) {
 	decoder := json.NewDecoder(bytes.NewReader(malformed))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&ReviewIntegrationFailure{}); err == nil {
-		t.Fatal("strict failure decoder accepted an unknown field")
+		t.Fatal("strict failure decoder accepted a private scope-change field")
 	}
 }
 

@@ -15,7 +15,7 @@ gentle-ai review capabilities \
 
 The response identifies the protocol major, package and build identity, executable SHA-256, operations, five gates, projections, schemas, mandatory and optional features, and compatibility window. The executable digest is self-reported evidence; compare it with the published release manifest before trusting the binary.
 
-Protocol v1 advertises additive optional features for `bounded_process_waits`, `exact_gate_receipt_discovery`, `native_low_risk_verification`, `risk_reasons`, and `scope_change_diagnostics`. Consumers that do not recognize an optional feature may ignore it under the advertised compatibility policy; consumers that rely on one must require it explicitly.
+Protocol v1.1 advertises the distinct `gentle-ai.review-integration.capabilities/v1.1` schema and additive optional features for `base_ref_workspace_overlay`, `bounded_process_waits`, `exact_gate_receipt_discovery`, `native_low_risk_verification`, `risk_reasons`, and `scope_change_diagnostics`. Protocol v1.0 artifacts remain available under `gentle-ai.review-integration.capabilities/v1`; old consumers must reject the unknown v1.1 identity, and new consumers must require protocol 1.1 and validate its schema before using overlay. The overlay feature requires immutable snapshots and restart-safe projection.
 
 Consumers MUST reject an incompatible protocol major, an unsupported mandatory feature, an unknown mandatory enum, or a schema identity mismatch. Unknown optional fields may be ignored only under the advertised additive-minor policy. Existing unnegotiated CLI responses remain separate compatibility surfaces and do not gain negotiated fields silently.
 
@@ -55,7 +55,21 @@ Consumers MUST NOT reconstruct receipts, derive canonical hashes, inspect the Gi
 
 `review.start` is the only ordinary entry point that creates a review budget. Finalize continues that frozen lifecycle. Status, validation, and gates are read-only and never allocate a reviewer, actor, lineage, or correction budget.
 
+`gentle-ai review capture-result` is an additive headless command, not a negotiated `review-integration/v1` repository operation. It accepts no `--contract` and emits a manifest with capability `review.native_result_artifact` and schema `gentle-ai.review-result-artifact/v1`; that native artifact schema remains advertised for consumer validation.
+
+### Choose the target explicitly
+
+| Invocation | Frozen boundary |
+| --- | --- |
+| `review start` | `HEAD` to the synthetic staged/unstaged/intended-untracked workspace tree. |
+| `review start --base-ref <ref> --committed-only` | `<ref>` to `HEAD`; workspace changes are excluded. |
+| `review start --base-ref <ref> --workspace-overlay` | `<ref>` to the synthetic workspace tree, including branch commits and staged, unstaged, and intended-untracked bytes. |
+
+Overlay mode requires workspace projection and cannot be combined with `--committed-only`. START returns `target_mode`, `target_identity`, `base_tree`, and `candidate_tree` only for this mode. Restarted consumers select the frozen target with `review status --base-tree <START base_tree> --workspace-overlay`; `--base-ref` remains available for a fresh symbolic selection, but cannot be combined with `--base-tree`. Existing workspace-only and committed-only payloads remain unchanged. Snapshot construction uses a temporary index and does not mutate the real index or worktree.
+
 Reviewer results may omit the top-level `lens`; when present, it must match the selected-lens position returned by start. Both the short names (`risk`, `resilience`, `readability`, `reliability`) and the negotiated facade names (`review-risk`, `review-resilience`, `review-readability`, `review-reliability`) map to the same native lenses. A mismatch is rejected before authority mutation instead of being overwritten.
+
+Durable controllers capture each result with exact lineage, target, lens, and selected order, then pass the emitted manifests to FINALIZE as ordered `--result-artifact` values. Legacy `--result` files remain compatible but cannot be mixed with artifact manifests and are not a durable cross-agent handoff.
 
 Proof and evidence strings accept ordinary technical notation, including `HEAD^{tree}`, `{}`, `<A>`, and `=>`. Blank values and exact non-evidence sentinels such as `n/a`, `none`, `todo`, `tbd`, `pass`, `passed`, `success`, and `placeholder` remain invalid.
 
@@ -84,7 +98,9 @@ There is no `archive` gate. An advisory preflight is not delivery authorization;
 | `ambiguous` | More than one authority applies or a required lineage selector is missing. |
 | `corrupted` | Authority required for classification cannot be validated safely. |
 
-The provider returns one action from `start`, `finalize`, `validate`, `recover`, `maintainer_action`, `select_lineage`, `repair_authority`, or `stop`. Applicable non-terminal legacy-v1 authority always returns `stop`; it never recommends finalize or another mutation. A consumer MUST stop on ambiguity, corruption, invalidation, escalation, or `stop` and present the provider's required action. It MUST NOT silently choose, reset, quarantine, or create a lineage.
+The provider returns one action from `start`, `finalize`, `validate`, `recover`, `maintainer_action`, `select_lineage`, `repair_authority`, `reconcile_finalize`, or `stop`. Applicable non-terminal legacy-v1 authority always returns `stop`; it never recommends finalize or another mutation. A consumer MUST stop on ambiguity, corruption, invalidation, escalation, or `stop` and present the provider's required action. It MUST NOT silently choose, reset, quarantine, or create a lineage.
+
+When an incomplete FINALIZE journal applies, negotiated status instead returns `action: reconcile_finalize`, `replayability: status_required`, and `reconciliation.required: true`. Re-run a non-terminal FINALIZE only with the original content-bound payload; a different payload is a typed reconciliation failure, not a retry. If authority is already terminal and only receipt publication remains, replay with the exact explicit lineage and no mutation inputs.
 
 Unqualified gate discovery compares every valid terminal receipt with the live immutable target before selecting authority. Zero exact matches returns `receipt_missing` or `receipt_unrelated`; exactly one scope-changed predecessor returns `receipt_scope_changed` with its complete recovery context. Multiple exact or viable scope-changed predecessors return `receipt_ambiguous` without choosing a predecessor or inventing singular recovery context. The failure requires only `lineage_id`, directs the caller to target-scoped `review.status`, and status returns the canonical sorted candidate lineage IDs for explicit selection. An explicit lineage remains a direct fail-closed lookup and derives its own scope diagnostics. Truly unrelated historical receipts never create false ambiguity.
 
@@ -117,11 +133,17 @@ Negotiated operations have a 25-second aggregate budget. Local Git children have
 | `status_required` | Run target-scoped status before deciding whether any replay is safe. |
 | `manual_action_required` | Stop and obtain the named maintainer action or repair prerequisite. |
 
-Finalize commits terminal compact authority before publishing its derived receipt. If receipt publication fails after that commit, the failure envelope reports `mutation_outcome: committed`, `exact_replay_safe`, the lineage, and the canonical request digest. That declaration permits the exact explicit-lineage finalize replay with no new review inputs; target status independently reports the same publication-pending condition after restart. The replay derives the same receipt bytes and does not mutate authority or open another budget.
+Before FINALIZE mutates compact authority, the provider atomically writes a separate `finalize-attempt-journal.json`. It binds lineage, the expected entry revision, a canonical request digest, candidate and payload digests (reviewer results, correction forecast, validation, refuter, evidence, and failed flag), and each committed transition. The journal never stores caller paths and does not alter historical `review-state.json` compatibility. Every journal replacement is reread as strict exact content after rename; an incomplete entry accepts only its matching request and is reconciled against current authority rather than generically replayed.
+
+Finalize commits terminal compact authority before publishing its derived receipt. If receipt publication is interrupted after that commit, the failure envelope reports `mutation_outcome: committed`, `exact_replay_safe`, the lineage, and the canonical request digest. That declaration permits the exact explicit-lineage finalize replay with no new review inputs; target status independently reports the same publication-pending condition after restart. The replay derives the same receipt bytes and does not mutate authority or open another budget. If a different or non-regular receipt already occupies the immutable path, replay cannot succeed: negotiated failure reports `receipt_publication_conflict`, `manual_action_required`, and `explicit-maintainer-action` instead.
+
+Terminal compact receipts are published with a synced temporary file and a platform-native atomic no-clobber operation: an exact existing byte sequence is an idempotent success, while different or non-regular existing content is rejected without replacement. On filesystems that support directory synchronization, the parent directory is synced after publication. Windows may reject directory-handle synchronization; Gentle AI still provides atomic visibility and conflict rejection there, but does not claim power-loss durability for the directory entry. SDD review-binding publication follows the same post-rename directory-sync rule. A post-rename sync failure reports `binding_publication_pending` with `exact_replay_safe`; replay `review.bind_sdd` with the same change, lineage, and expected binding revision.
 
 An ambiguous or lost transport result is never proof of `not_started`. Reconcile it with `review.status`; do not launch another reviewer, correction, or lineage while the outcome is unknown.
 
 For `gate_scope_changed` or `receipt_scope_changed`, use the strict `context.scope_change` evidence to present the exact drift. Recovery remains explicit: pass `predecessor_lineage_id`, `expected_predecessor_revision`, a distinct `successor_lineage_id`, `disposition`, `reason`, and `actor` to `review.recover`. Diagnostics never create a successor, allocate another budget, or mutate the predecessor.
+
+When a release merge retains an approved `current-changes` candidate but expands its path scope, add `--release-scope` to that explicit `scope_changed` recovery. The provider derives an immutable `HEAD^1..HEAD` base-diff; it rejects caller-selected base flags, candidate-tree changes, projection changes, omitted predecessor paths, and non-expanding scopes. The fresh successor must complete its newly derived review tier before the release gate can allow publication.
 
 Malformed reviewer JSON, missing required reviewer arrays, canonicalization failures, and selected-lens mismatches are deterministic preflight failures. Negotiated finalize reports `invalid_request`, `mutation_outcome: not_started`, `retry_safe: true`, `replayability: not_replayable`, and `next_action: correct_request`, while preserving a valid requested lineage for target-scoped recovery. Correct the payload before retrying; do not run authority repair.
 
@@ -167,7 +189,7 @@ Pi adoption, fallback retirement, package pinning, and Pi release sequencing are
 
 Each release archive contains:
 
-- `contracts/review-integration/v1/schemas/` — six strict JSON Schemas.
+- `contracts/review-integration/v1/schemas/` — the original six strict JSON Schemas plus the result-artifact schema.
 - `contracts/review-integration/v1/fixtures/` — eight deterministic conformance fixtures, including all four target-applicability states.
 - `docs/review-integration.md` — this ownership and consumption guide.
 

@@ -27,14 +27,15 @@ const (
 type TargetStatusAction string
 
 const (
-	TargetStatusActionStart           TargetStatusAction = "start"
-	TargetStatusActionFinalize        TargetStatusAction = "finalize"
-	TargetStatusActionValidate        TargetStatusAction = "validate"
-	TargetStatusActionRecover         TargetStatusAction = "recover"
-	TargetStatusActionMaintainer      TargetStatusAction = "maintainer_action"
-	TargetStatusActionSelectLineage   TargetStatusAction = "select_lineage"
-	TargetStatusActionRepairAuthority TargetStatusAction = "repair_authority"
-	TargetStatusActionStop            TargetStatusAction = "stop"
+	TargetStatusActionStart             TargetStatusAction = "start"
+	TargetStatusActionFinalize          TargetStatusAction = "finalize"
+	TargetStatusActionValidate          TargetStatusAction = "validate"
+	TargetStatusActionRecover           TargetStatusAction = "recover"
+	TargetStatusActionMaintainer        TargetStatusAction = "maintainer_action"
+	TargetStatusActionSelectLineage     TargetStatusAction = "select_lineage"
+	TargetStatusActionRepairAuthority   TargetStatusAction = "repair_authority"
+	TargetStatusActionReconcileFinalize TargetStatusAction = "reconcile_finalize"
+	TargetStatusActionStop              TargetStatusAction = "stop"
 )
 
 type Replayability string
@@ -91,6 +92,7 @@ type targetStatusCandidate struct {
 	receiptIdentity    string
 	receiptPublished   bool
 	receiptReplayable  bool
+	pendingFinalize    bool
 	correctionRecovery bool
 }
 
@@ -137,10 +139,14 @@ func AssessTargetStatus(ctx context.Context, repo string, request TargetStatusRe
 		if receiptErr != nil {
 			return corruptedTargetStatus(base), nil
 		}
+		pending, pendingErr := store.PendingFinalizeAttemptReadOnly()
+		if pendingErr != nil {
+			return corruptedTargetStatus(base), nil
+		}
 		copy := record
 		compact[record.State.LineageID] = targetStatusCandidate{
 			version: AuthorityVersionCompact, lineage: record.State.LineageID, compact: &copy,
-			receiptIdentity: identity, receiptPublished: published, receiptReplayable: replayable,
+			receiptIdentity: identity, receiptPublished: published, receiptReplayable: replayable, pendingFinalize: pending != nil,
 		}
 	}
 
@@ -176,7 +182,15 @@ func AssessTargetStatus(ctx context.Context, repo string, request TargetStatusRe
 			continue
 		}
 		state := candidate.compact.State
-		if state.State == StateCorrectionRequired {
+		if state.State == StateEscalated {
+			requested := state
+			requested.InitialSnapshot = live
+			if compactStartDeliveryScopeMatches(state, requested) {
+				candidate.correctionRecovery = compactEscalatedRecoveryTargetChanged(state.CurrentSnapshot, live)
+				candidates = append(candidates, candidate)
+				continue
+			}
+		} else if state.State == StateCorrectionRequired {
 			requested := candidate.compact.State
 			requested.InitialSnapshot = live
 			switch classifyCompactCorrectionTarget(ctx, repo, state, requested) {
@@ -292,8 +306,16 @@ func targetStatusForCandidate(result TargetStatusResult, candidate targetStatusC
 		result.OriginalChangedLines, result.Tier, result.CorrectionBudget = state.OriginalChangedLines, state.RiskLevel, state.CorrectionBudget
 		result.Projection = targetProjectionFromCompact(state, result.Projection)
 		result.ReceiptIdentity = candidate.receiptIdentity
+		if candidate.pendingFinalize {
+			result.Action, result.Replayability = TargetStatusActionReconcileFinalize, ReplayabilityStatusRequired
+			return result
+		}
 		if candidate.correctionRecovery {
 			result.Action, result.Replayability = TargetStatusActionRecover, ReplayabilityManualActionRequired
+			return result
+		}
+		if state.State == StateEscalated || compactHistoricalFailedValidator(state) {
+			result.Action, result.Replayability = TargetStatusActionStop, ReplayabilityManualActionRequired
 			return result
 		}
 		if !candidate.receiptPublished && candidate.receiptReplayable {
