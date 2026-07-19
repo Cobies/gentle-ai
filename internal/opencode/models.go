@@ -70,6 +70,9 @@ type Provider struct {
 
 // LoadModels parses the OpenCode models cache JSON file and returns providers keyed by ID.
 func LoadModels(cachePath string) (map[string]Provider, error) {
+	if strings.HasSuffix(cachePath, ".db") {
+		return map[string]Provider{}, nil // SQLite placeholder to prevent discovery failure
+	}
 	data, err := os.ReadFile(cachePath)
 	if err != nil {
 		return nil, fmt.Errorf("read models cache %q: %w", cachePath, err)

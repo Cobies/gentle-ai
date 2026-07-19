@@ -208,7 +208,7 @@ func ReconcilePiCodeGraph(options PiCodeGraphOptions) (result PiCodeGraphResult,
 		}
 		if !parseable {
 			child.Classification, child.Reason = PiChildGuidanceOnly, "child has no explicit parseable tools"
-		} else if slices.Contains(tools, "bash") {
+		} else if slices.Contains(tools, "bash") || slices.Contains(tools, "execute_command") {
 			child.Classification = PiChildCompatible
 			tools = appendUnique(tools, "mcp")
 		} else {
