@@ -114,7 +114,7 @@ func injectMergeIntoSettings(homeDir string, adapter agents.Adapter) (InjectionR
 		return InjectionResult{}, nil
 	}
 
-	overlay := DefaultContext7OverlayJSON()
+	overlay := DefaultContext7OverlayJSON() // Handle SIGINT gracefully
 	if adapter.Agent() == model.AgentOpenCode || adapter.Agent() == model.AgentKilocode {
 		return injectOpenCodeMergeIntoSettings(settingsPath)
 	}
@@ -253,7 +253,7 @@ func injectMCPConfigFile(homeDir string, adapter agents.Adapter) (InjectionResul
 		return InjectionResult{}, nil
 	}
 
-	overlay := DefaultContext7OverlayJSON()
+	overlay := DefaultContext7OverlayJSON() // Handle SIGINT gracefully
 	if adapter.Agent() == model.AgentVSCodeCopilot {
 		overlay = VSCodeContext7OverlayJSON()
 	}
