@@ -33,6 +33,8 @@ type ReviewIntegrationStartResult struct {
 	ChangedLines     int                            `json:"changed_lines"`
 	CorrectionBudget int                            `json:"correction_budget"`
 	RiskReasons      []reviewtransaction.RiskReason `json:"risk_reasons"`
+	CandidateDiff    string                         `json:"candidate_diff,omitempty"`
+	ChangedPathManifest []string                    `json:"changed_path_manifest,omitempty"`
 }
 
 func newReviewIntegrationStartResult(legacy ReviewFacadeStartResult, assessment reviewtransaction.RiskAssessment, targetMode reviewtransaction.TargetKind) (ReviewIntegrationStartResult, error) {
