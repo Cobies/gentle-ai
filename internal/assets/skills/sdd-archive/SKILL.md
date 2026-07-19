@@ -125,8 +125,8 @@ The delta spec IS a full spec (not a delta). Copy it directly:
 
 ```bash
 # Copy new spec to main specs
-openspec/changes/{change-name}/specs/{domain}/spec.md
-  → openspec/specs/{domain}/spec.md
+mkdir -p openspec/specs/{domain}
+cp openspec/changes/{change-name}/specs/{domain}/spec.md    openspec/specs/{domain}/spec.md
 ```
 
 ### Step 3: Move to Archive
@@ -135,14 +135,18 @@ openspec/changes/{change-name}/specs/{domain}/spec.md
 
 **IF mode is `none`:** Skip — no filesystem operations.
 
-**IF mode is `openspec` or `hybrid`:** Move the entire change folder to archive with date prefix:
+**IF mode is `openspec` or `hybrid`:** Move the entire change folder to archive with date prefix (ONE rename command):
 
-```
-openspec/changes/{change-name}/
-  → openspec/changes/archive/YYYY-MM-DD-{change-name}/
+```bash
+# Move change folder to archive
+mkdir -p openspec/changes/archive
+mv openspec/changes/{change-name}    openspec/changes/archive/{YYYY-MM-DD}-{change-name}
 ```
 
 Use today's date in ISO format (e.g., `2026-02-16`).
+
+> [!IMPORTANT]
+> **PROHIBITED**: Performing a move by reading every file and writing it to the destination (Read+Write simulation) is strictly prohibited. You must use the `mv` command via `Bash` to perform a single directory rename. `Write` is reserved for editing main-spec content and the archive report.
 
 ### Step 4: Verify Archive
 
