@@ -34,6 +34,7 @@ type ReviewFacadeStartResult struct {
 	State            reviewtransaction.State      `json:"state"`
 	RiskLevel        reviewtransaction.RiskLevel  `json:"risk_level"`
 	SelectedLenses   []string                     `json:"selected_lenses"`
+	LensBindings     []ReviewFacadeLensBinding    `json:"lens_bindings"`
 	Projection       reviewtransaction.Projection `json:"projection"`
 	TargetMode       reviewtransaction.TargetKind `json:"target_mode,omitempty"`
 	TargetIdentity   string                       `json:"target_identity,omitempty"`
@@ -42,6 +43,21 @@ type ReviewFacadeStartResult struct {
 	ChangedFiles     int                          `json:"changed_files"`
 	ChangedLines     int                          `json:"changed_lines"`
 	CorrectionBudget int                          `json:"correction_budget"`
+}
+
+// ReviewFacadeLensBinding pairs one selected lens with its frozen zero-based
+// order so orchestrators build capture bindings exclusively from START output.
+type ReviewFacadeLensBinding struct {
+	Lens  string `json:"lens"`
+	Order int    `json:"order"`
+}
+
+func facadeLensBindings(lenses []string) []ReviewFacadeLensBinding {
+	bindings := make([]ReviewFacadeLensBinding, len(lenses))
+	for order, lens := range lenses {
+		bindings[order] = ReviewFacadeLensBinding{Lens: lens, Order: order}
+	}
+	return bindings
 }
 
 func facadeProjection(projection reviewtransaction.Projection) reviewtransaction.Projection {
@@ -140,6 +156,7 @@ func (err *reviewFacadeOperationProgressError) record(lineage, revision string) 
 
 var writeCompactFacadeReceipt = reviewtransaction.WriteCompactReceiptAtomic
 var reviewFacadeSyncDirectory = reviewtransaction.SyncReviewDirectory
+var reviewRecoverBeforePersist = func() {}
 
 type ReviewInvalidateResult struct {
 	Operation     string                  `json:"operation"`
@@ -149,11 +166,13 @@ type ReviewInvalidateResult struct {
 }
 
 type ReviewRecoverResult struct {
-	Operation     string                                      `json:"operation"`
-	LineageID     string                                      `json:"lineage_id"`
-	State         reviewtransaction.State                     `json:"state"`
-	StoreRevision string                                      `json:"store_revision"`
-	Recovery      reviewtransaction.CompactRecoveryProvenance `json:"recovery"`
+	Operation      string                                      `json:"operation"`
+	LineageID      string                                      `json:"lineage_id"`
+	State          reviewtransaction.State                     `json:"state"`
+	StoreRevision  string                                      `json:"store_revision"`
+	Projection     reviewtransaction.Projection                `json:"projection"`
+	TargetIdentity string                                      `json:"target_identity"`
+	Recovery       reviewtransaction.CompactRecoveryProvenance `json:"recovery"`
 }
 
 type facadeFinding struct {
@@ -205,8 +224,8 @@ var reviewFacadeCommittedTransitionHook = func(context.Context, string, string, 
 
 func RunReview(args []string, stdout io.Writer) error {
 	if len(args) == 0 || args[0] == "help" || args[0] == "-h" || args[0] == "--help" {
-		_, _ = fmt.Fprintln(stdout, "Usage: gentle-ai review <capabilities|start|finalize|validate|status|invalidate|recover|schema|bind-sdd> [flags]\n\nOrdinary review facade; repository scope, authority, canonical artifacts, and lifecycle transitions are derived by Go.")
-		_, _ = fmt.Fprintln(stdout, "Additive headless capability: gentle-ai review capture-result.")
+		_, _ = fmt.Fprintln(stdout, "Usage: gentle-ai review <capabilities|start|finalize|validate|status|invalidate|abandon|recover|reclaim|reconcile-authority|quarantine-legacy|schema|bind-sdd> [flags]\n\nOrdinary review facade; repository scope, authority, canonical artifacts, and lifecycle transitions are derived by Go.")
+		_, _ = fmt.Fprintln(stdout, "Additive headless capabilities: gentle-ai review capture-result (with --preflight) and gentle-ai review preserve-result.")
 		return nil
 	}
 	operation, negotiated, preflightFailure := reviewIntegrationFailureRoute(args)
@@ -274,6 +293,8 @@ func runReviewCommand(args []string, stdout io.Writer) error {
 	switch args[0] {
 	case "capture-result":
 		return RunReviewCaptureResult(args[1:], stdout)
+	case "preserve-result":
+		return RunReviewPreserveResult(args[1:], stdout)
 	case "capabilities":
 		return RunReviewCapabilities(args[1:], stdout)
 	case "start":
@@ -286,8 +307,16 @@ func runReviewCommand(args []string, stdout io.Writer) error {
 		return RunReviewStatus(args[1:], stdout)
 	case "invalidate":
 		return RunReviewInvalidate(args[1:], stdout)
+	case "abandon":
+		return RunReviewAbandon(args[1:], stdout)
 	case "recover":
 		return RunReviewRecover(args[1:], stdout)
+	case "reclaim":
+		return RunReviewReclaim(args[1:], stdout)
+	case "reconcile-authority":
+		return RunReviewReconcileAuthority(args[1:], stdout)
+	case "quarantine-legacy":
+		return RunReviewLegacyQuarantine(args[1:], stdout)
 	case "schema":
 		return RunReviewSchema(args[1:], stdout)
 	case "bind-sdd":
@@ -394,7 +423,8 @@ func RunReviewRecover(args []string, stdout io.Writer) error {
 	disposition := flags.String("disposition", "", "scope_changed, invalidated, or escalated")
 	reason := flags.String("reason", "", "recovery reason")
 	actor := flags.String("actor", "", "recovery actor")
-	authorization := flags.String("maintainer-authorization", "", "explicit authorization required for escalated or correction-required scope recovery")
+	projectionFlag := flags.String("projection", "", "successor projection: workspace or staged (default: predecessor projection)")
+	authorization := flags.String("maintainer-authorization", "", "exact six-line LF-only binding: gentle-ai.review-recovery-authorization/v1, predecessor_lineage, predecessor_revision, target_identity, actor, reason")
 	policySource := flags.String("policy", "", "optional review policy file")
 	focus := flags.String("focus", "reliability", "dominant standard-risk focus; large pure documentation always uses readability")
 	baseRef := flags.String("base-ref", "", "optional base revision for immutable base-to-HEAD review")
@@ -441,6 +471,12 @@ func RunReviewRecover(args []string, stdout io.Writer) error {
 		return errors.New("base-diff recovery requires matching --base-ref and --committed-only")
 	}
 	projection := predecessorRecord.State.InitialSnapshot.Projection
+	if selected := strings.TrimSpace(*projectionFlag); selected != "" {
+		projection = reviewtransaction.Projection(selected)
+		if projection != reviewtransaction.ProjectionWorkspace && projection != reviewtransaction.ProjectionStaged {
+			return fmt.Errorf("unsupported review recovery projection %q", selected)
+		}
+	}
 	intended := []string{}
 	if projection != reviewtransaction.ProjectionStaged {
 		intended, err = builder.DiscoverIntendedUntracked(context.Background())
@@ -492,6 +528,7 @@ func RunReviewRecover(args []string, stdout io.Writer) error {
 	if *releaseScope {
 		*authorization = reviewtransaction.ReleaseScopeRecoveryAuthorization
 	}
+	reviewRecoverBeforePersist()
 	record, err := reviewtransaction.RecoverCompactAuthority(context.Background(), root, reviewtransaction.CompactRecoveryRequest{
 		PredecessorLineageID: *predecessor, ExpectedPredecessorRevision: *expected, Successor: state,
 		Disposition: reviewtransaction.RecoveryDisposition(*disposition), Reason: *reason, Actor: *actor, MaintainerAuthorization: *authorization,
@@ -499,7 +536,8 @@ func RunReviewRecover(args []string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	return encodeReviewJSON(stdout, ReviewRecoverResult{Operation: "review/recover", LineageID: record.State.LineageID, State: record.State.State, StoreRevision: record.Revision, Recovery: *record.State.Recovery})
+	return encodeReviewJSON(stdout, ReviewRecoverResult{Operation: "review/recover", LineageID: record.State.LineageID, State: record.State.State,
+		StoreRevision: record.Revision, Projection: facadeProjection(snapshot.Projection), TargetIdentity: snapshot.Identity, Recovery: *record.State.Recovery})
 }
 
 func RunReviewBindSDD(args []string, stdout io.Writer) error {
@@ -714,13 +752,13 @@ func runReviewFacadeStart(ctx context.Context, args []string, stdout io.Writer) 
 	legacyResult := ReviewFacadeStartResult{
 		Operation: "review/start", Action: string(started.Action), LensesRequired: started.LensesRequired,
 		LineageID: authority.LineageID, State: authority.State, RiskLevel: authority.RiskLevel,
-		SelectedLenses: append([]string{}, authority.SelectedLenses...), Projection: facadeProjection(authority.InitialSnapshot.Projection),
-		ChangedFiles: len(authority.InitialSnapshot.Paths),
+		SelectedLenses: append([]string{}, authority.SelectedLenses...), LensBindings: facadeLensBindings(authority.SelectedLenses),
+		Projection:   facadeProjection(authority.InitialSnapshot.Projection),
+		ChangedFiles: len(authority.InitialSnapshot.Paths), TargetIdentity: authority.InitialSnapshot.Identity,
 		ChangedLines: authority.OriginalChangedLines, CorrectionBudget: authority.CorrectionBudget,
 	}
 	if authority.InitialSnapshot.Kind == reviewtransaction.TargetBaseWorkspaceOverlay {
 		legacyResult.TargetMode = authority.InitialSnapshot.Kind
-		legacyResult.TargetIdentity = authority.InitialSnapshot.Identity
 		legacyResult.BaseTree = authority.InitialSnapshot.BaseTree
 		legacyResult.CandidateTree = authority.InitialSnapshot.CandidateTree
 	}
@@ -1361,7 +1399,7 @@ func discoverCompactFacadeGateReview(ctx context.Context, repo, lineage string, 
 		return discoverCompactFacadeReview(ctx, repo, lineage, true)
 	}
 	report, err := reviewtransaction.InventoryAuthority(ctx, repo)
-	if err != nil || !report.Complete || !report.Authoritative {
+	if (err != nil || !report.Complete || !report.Authoritative) && !reviewAuthorityCorruptionConfinedToLegacyEntries(report, err) {
 		return reviewtransaction.CompactStore{}, reviewtransaction.CompactRecord{}, &ReviewReceiptDiscoveryError{Kind: ReviewAuthorityCorrupted, Category: reviewAuthorityCauseCategory(report, err)}
 	}
 	stores, err := reviewtransaction.CompactAuthorityLeaves(ctx, repo)
@@ -1423,7 +1461,7 @@ func discoverCompactFacadeGateReview(ctx context.Context, repo, lineage string, 
 					StoreRevision: record.Revision, GenesisRevision: record.Revision, ChainIdentity: record.Revision, BundleDigest: record.Revision,
 					BaseTree: assessment.Actual.BaseTree, CandidateTree: assessment.Actual.CandidateTree, PathsDigest: assessment.Actual.PathsDigest,
 					FixDeltaHash: record.State.FixDeltaHash, PolicyHash: record.State.PolicyHash,
-					LedgerHash: reviewtransaction.EmptyFixDeltaHash, EvidenceHash: record.State.EvidenceHash,
+					LedgerHash: record.State.LedgerHash(), EvidenceHash: record.State.EvidenceHash,
 					Denial: &reviewtransaction.GateDenial{Stage: "receipt-binding", Code: "candidate-or-paths-mismatch"}, ScopeChange: &diagnostics,
 				},
 			})
@@ -1467,6 +1505,35 @@ func discoverCompactFacadeGateReview(ctx context.Context, repo, lineage string, 
 	return reviewtransaction.CompactStore{}, reviewtransaction.CompactRecord{}, &ReviewReceiptDiscoveryError{Kind: ReviewReceiptUnrelated, Candidates: allLineages}
 }
 
+// reviewAuthorityCorruptionConfinedToLegacyEntries reports whether every cause
+// of a non-authoritative inventory is an invalid legacy-v1 entry, which can
+// never resolve as a compact discovery candidate. Inventory IO/layout
+// diagnostics, ambiguous locks, reset residue, mixed-store collisions, and any
+// compact-v2 problem keep lineage-less discovery fail-closed.
+func reviewAuthorityCorruptionConfinedToLegacyEntries(report reviewtransaction.AuthorityStatusReport, inventoryErr error) bool {
+	if inventoryErr != nil || len(report.Diagnostics) > 0 {
+		return false
+	}
+	for _, lock := range report.Locks {
+		if lock.Status == reviewtransaction.AuthorityLockAmbiguous {
+			return false
+		}
+	}
+	confined := false
+	for _, entry := range report.Entries {
+		switch entry.Status {
+		case reviewtransaction.AuthorityStatusInvalid:
+			if entry.Version != reviewtransaction.AuthorityVersionLegacy {
+				return false
+			}
+			confined = true
+		case reviewtransaction.AuthorityStatusReset, reviewtransaction.AuthorityStatusCollision:
+			return false
+		}
+	}
+	return confined
+}
+
 func reviewAuthorityCauseCategory(report reviewtransaction.AuthorityStatusReport, inventoryErr error) string {
 	if inventoryErr != nil || len(report.Diagnostics) > 0 {
 		return "inventory_io_or_layout"
@@ -1482,6 +1549,11 @@ func reviewAuthorityCauseCategory(report reviewtransaction.AuthorityStatusReport
 			return "reset_residue"
 		case reviewtransaction.AuthorityStatusInvalid, reviewtransaction.AuthorityStatusCollision:
 			return "record_or_graph_invalid"
+		}
+	}
+	for _, entry := range report.Entries {
+		if entry.Status == reviewtransaction.AuthorityStatusIncomplete {
+			return "incomplete_store_entry"
 		}
 	}
 	return "inventory_incomplete"
@@ -1515,6 +1587,10 @@ func legacyExactFacadeGateLineages(ctx context.Context, repo string, input revie
 		}
 		receipt, parseErr := reviewtransaction.ParseReceipt(payload)
 		if parseErr != nil {
+			continue
+		}
+		authoritative, deriveErr := tx.Receipt()
+		if deriveErr != nil || !reflect.DeepEqual(receipt, authoritative) {
 			continue
 		}
 		evaluation := reviewtransaction.EvaluateNativeGate(ctx, repo, receipt, request)
