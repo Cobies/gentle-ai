@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 // DefaultCachePath returns the default path to the OpenCode models cache file.
@@ -14,6 +15,10 @@ func DefaultCachePath() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
+	}
+	dbPath := filepath.Join(home, ".cache", "opencode", "models.db")
+	if _, err := os.Stat(dbPath); err == nil {
+		return dbPath
 	}
 	return filepath.Join(home, ".cache", "opencode", "models.json")
 }
@@ -70,6 +75,9 @@ type Provider struct {
 
 // LoadModels parses the OpenCode models cache JSON file and returns providers keyed by ID.
 func LoadModels(cachePath string) (map[string]Provider, error) {
+	if strings.HasSuffix(cachePath, ".db") {
+		return map[string]Provider{}, nil
+	}
 	data, err := os.ReadFile(cachePath)
 	if err != nil {
 		return nil, fmt.Errorf("read models cache %q: %w", cachePath, err)
