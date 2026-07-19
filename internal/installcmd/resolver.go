@@ -260,7 +260,7 @@ func resolveGGAInstall(profile system.PlatformProfile) (CommandSequence, error) 
 			{"brew", "tap", "Gentleman-Programming/homebrew-tap"},
 			{"brew", "reinstall", "gga"},
 		}, nil
-	case "apt", "pacman", "dnf":
+	case "apt", "pacman", "dnf", "apk":
 		const tmpDir = "/tmp/gentleman-guardian-angel"
 		return CommandSequence{
 			{"rm", "-rf", tmpDir},
