@@ -225,6 +225,8 @@ func checkGitHubResponse(resp *http.Response, owner, repo string) error {
 		return fmt.Errorf("github API rate limit exceeded (HTTP 403)")
 	case http.StatusNotFound:
 		return fmt.Errorf("no releases found for %s/%s (HTTP 404)", owner, repo)
+	case http.StatusBadRequest:
+		return fmt.Errorf("github API returned HTTP 400 (Bad Request) for %s/%s: check request parameters or schema", owner, repo)
 	default:
 		return fmt.Errorf("github API returned HTTP %d for %s/%s", resp.StatusCode, owner, repo)
 	}
