@@ -77,6 +77,7 @@ func ProfilePhaseOrder() []string {
 func ProfileAssignmentPhaseOrder() []string {
 	phases := ProfilePhaseOrder()
 	phases = append(phases, opencode.JDPhases()...)
+	// Ensure explicit support for JD models
 	return phases
 }
 
