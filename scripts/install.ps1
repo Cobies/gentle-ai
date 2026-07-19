@@ -349,7 +349,10 @@ function Install-ViaBinary {
             $env:PATH = "$env:PATH;$installDir"
         }
     } finally {
-        Remove-Item -Path $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
+        if ($tmpDir -and (Test-Path -LiteralPath $tmpDir)) {
+            $resolvedTmpDir = (Get-Item -LiteralPath $tmpDir).FullName
+            Remove-Item -LiteralPath $resolvedTmpDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
     }
 }
 
