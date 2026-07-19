@@ -366,12 +366,13 @@ func GenerateProfileOverlay(profile model.Profile, homeDir string, fallbackPhase
 			"hidden":      true,
 			"description": phaseDescriptions[phase],
 			"prompt":      prompt,
-			"tools": map[string]any{
-				"read":  true,
-				"write": true,
-				"edit":  true,
-				"bash":  true,
-			},
+							"tools": map[string]any{
+								"read":  true,
+								"write": true,
+								"edit":  true,
+								"bash":  true,
+								"mcp":   true,
+							},
 		}
 		// Issue #557: consult fallback when the profile did not set the phase,
 		// so generated *-{name} agents stay consistent with what the user sees
