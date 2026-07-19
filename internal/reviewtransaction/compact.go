@@ -762,6 +762,8 @@ func (state *CompactState) CompleteCorrection(snapshot Snapshot, actual int, val
 	state.OriginalCriteria, state.CorrectionRegression = &original, &regression
 	if state.CumulativeCorrectionLines > state.CorrectionBudget || !original.Passed || !regression.Passed {
 		state.State = StateEscalated
+	} else if state.State == StateEscalated {
+		state.State = StateValidating
 	} else {
 		state.State = StateValidating
 	}
