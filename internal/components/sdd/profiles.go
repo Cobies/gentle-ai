@@ -361,18 +361,19 @@ func GenerateProfileOverlay(profile model.Profile, homeDir string, fallbackPhase
 	for _, phase := range profilePhaseOrder {
 		key := phase + suffix
 		prompt := "{file:" + filepath.ToSlash(filepath.Join(promptDir, phase+".md")) + "}"
-		entry := map[string]any{
-			"mode":        "subagent",
-			"hidden":      true,
-			"description": phaseDescriptions[phase],
-			"prompt":      prompt,
-			"tools": map[string]any{
-				"read":  true,
-				"write": true,
-				"edit":  true,
-				"bash":  true,
-			},
-		}
+					entry := map[string]any{
+						"mode":        "subagent",
+						"hidden":      true,
+						"description": phaseDescriptions[phase],
+						"prompt":      prompt,
+						"tools": map[string]any{
+							"read":  true,
+							"write": true,
+							"edit":  true,
+							"bash":  true,
+						},
+						"timeout": 300,
+					}
 		// Issue #557: consult fallback when the profile did not set the phase,
 		// so generated *-{name} agents stay consistent with what the user sees
 		// in the gentle-ai TUI. Profile-level assignments still win.
