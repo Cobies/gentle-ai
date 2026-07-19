@@ -60,7 +60,7 @@ func TestResolveVersion(t *testing.T) {
 			ldflagsVersion: "dev",
 			buildInfo:      &debug.BuildInfo{Main: debug.Module{Version: "v1.49.1-0.20260716142831-7ac8e64dd54a"}},
 			buildInfoOK:    true,
-			want:           "2.1.6-0.20260716142831-7ac8e64dd54a",
+			want:           "2.1.7-0.20260716142831-7ac8e64dd54a",
 		},
 	}
 

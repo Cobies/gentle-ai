@@ -32,7 +32,7 @@ func ResolveVersion(ldflagsVersion string) string {
 
 	v = strings.TrimPrefix(v, "v")
 	if strings.HasPrefix(v, "1.49.1") {
-		v = strings.Replace(v, "1.49.1", "2.1.6", 1)
+		v = strings.Replace(v, "1.49.1", "2.1.7", 1)
 	}
 	return v
 }
