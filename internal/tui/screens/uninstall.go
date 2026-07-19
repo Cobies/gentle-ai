@@ -81,7 +81,13 @@ func RenderUninstallMode(cursor int) string {
 }
 
 func UninstallAgentOptions() []catalog.Agent {
-	return catalog.AllAgents()
+	agents := catalog.AllAgents()
+	agents = append(agents, catalog.Agent{
+		ID:   "custom-profile",
+		Name: "Custom User Profiles/Agents",
+		Tier: model.TierFull,
+	})
+	return agents
 }
 
 func UninstallComponentOptions() []catalog.Component {
