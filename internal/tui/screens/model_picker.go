@@ -1,11 +1,13 @@
 package screens
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/gentleman-programming/gentle-ai/internal/model"
@@ -87,6 +89,25 @@ func NewModelPickerState(cachePath string, settingsPath string) ModelPickerState
 	}
 
 	configProviders, configErr := opencode.LoadConfigProviders(settingsPath)
+	if lm, ok := configProviders["lmstudio"]; ok {
+		url := lm.URL
+		if url == "" {
+			url = "http://127.0.0.1:1234/v1"
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+		dynModels, err := opencode.FetchDynamicModels(ctx, url)
+		cancel()
+		if err == nil && len(dynModels) > 0 {
+			if lm.Models == nil {
+				lm.Models = make(map[string]opencode.ConfigModel)
+			}
+			for _, m := range dynModels {
+				lm.Models[m.Name] = m
+			}
+			configProviders["lmstudio"] = lm
+		}
+	}
+
 	if len(configProviders) > 0 {
 		providers = opencode.MergeCustomProviders(providers, configProviders)
 	}
