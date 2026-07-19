@@ -135,6 +135,21 @@ Kiro uses native custom agents in `~/.kiro/agents/`. `gentle-ai` writes phase ag
 - System prompt at `Code/User/prompts/gentle-ai.instructions.md`
 - MCP config at `Code/User/mcp.json`
 
+#### VS Code Copilot Configuration Guide
+
+To use Gentle-AI with VS Code Copilot Chat:
+1. Install VS Code and the **GitHub Copilot Chat** extension.
+2. Open VS Code settings (`Ctrl+,` or `Cmd+,`) and search for **Copilot Chat Custom Instructions**. Ensure `"github.copilot.chat.customInstructions.enabled": true` is set (Gentle-AI merges auto-approve settings but you must enable custom instructions if disabled).
+3. Run `gentle-ai install --agent vscode-copilot`.
+4. The installer will automatically write:
+   - Global skills to `~/.copilot/skills/`
+   - Custom instructions to `Code/User/prompts/gentle-ai.instructions.md`
+   - Auto-approve settings for chat tools to `Code/User/settings.json`
+   - MCP config to `Code/User/mcp.json`
+5. In VS Code Copilot Chat, reference the custom instruction or use `@mcp` tools as needed.
+
+*Note on Copilot in the CLI (`gh copilot`)*: GitHub Copilot in the CLI is a CLI wrapper for command suggestions and does not currently support custom system instructions, custom subagents, or general MCP servers. Gentle-AI does not support `gh copilot` directly; use the IDE-integrated VS Code Copilot agent instead.
+
 ### Codex
 
 - CLI-native agent with TOML config at `~/.codex/config.toml`
