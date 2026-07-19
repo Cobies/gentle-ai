@@ -1064,7 +1064,8 @@ func (s componentApplyStep) Run() error {
 		return nil
 	case model.ComponentContext7:
 		for _, adapter := range adapters {
-			if _, err := mcp.Inject(s.homeDir, adapter); err != nil {
+			targetDir := componentInjectionDirScoped(s.homeDir, s.workspaceDir, s.scope, adapter)
+			if _, err := mcp.Inject(targetDir, adapter); err != nil {
 				return fmt.Errorf("inject context7 for %q: %w", adapter.Agent(), err)
 			}
 		}
