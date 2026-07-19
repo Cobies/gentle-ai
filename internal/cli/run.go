@@ -255,7 +255,12 @@ func mergeExplicitAgentInstallState(homeDir string, newState state.InstallState,
 		merged.ClaudeModelAssignments = nil
 	}
 	if newState.KiroModelAssignments != nil {
-		merged.KiroModelAssignments = newState.KiroModelAssignments
+		if merged.KiroModelAssignments == nil {
+			merged.KiroModelAssignments = make(map[string]string)
+		}
+		for k, v := range newState.KiroModelAssignments {
+			merged.KiroModelAssignments[k] = v
+		}
 	}
 	if newState.CodexOrchestratorAssignment != nil {
 		merged.CodexOrchestratorAssignment = newState.CodexOrchestratorAssignment
