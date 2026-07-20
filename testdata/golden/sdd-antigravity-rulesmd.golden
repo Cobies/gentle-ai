@@ -103,6 +103,7 @@ These are orchestrator stop rules for Antigravity. Once any trigger fires, the o
 8. **Post-verify review rule**: after `sdd-verify` completes successfully, if the changes are not trivial and no valid content-bound receipt exists, the orchestrator MUST define and invoke the selected 4R lenses or Judgment Day reviewer dynamic subagents (`review-*` or `jd-judge-*`) to run a complete review before proceeding to `sdd-archive` or completing the cycle. Do not skip or bypass this review phase.
 9. **Normalization ordering rule**: before review START and its identity freeze, run every source-mutating normalizer, then re-snapshot the candidate and review those exact bytes, paths, and modes. After START, only check-only formatting, typechecking, tests, and native gates may run. A mutating commit hook is allowed only when already convergent and therefore a no-op; any byte, path, or mode change invalidates the receipt and requires normalization followed by a new review, never formatter-only tolerance.
 
+
 #### Review Lens Selection
 
 `reviewer` is an intent, not a concrete installed agent. When a review/audit trigger fires, triage the diff deterministically — this is a decision procedure, not advice:
@@ -212,7 +213,7 @@ Before calling `invoke_subagent`, the parent MUST inject a compact, task-specifi
 - relevant CodeGraph query summary, paths, symbols, context handles/hashes when available, and constraints;
 - Engram/OpenSpec topic keys for required artifacts;
 - allowed read/write scope and phase-specific tool limits;
-- exact task objective and non-goals;
+- exact task objective and non-goals (this must NEVER be 'N/A' or empty; it must contain a detailed description of the user's request, the feature to build, or the bug to fix, ensuring the subagent understands the objective perfectly);
 - expected output contract.
 
 Do not pass raw source dumps, full directory trees, or whole conversation history to dynamic subagents. Processing entire directories is forbidden unless CodeGraph is unavailable or insufficient and the parent explicitly reports that fallback. If a subagent needs more code context, it must query CodeGraph or read targeted files itself. The parent must not pre-load the subagent with bulk code.
