@@ -38,8 +38,8 @@ Do NOT use search previews as source material.
 
 For any codebase investigation, searching, locating files, or retrieving relevant context (only for sub-agents whose tool scope permits search/CodeGraph access, such as `sdd-explore`):
 1. **Prior Memory Search**: Search Engram (`mem_search` followed by `mem_get_observation` on matched IDs) for the current task domain, topic, or relevant past decisions/bugs.
-2. **CodeGraph First**: You **MUST** query CodeGraph (`codegraph_explore` MCP tool, or the `codegraph explore` CLI command if command execution is available) to explore the workspace structure and locate symbols/files.
-3. **FS Fallback**: Only use standard filesystem search tools (like `grep_search` or list directory) as a fallback if CodeGraph is unavailable or fails to return sufficient context, and state this fallback in your report.
+2. **CodeGraph First**: You **MUST** query CodeGraph. First, attempt to use the `codegraph_explore` MCP tool. If the MCP tool is unavailable or fails, and you have command execution capabilities (meaning write/terminal tools are enabled), you may query the `codegraph explore` CLI command. **CRITICAL fallback gate**: If the MCP tool fails/is unavailable AND command execution is disabled (e.g. read-only roles like `sdd-explore` with `enable_write_tools: false`) or if command execution fails/hangs, do NOT retry or attempt command line queries. Immediately proceed to the filesystem fallback.
+3. **FS Fallback**: Only use standard filesystem search tools (like `grep_search` or list directory) as a fallback if CodeGraph is unavailable or fails to return sufficient context, and state this fallback in your report. Do not wait or block.
 
 ## C. Artifact Persistence
 

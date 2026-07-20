@@ -214,7 +214,7 @@ Before calling `invoke_subagent`, the parent MUST inject a compact, task-specifi
 - relevant CodeGraph query summary, paths, symbols, context handles/hashes when available, and constraints;
 - Engram/OpenSpec topic keys for required artifacts;
 - allowed read/write scope and phase-specific tool limits;
-- exact task objective and non-goals;
+- exact task objective and non-goals (this must NEVER be 'N/A' or empty; it must contain a detailed description of the user's request, the feature to build, or the bug to fix, ensuring the subagent understands the objective perfectly);
 - expected output contract.
 
 Do not pass raw source dumps, full directory trees, or whole conversation history to dynamic subagents. Processing entire directories is forbidden unless CodeGraph is unavailable or insufficient and the parent explicitly reports that fallback. If a subagent needs more code context, it must query CodeGraph or read targeted files itself. The parent must not pre-load the subagent with bulk code.

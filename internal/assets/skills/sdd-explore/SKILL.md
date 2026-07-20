@@ -76,8 +76,9 @@ Retrieve context:
 
 For structural or codebase investigation, and when searching for or locating files and symbols, you **MUST** use CodeGraph first:
 1. Query CodeGraph using the `codegraph_explore` MCP tool (if available) before using broad grep, find, or multi-file read sweeps.
-2. If the MCP tool is not available but command execution tools are present, resolve the project root (using `git rev-parse --show-toplevel || pwd`), check for the `.codegraph/` directory in it, and run `gentle-ai codegraph init --cwd <resolved-project-root>` or `codegraph sync <resolved-project-root>` if needed.
-3. Fall back to normal filesystem tools (like ripgrep or standard file reads) only after CodeGraph exploration fails or returns insufficient results, and briefly report this fallback in your output.
+2. If the MCP tool is not available but command execution tools are present (meaning write/terminal tools are enabled), resolve the project root (using `git rev-parse --show-toplevel || pwd`), check for the `.codegraph/` directory in it, and run `gentle-ai codegraph init --cwd <resolved-project-root>` or `codegraph sync <resolved-project-root>` if needed.
+3. **CRITICAL fallback gate**: If the MCP tool fails/is unavailable AND command execution is disabled (e.g. `enable_write_tools: false`) or if command execution fails/hangs, do NOT retry or attempt command line queries. Immediately proceed to the filesystem fallback.
+4. Fall back to normal filesystem tools (like ripgrep or standard file reads) only after CodeGraph exploration fails or returns insufficient results, and briefly report this fallback in your output. Do not wait or block.
 
 Read relevant code returned by CodeGraph to understand:
 - Current architecture and patterns
