@@ -75,10 +75,12 @@ type TargetStatusResult struct {
 	Revision             string                 `json:"revision,omitempty"`
 	ReceiptIdentity      string                 `json:"receipt_identity,omitempty"`
 	Action               TargetStatusAction     `json:"action"`
+	ActionDisposition    RecoveryDisposition    `json:"action_disposition,omitempty"`
 	Replayability        Replayability          `json:"replayability"`
 	OriginalChangedLines int                    `json:"original_changed_lines,omitempty"`
 	Tier                 RiskLevel              `json:"tier,omitempty"`
 	CorrectionBudget     int                    `json:"correction_budget,omitempty"`
+	SelectedLenses       []string               `json:"selected_lenses,omitempty"`
 	TargetIdentity       string                 `json:"target_identity"`
 	Projection           TargetProjectionStatus `json:"projection"`
 	CandidateLineageIDs  []string               `json:"candidate_lineage_ids"`
@@ -94,6 +96,10 @@ type targetStatusCandidate struct {
 	receiptReplayable  bool
 	pendingFinalize    bool
 	correctionRecovery bool
+	// recoveryDisposition names the `review recover --disposition` value the
+	// recovery rules accept for this candidate. It is only set when the
+	// recommended action is recovery; guidance never invents a disposition.
+	recoveryDisposition RecoveryDisposition
 }
 
 // AssessTargetStatus classifies the selected live Git projection against
@@ -187,6 +193,9 @@ func AssessTargetStatus(ctx context.Context, repo string, request TargetStatusRe
 			requested.InitialSnapshot = live
 			if compactStartDeliveryScopeMatches(state, requested) {
 				candidate.correctionRecovery = compactEscalatedRecoveryTargetChanged(state.CurrentSnapshot, live)
+				if candidate.correctionRecovery {
+					candidate.recoveryDisposition = RecoveryEscalated
+				}
 				candidates = append(candidates, candidate)
 				continue
 			}
@@ -199,6 +208,7 @@ func AssessTargetStatus(ctx context.Context, repo string, request TargetStatusRe
 				continue
 			case compactCorrectionTargetRecover:
 				candidate.correctionRecovery = true
+				candidate.recoveryDisposition = compactCorrectionRecoveryDisposition(state, live)
 				candidates = append(candidates, candidate)
 				continue
 			}
@@ -304,6 +314,7 @@ func targetStatusForCandidate(result TargetStatusResult, candidate targetStatusC
 		state := record.State
 		result.State, result.Generation, result.Revision = state.State, state.Generation, record.Revision
 		result.OriginalChangedLines, result.Tier, result.CorrectionBudget = state.OriginalChangedLines, state.RiskLevel, state.CorrectionBudget
+		result.SelectedLenses = append([]string{}, state.SelectedLenses...)
 		result.Projection = targetProjectionFromCompact(state, result.Projection)
 		result.ReceiptIdentity = candidate.receiptIdentity
 		if candidate.pendingFinalize {
@@ -312,6 +323,7 @@ func targetStatusForCandidate(result TargetStatusResult, candidate targetStatusC
 		}
 		if candidate.correctionRecovery {
 			result.Action, result.Replayability = TargetStatusActionRecover, ReplayabilityManualActionRequired
+			result.ActionDisposition = candidate.recoveryDisposition
 			return result
 		}
 		if state.State == StateEscalated || compactHistoricalFailedValidator(state) {
@@ -322,7 +334,7 @@ func targetStatusForCandidate(result TargetStatusResult, candidate targetStatusC
 			result.Action, result.Replayability = TargetStatusActionFinalize, ReplayabilityExactReplaySafe
 			return result
 		}
-		result.Action, result.Replayability = targetStatusAction(state.State)
+		result.Action, result.Replayability, result.ActionDisposition = targetStatusAction(state.State)
 		return result
 	}
 	chain := *candidate.legacy
@@ -399,18 +411,22 @@ func inspectCompactTargetReceipt(store CompactStore, state CompactState) (identi
 	return "sha256:" + hex.EncodeToString(sum[:]), true, false, nil
 }
 
-func targetStatusAction(state State) (TargetStatusAction, Replayability) {
+// targetStatusAction maps a state to the single operation that state accepts.
+// When that operation is recovery it also names the disposition the recovery
+// rules accept, so guidance never routes an operator to a bare `recover` whose
+// --disposition they must guess.
+func targetStatusAction(state State) (TargetStatusAction, Replayability, RecoveryDisposition) {
 	switch state {
 	case StateReviewing, StateCorrectionRequired, StateValidating:
-		return TargetStatusActionFinalize, ReplayabilityNotReplayable
+		return TargetStatusActionFinalize, ReplayabilityNotReplayable, ""
 	case StateApproved:
-		return TargetStatusActionValidate, ReplayabilityNotReplayable
+		return TargetStatusActionValidate, ReplayabilityNotReplayable, ""
 	case StateInvalidated:
-		return TargetStatusActionRecover, ReplayabilityManualActionRequired
+		return TargetStatusActionRecover, ReplayabilityManualActionRequired, RecoveryInvalidated
 	case StateEscalated:
-		return TargetStatusActionMaintainer, ReplayabilityManualActionRequired
+		return TargetStatusActionMaintainer, ReplayabilityManualActionRequired, ""
 	default:
-		return TargetStatusActionFinalize, ReplayabilityNotReplayable
+		return TargetStatusActionFinalize, ReplayabilityNotReplayable, ""
 	}
 }
 
