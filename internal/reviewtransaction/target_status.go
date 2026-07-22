@@ -80,6 +80,7 @@ type TargetStatusResult struct {
 	OriginalChangedLines int                    `json:"original_changed_lines,omitempty"`
 	Tier                 RiskLevel              `json:"tier,omitempty"`
 	CorrectionBudget     int                    `json:"correction_budget,omitempty"`
+	SelectedLenses       []string               `json:"selected_lenses,omitempty"`
 	TargetIdentity       string                 `json:"target_identity"`
 	Projection           TargetProjectionStatus `json:"projection"`
 	CandidateLineageIDs  []string               `json:"candidate_lineage_ids"`
@@ -104,16 +105,29 @@ type targetStatusCandidate struct {
 // AssessTargetStatus classifies the selected live Git projection against
 // validated authority. It only reads Git objects and authority bytes.
 func AssessTargetStatus(ctx context.Context, repo string, request TargetStatusRequest) (TargetStatusResult, error) {
+	result, _, err := AssessTargetStatusWithSnapshot(ctx, repo, request)
+	return result, err
+}
+
+// AssessTargetStatusWithSnapshot returns the exact live snapshot used for the
+// status classification so callers can derive related routing artifacts from
+// the same immutable candidate tree instead of rereading a mutable worktree.
+func AssessTargetStatusWithSnapshot(ctx context.Context, repo string, request TargetStatusRequest) (TargetStatusResult, Snapshot, error) {
 	if request.LineageID != "" {
 		request.LineageID = strings.TrimSpace(request.LineageID)
 		if err := validateLineageID(request.LineageID); err != nil {
-			return TargetStatusResult{}, err
+			return TargetStatusResult{}, Snapshot{}, err
 		}
 	}
 	live, err := (SnapshotBuilder{Repo: repo}).Build(ctx, request.Target)
 	if err != nil {
-		return TargetStatusResult{}, err
+		return TargetStatusResult{}, Snapshot{}, err
 	}
+	result, err := assessTargetStatusSnapshot(ctx, repo, request, live)
+	return result, live, err
+}
+
+func assessTargetStatusSnapshot(ctx context.Context, repo string, request TargetStatusRequest, live Snapshot) (TargetStatusResult, error) {
 	base := TargetStatusResult{
 		TargetIdentity:      live.Identity,
 		Projection:          targetProjectionFromSnapshot(live),
@@ -121,6 +135,7 @@ func AssessTargetStatus(ctx context.Context, repo string, request TargetStatusRe
 	}
 
 	var compactStores []CompactStore
+	var err error
 	if request.LineageID == "" {
 		compactStores, err = CompactAuthorityLeaves(ctx, repo)
 	} else {
@@ -313,6 +328,7 @@ func targetStatusForCandidate(result TargetStatusResult, candidate targetStatusC
 		state := record.State
 		result.State, result.Generation, result.Revision = state.State, state.Generation, record.Revision
 		result.OriginalChangedLines, result.Tier, result.CorrectionBudget = state.OriginalChangedLines, state.RiskLevel, state.CorrectionBudget
+		result.SelectedLenses = append([]string{}, state.SelectedLenses...)
 		result.Projection = targetProjectionFromCompact(state, result.Projection)
 		result.ReceiptIdentity = candidate.receiptIdentity
 		if candidate.pendingFinalize {
@@ -324,7 +340,7 @@ func targetStatusForCandidate(result TargetStatusResult, candidate targetStatusC
 			result.ActionDisposition = candidate.recoveryDisposition
 			return result
 		}
-		if state.State == StateEscalated || compactHistoricalFailedValidator(state) {
+		if state.State == StateEscalated || state.State == StateCorrectionRequired && state.CorrectionAttemptConsumed() {
 			result.Action, result.Replayability = TargetStatusActionStop, ReplayabilityManualActionRequired
 			return result
 		}
