@@ -96,17 +96,9 @@ func RunDoctor(ctx context.Context, w io.Writer) error {
 	// reports the always-required core tools — preserving the first-time-install
 	// behaviour where the user has not yet selected any agents (#709).
 
-<<<<<<< HEAD
-	report := DoctorReport{}
-	report.Checks = append(report.Checks, checkToolBinaries(pathDirsFn(), installedAgents)...)
-	report.Checks = append(report.Checks, checkStateJSON(homeDir))
-	report.Checks = append(report.Checks, checkEngramReachable())
-	report.Checks = append(report.Checks, checkDiskSpace(homeDir))
-	report.Checks = append(report.Checks, checkAntigravityDynamicSubagentRuntime(homeDir)...)
-=======
 	pathDirs := pathDirsFn()
 	requiredTools := requiredDoctorTools(installedAgents)
-	checks := make([]doctor.Check, 0, len(requiredTools)+3)
+	checks := make([]doctor.Check, 0, len(requiredTools)+4)
 	for _, tool := range requiredTools {
 		tool := tool
 		checks = append(checks, doctor.Check{ID: doctor.ToolCheckID(tool), Run: func(context.Context) doctor.Result {
@@ -118,8 +110,17 @@ func RunDoctor(ctx context.Context, w io.Writer) error {
 		doctor.Check{ID: doctor.CheckEngramReachable, Run: func(context.Context) doctor.Result { return checkEngramReachable() }},
 		doctor.Check{ID: doctor.CheckDiskSpace, Run: func(context.Context) doctor.Result { return checkDiskSpace(homeDir) }},
 	)
+	for _, res := range checkAntigravityDynamicSubagentRuntime(homeDir) {
+		r := res
+		checks = append(checks, doctor.Check{ID: doctor.CheckID(r.Name), Run: func(context.Context) doctor.Result {
+			return doctor.Result{
+				Status: r.Status,
+				Detail: r.Detail,
+				Remedy: r.Remedy,
+			}
+		}})
+	}
 	report := (doctor.Runner{Checks: checks}).Run(ctx)
->>>>>>> origin/main
 
 	renderDoctorReport(w, report)
 	return nil
