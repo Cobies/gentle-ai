@@ -113,13 +113,7 @@ func hasCodeGraphToolWiring(homeDir string, adapter agents.Adapter) (string, boo
 		return path, hasCanonicalCodeGraphServer(data)
 	}
 	if adapter.Agent() == model.AgentAntigravity {
-<<<<<<< HEAD
 		return sdd.HasAntigravityCodeGraphToolWiringFn(homeDir, adapter)
-=======
-		path := antigravityCodeGraphMCPConfigPath(homeDir)
-		data, err := os.ReadFile(path)
-		return path, err == nil && hasCanonicalAntigravityCodeGraphServer(data)
->>>>>>> origin/main
 	}
 	if detector, ok := adapter.(agents.EffectiveCodeGraphWiringDetector); ok {
 		return detector.EffectiveCodeGraphWiring(homeDir)
