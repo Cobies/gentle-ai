@@ -95,6 +95,24 @@ type TaskProgress struct {
 	AllComplete bool `json:"allComplete"`
 }
 
+type blockerReasons struct {
+	expectedPlanning []string
+	genuine          []string
+}
+
+func (reasons blockerReasons) forRoute(nextRecommended string) []string {
+	return reasons.finalize(nextRecommended, reasons.genuine)
+}
+
+func (reasons blockerReasons) finalize(nextRecommended string, accumulated []string) []string {
+	switch Phase(nextRecommended) {
+	case PhasePropose, PhaseSpec, PhaseDesign, PhaseTasks:
+		return append([]string{}, accumulated...)
+	default:
+		return append(append([]string{}, reasons.expectedPlanning...), accumulated...)
+	}
+}
+
 type Dependencies struct {
 	Proposal DependencyState `json:"proposal"`
 	Specs    DependencyState `json:"specs"`
@@ -327,7 +345,7 @@ func Resolve(options ResolveOptions) (Status, error) {
 		if evaluation.Result == reviewtransaction.GateAllow {
 			staleAllowAuthority = &evaluation
 		} else {
-			blockedReasons = append(blockedReasons, evaluation.Reason)
+			blockedReasons.genuine = append(blockedReasons.genuine, evaluation.Reason)
 		}
 	}
 	runtimeRemediationComplete := nativeRuntimeCompletesRemediation(runtimeStatus, verifyResult)
@@ -371,7 +389,7 @@ func Resolve(options ResolveOptions) (Status, error) {
 			dependencies.Verify = DependencyBlocked
 			dependencies.Archive = DependencyBlocked
 			nextRecommended = "resolve-review"
-			blockedReasons = append(blockedReasons, bindingErr.Error())
+			blockedReasons.genuine = append(blockedReasons.genuine, bindingErr.Error())
 		}
 	} else if applyState == ApplyAllDone && (artifacts["verifyReport"] != ArtifactDone || recoverable) && compactBridgeableReviewArtifact(artifacts["reviewState"], reviewStateReason) {
 		fields, _ := authorityFailureFields(readText(firstPath(artifactPaths.VerifyReport)))
@@ -384,7 +402,7 @@ func Resolve(options ResolveOptions) (Status, error) {
 		remediationState = RemediationState{}
 	}
 	if remediationState.Reason != "" {
-		blockedReasons = append(blockedReasons, remediationState.Reason)
+		blockedReasons.genuine = append(blockedReasons.genuine, remediationState.Reason)
 	}
 	if !bindingPresent {
 		applyPreVerifyCompactBridgeRouting(&dependencies, &nextRecommended, &blockedReasons, applyState, artifacts["verifyReport"] == ArtifactDone, reviewState, bridge)
@@ -393,7 +411,7 @@ func Resolve(options ResolveOptions) (Status, error) {
 		applyPreVerifyReviewRouting(&dependencies, &nextRecommended, &blockedReasons, applyState, artifacts["verifyReport"] == ArtifactDone, reviewState, reviewStateReason)
 	}
 
-	status := baseStatus(workspaceRoot, &changeName, &changeRoot, nextRecommended, blockedReasons)
+	status := baseStatus(workspaceRoot, &changeName, &changeRoot, nextRecommended, append([]string{}, blockedReasons.genuine...))
 	status.ArtifactPaths = artifactPaths
 	status.ContextFiles = artifactPaths
 	status.Artifacts = artifacts
@@ -423,6 +441,7 @@ func Resolve(options ResolveOptions) (Status, error) {
 	} else {
 		applyNativeRuntimeRouting(&status)
 	}
+	status.BlockedReasons = blockedReasons.finalize(status.NextRecommended, status.BlockedReasons)
 	if options.IncludeInstructions {
 		instructions := renderPhaseInstructions(status)
 		status.PhaseInstructions = &instructions
@@ -542,44 +561,11 @@ func authorityChangedSinceReport(report, revision string) bool {
 }
 
 func authorityFailureFields(report string) (map[string]string, bool) {
-	const emptyOutputHash = "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-
-	lines, end, reason := parseLeadingEnvelope(report)
-	if reason != "" {
+	parsed, reason := parseVerifyReport(report)
+	if reason != "" || !parsed.AuthorityOnly {
 		return nil, false
 	}
-	allowed := map[string]bool{
-		"schema": true, "evidence_revision": true, "verdict": true, "blockers": true, "critical_findings": true,
-		"requirements": true, "scenarios": true, "test_command": true, "test_exit_code": true, "test_output_hash": true,
-		"build_command": true, "build_exit_code": true, "build_output_hash": true, "authority_only_failure": true,
-		"missing_review_authority": true, "substantive_failure": true, "command_failed": true, "observed_authority_revision": true,
-	}
-	fields, reason := parseScalarFields(lines[1:end], allowed, "authority failure")
-	if reason != "" || len(fields) != len(allowed) || fields["schema"] != VerifyResultSchema || fields["verdict"] != "fail" {
-		return nil, false
-	}
-	for _, field := range []string{"evidence_revision", "test_output_hash", "build_output_hash", "observed_authority_revision"} {
-		if !sha256IdentityPattern.MatchString(fields[field]) {
-			return nil, false
-		}
-	}
-	if fields["test_output_hash"] != emptyOutputHash || fields["build_output_hash"] != emptyOutputHash {
-		return nil, false
-	}
-	testExit, testOK := parseNonnegativeInt(fields["test_exit_code"])
-	buildExit, buildOK := parseNonnegativeInt(fields["build_exit_code"])
-	blockers, blockersOK := parseNonnegativeInt(fields["blockers"])
-	critical, criticalOK := parseNonnegativeInt(fields["critical_findings"])
-	if !testOK || !buildOK || !blockersOK || !criticalOK || blockers == 0 || critical == 0 || testExit != 125 || buildExit != 125 {
-		return nil, false
-	}
-	if _, ok := parseVerifyCompletion(fields["requirements"]); !ok {
-		return nil, false
-	}
-	if _, ok := parseVerifyCompletion(fields["scenarios"]); !ok || !isConcreteEvidence(fields["test_command"]) || !isConcreteEvidence(fields["build_command"]) {
-		return nil, false
-	}
-	return fields, true
+	return parsed.Fields, true
 }
 
 func resolveEngramStatus(workspaceRoot string, requestedChange string, includeInstructions bool) (Status, bool, error) {
@@ -648,7 +634,7 @@ func resolveEngramStatus(workspaceRoot string, requestedChange string, includeIn
 		if evaluation.Result == reviewtransaction.GateAllow {
 			staleAllowAuthority = &evaluation
 		} else {
-			blockedReasons = append(blockedReasons, evaluation.Reason)
+			blockedReasons.genuine = append(blockedReasons.genuine, evaluation.Reason)
 		}
 	}
 	runtimeRemediationComplete := nativeRuntimeCompletesRemediation(runtimeStatus, verifyResult)
@@ -666,7 +652,7 @@ func resolveEngramStatus(workspaceRoot string, requestedChange string, includeIn
 		artifactsByType["apply-progress"].Content,
 	)
 	if remediationState.Reason != "" {
-		blockedReasons = append(blockedReasons, remediationState.Reason)
+		blockedReasons.genuine = append(blockedReasons.genuine, remediationState.Reason)
 	}
 	dependencies := resolveDependencies(artifacts, taskProgress, applyState, coreReady, verifyResult.Passing, remediationState.Complete)
 	nextRecommended := resolveNextRecommended(dependencies, applyState, artifacts["verifyReport"] == ArtifactDone, remediationState)
@@ -697,7 +683,7 @@ func resolveEngramStatus(workspaceRoot string, requestedChange string, includeIn
 			dependencies.Verify = DependencyBlocked
 			dependencies.Archive = DependencyBlocked
 			nextRecommended = "resolve-review"
-			blockedReasons = append(blockedReasons, bindingErr.Error())
+			blockedReasons.genuine = append(blockedReasons.genuine, bindingErr.Error())
 		}
 	} else {
 		if applyState == ApplyAllDone && artifacts["verifyReport"] != ArtifactDone && compactBridgeableReviewArtifact(artifacts["reviewState"], reviewStateReason) {
@@ -710,7 +696,7 @@ func resolveEngramStatus(workspaceRoot string, requestedChange string, includeIn
 	}
 
 	changeRoot := fmt.Sprintf("engram:sdd/%s", changeName)
-	status := baseStatus(workspaceRoot, &changeName, &changeRoot, nextRecommended, blockedReasons)
+	status := baseStatus(workspaceRoot, &changeName, &changeRoot, nextRecommended, append([]string{}, blockedReasons.genuine...))
 	status.ArtifactStore = ArtifactStoreEngram
 	status.PlanningHome = PlanningHome{Mode: ActionModeRepoLocal, Path: "engram:sdd"}
 	status.ArtifactPaths = artifactPaths
@@ -742,6 +728,7 @@ func resolveEngramStatus(workspaceRoot string, requestedChange string, includeIn
 	} else {
 		applyNativeRuntimeRouting(&status)
 	}
+	status.BlockedReasons = blockedReasons.finalize(status.NextRecommended, status.BlockedReasons)
 	if includeInstructions {
 		instructions := renderPhaseInstructions(status)
 		status.PhaseInstructions = &instructions
@@ -760,14 +747,14 @@ func blockedEngramStatus(workspaceRoot string, changeName *string, next string, 
 	return status
 }
 
-func applyPreVerifyReviewRouting(dependencies *Dependencies, next *string, blockedReasons *[]string, applyState ApplyState, verifyReportDone bool, transaction *reviewtransaction.Transaction, transactionReason string) {
+func applyPreVerifyReviewRouting(dependencies *Dependencies, next *string, blockedReasons *blockerReasons, applyState ApplyState, verifyReportDone bool, transaction *reviewtransaction.Transaction, transactionReason string) {
 	if applyState != ApplyAllDone || verifyReportDone {
 		return
 	}
 	if transaction == nil {
 		dependencies.Verify = DependencyBlocked
 		*next = "review"
-		*blockedReasons = append(*blockedReasons, "explicit bounded review/start(target) is required after apply before independent final verification: "+transactionReason)
+		blockedReasons.genuine = append(blockedReasons.genuine, "explicit bounded review/start(target) is required after apply before independent final verification: "+transactionReason)
 		return
 	}
 	switch transaction.State {
@@ -777,15 +764,15 @@ func applyPreVerifyReviewRouting(dependencies *Dependencies, next *string, block
 	case reviewtransaction.StateEscalated, reviewtransaction.StateApproved:
 		dependencies.Verify = DependencyBlocked
 		*next = "resolve-review"
-		*blockedReasons = append(*blockedReasons, fmt.Sprintf("review transaction state %q cannot start missing final verification evidence", transaction.State))
+		blockedReasons.genuine = append(blockedReasons.genuine, fmt.Sprintf("review transaction state %q cannot start missing final verification evidence", transaction.State))
 	default:
 		dependencies.Verify = DependencyBlocked
 		*next = "review"
-		*blockedReasons = append(*blockedReasons, fmt.Sprintf("bounded review transaction is %q; continue it without creating a new budget before final verification", transaction.State))
+		blockedReasons.genuine = append(blockedReasons.genuine, fmt.Sprintf("bounded review transaction is %q; continue it without creating a new budget before final verification", transaction.State))
 	}
 }
 
-func applyPreVerifyCompactBridgeRouting(dependencies *Dependencies, next *string, blockedReasons *[]string, applyState ApplyState, verifyReportDone bool, transaction *reviewtransaction.Transaction, bridge compactPreVerifyBridge) {
+func applyPreVerifyCompactBridgeRouting(dependencies *Dependencies, next *string, blockedReasons *blockerReasons, applyState ApplyState, verifyReportDone bool, transaction *reviewtransaction.Transaction, bridge compactPreVerifyBridge) {
 	if applyState != ApplyAllDone || verifyReportDone || transaction != nil {
 		return
 	}
@@ -799,7 +786,7 @@ func applyPreVerifyCompactBridgeRouting(dependencies *Dependencies, next *string
 		dependencies.Verify = DependencyBlocked
 		dependencies.Archive = DependencyBlocked
 		*next = "resolve-review"
-		*blockedReasons = append(*blockedReasons, bridge.Reason)
+		blockedReasons.genuine = append(blockedReasons.genuine, bridge.Reason)
 	}
 }
 
@@ -1471,22 +1458,22 @@ func countTaskProgressText(content string) TaskProgress {
 	return progress
 }
 
-func artifactBlockedReasons(artifacts map[string]ArtifactState, taskProgress TaskProgress) []string {
-	var reasons []string
+func artifactBlockedReasons(artifacts map[string]ArtifactState, taskProgress TaskProgress) blockerReasons {
+	var reasons blockerReasons
 	if artifacts["proposal"] != ArtifactDone {
-		reasons = append(reasons, "proposal.md is missing or partial.")
+		reasons.expectedPlanning = append(reasons.expectedPlanning, "proposal.md is missing or partial.")
 	}
 	if artifacts["specs"] != ArtifactDone {
-		reasons = append(reasons, "specs/**/spec.md is missing or partial.")
+		reasons.expectedPlanning = append(reasons.expectedPlanning, "specs/**/spec.md is missing or partial.")
 	}
 	if artifacts["design"] != ArtifactDone {
-		reasons = append(reasons, "design.md is missing or partial.")
+		reasons.expectedPlanning = append(reasons.expectedPlanning, "design.md is missing or partial.")
 	}
 	if artifacts["tasks"] != ArtifactDone {
-		reasons = append(reasons, "tasks.md is missing or partial.")
+		reasons.expectedPlanning = append(reasons.expectedPlanning, "tasks.md is missing or partial.")
 	}
 	if artifacts["tasks"] == ArtifactDone && taskProgress.Total == 0 {
-		reasons = append(reasons, "tasks.md has no markdown task checkboxes.")
+		reasons.genuine = append(reasons.genuine, "tasks.md has no markdown task checkboxes.")
 	}
 	return reasons
 }

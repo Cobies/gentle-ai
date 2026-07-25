@@ -144,15 +144,15 @@ func (a *Adapter) CommandsDir(_ string) string {
 }
 
 func (a *Adapter) SupportsSubAgents() bool {
-	return false
+	return true
 }
 
 func (a *Adapter) SubAgentsDir(homeDir string) string {
-	return ""
+	return filepath.Join(a.GlobalConfigDir(homeDir), "agents")
 }
 
 func (a *Adapter) EmbeddedSubAgentsDir() string {
-	return ""
+	return "kiro/agents"
 }
 
 func (a *Adapter) SupportsSkills() bool {

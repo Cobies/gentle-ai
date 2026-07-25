@@ -171,20 +171,22 @@ type CompactInvalidationEvidence struct {
 type RecoveryDisposition string
 
 const (
-	RecoveryScopeChanged RecoveryDisposition = "scope_changed"
-	RecoveryInvalidated  RecoveryDisposition = "invalidated"
-	RecoveryEscalated    RecoveryDisposition = "escalated"
+	RecoveryScopeChanged           RecoveryDisposition = "scope_changed"
+	RecoveryInvalidated            RecoveryDisposition = "invalidated"
+	RecoveryEscalated              RecoveryDisposition = "escalated"
+	RecoveryFinalVerificationRetry RecoveryDisposition = "final_verification_retry"
 )
 
 type CompactRecoveryProvenance struct {
-	PredecessorLineageID    string                    `json:"predecessor_lineage_id"`
-	PredecessorRevision     string                    `json:"predecessor_revision"`
-	Disposition             RecoveryDisposition       `json:"disposition"`
-	Reason                  string                    `json:"reason"`
-	Actor                   string                    `json:"actor"`
-	RecoveredAt             time.Time                 `json:"recovered_at"`
-	MaintainerAuthorization string                    `json:"maintainer_authorization,omitempty"`
-	Evidence                *CompactRecoveredEvidence `json:"evidence,omitempty"`
+	PredecessorLineageID    string                              `json:"predecessor_lineage_id"`
+	PredecessorRevision     string                              `json:"predecessor_revision"`
+	Disposition             RecoveryDisposition                 `json:"disposition"`
+	Reason                  string                              `json:"reason"`
+	Actor                   string                              `json:"actor"`
+	RecoveredAt             time.Time                           `json:"recovered_at"`
+	MaintainerAuthorization string                              `json:"maintainer_authorization,omitempty"`
+	Evidence                *CompactRecoveredEvidence           `json:"evidence,omitempty"`
+	FinalVerificationRetry  *CompactFinalVerificationRetryProof `json:"final_verification_retry,omitempty"`
 }
 
 // CompactRecoveredEvidence is the self-contained provenance for the only
@@ -241,7 +243,7 @@ func NewCompactState(start Start) (CompactState, error) {
 	if start.Generation < 1 {
 		return CompactState{}, errors.New("generation must be positive")
 	}
-	if err := validateSnapshot(start.Snapshot); err != nil {
+	if err := validateCompactSnapshot(start.Snapshot); err != nil {
 		return CompactState{}, err
 	}
 	if !validSHA256(start.PolicyHash) {
@@ -289,11 +291,21 @@ func (state CompactState) Validate() error {
 			if strings.TrimSpace(recovery.MaintainerAuthorization) == "" {
 				return errors.New("escalated recovery requires maintainer authorization")
 			}
+		case RecoveryFinalVerificationRetry:
+			if recovery.FinalVerificationRetry == nil || recovery.MaintainerAuthorization == "" {
+				return errors.New("final-verification retry recovery requires exact source proof and maintainer authorization")
+			}
+			if err := validateCompactFinalVerificationRetryProofShape(state, *recovery); err != nil {
+				return err
+			}
 		default:
 			return errors.New("compact recovery disposition is invalid")
 		}
 		if recovery.Evidence != nil && recovery.Disposition != RecoveryEscalated {
 			return errors.New("only escalated recovery may carry predecessor evidence")
+		}
+		if recovery.FinalVerificationRetry != nil && recovery.Disposition != RecoveryFinalVerificationRetry {
+			return errors.New("only final-verification retry recovery may carry final-verification source proof")
 		}
 	}
 	if err := validateCompactResultDispositions(state); err != nil {
@@ -321,10 +333,10 @@ func (state CompactState) Validate() error {
 		}
 		return errors.New("approved compact invalidation evidence does not bind its predecessor revision")
 	}
-	if err := validateSnapshot(state.InitialSnapshot); err != nil {
+	if err := validateCompactSnapshot(state.InitialSnapshot); err != nil {
 		return fmt.Errorf("initial snapshot: %w", err)
 	}
-	if err := validateSnapshot(state.CurrentSnapshot); err != nil {
+	if err := validateCompactSnapshot(state.CurrentSnapshot); err != nil {
 		return fmt.Errorf("current snapshot: %w", err)
 	}
 	if err := validateCompactSnapshotMetadata(state.InitialSnapshot); err != nil {
@@ -723,7 +735,7 @@ func validateCompactRecoveredCorrection(state CompactState, evidence CompactReco
 		!attempt.OriginalCriteria.Passed || !attempt.CorrectionRegression.Passed {
 		return errors.New("recovered correction does not match the accounting-only source attempt")
 	}
-	if err := validateSnapshot(attempt.Snapshot); err != nil {
+	if err := validateCompactSnapshot(attempt.Snapshot); err != nil {
 		return fmt.Errorf("recovered correction snapshot: %w", err)
 	}
 	if err := validateCompactSnapshotMetadata(attempt.Snapshot); err != nil {
