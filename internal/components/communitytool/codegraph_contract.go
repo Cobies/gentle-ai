@@ -8,9 +8,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/gentleman-programming/gentle-ai/internal/agents"
-	"github.com/gentleman-programming/gentle-ai/internal/components/sdd"
-	"github.com/gentleman-programming/gentle-ai/internal/model"
+	"github.com/gentleman-programming/gentle-ai/v2/internal/agents"
+	"github.com/gentleman-programming/gentle-ai/v2/internal/components/sdd"
+	"github.com/gentleman-programming/gentle-ai/v2/internal/model"
 )
 
 const codeGraphUpstreamVersion = "1.4.1"

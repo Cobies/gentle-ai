@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gentleman-programming/gentle-ai/internal/agents"
-	"github.com/gentleman-programming/gentle-ai/internal/assets"
-	"github.com/gentleman-programming/gentle-ai/internal/model"
+	"github.com/gentleman-programming/gentle-ai/v2/internal/agents"
+	"github.com/gentleman-programming/gentle-ai/v2/internal/assets"
+	"github.com/gentleman-programming/gentle-ai/v2/internal/model"
 )
 
 const mockCodeGraphGuidanceMarkdown = "## CodeGraph\n\n- Check for <project-root>/.codegraph/\n- Run gentle-ai codegraph init --cwd <project-root>\n"

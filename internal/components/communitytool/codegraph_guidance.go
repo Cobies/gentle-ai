@@ -8,10 +8,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/gentleman-programming/gentle-ai/internal/agents"
-	"github.com/gentleman-programming/gentle-ai/internal/agents/antigravity"
-	"github.com/gentleman-programming/gentle-ai/internal/components/filemerge"
-	"github.com/gentleman-programming/gentle-ai/internal/model"
+	"github.com/gentleman-programming/gentle-ai/v2/internal/agents"
+	"github.com/gentleman-programming/gentle-ai/v2/internal/agents/antigravity"
+	"github.com/gentleman-programming/gentle-ai/v2/internal/components/filemerge"
+	"github.com/gentleman-programming/gentle-ai/v2/internal/model"
 )
 
 const (

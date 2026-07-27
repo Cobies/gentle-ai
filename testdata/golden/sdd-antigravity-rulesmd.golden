@@ -75,7 +75,7 @@ Regardless of the language (English, Spanish, etc.) or phrasing used by the user
 
 ### Delegation Rules
 
-Core principle: **does this inflate my context without need?** If yes → run the appropriate SDD phase through a dynamic subagent. If no → do small orchestration work directly.
+These rules select execution topology, not the implementation method. Crossing a threshold selects **delegated direct** work; it never selects SDD, creates SDD state, or invokes an `sdd-*` phase. Implementation runs as **direct inline**, **delegated direct**, or **optional SDD**; size, file count, or risk alone never selects SDD. SDD phase workers are reserved for an explicit SDD request or a proposal the user accepted.
 
 | Action | Orchestrator may do directly | Dynamic phase subagent |
 | -------- | ------------------------------ | ------------------------ |
@@ -87,7 +87,15 @@ Core principle: **does this inflate my context without need?** If yes → run th
 | Bash for state, e.g. `git status`, `gh issue view` | ✅ | — |
 | Bash for execution, tests, builds, installs | — | ✅ `sdd-verify` |
 
-All SDD phases are run via dynamic subagent delegation. "Defer" means complete orchestration for the current step, save or reference artifacts, pause for user approval when required, then invoke the next phase subagent.
+| Action | Direct inline | Delegated direct worker |
+|--------|---------------|-------------------------|
+| Read to decide/verify (1–3 files) | ✅ | — |
+| Read to explore/understand (4+ files) | — | ✅ one narrow mapper |
+| Read as preparation for writing | — | ✅ together with the write |
+| Write one mechanical, already-understood file | ✅ | — |
+| Write 2+ non-trivial files | — | ✅ one writer |
+| Bash for state (`git`, `gh`) | ✅ | — |
+| Tests, builds, installs, or native review actions | allowed as a bounded action | ✅ fresh per-action worker without changing route |
 
 Anti-patterns — these ALWAYS inflate context without need:
 
@@ -96,11 +104,11 @@ Anti-patterns — these ALWAYS inflate context without need:
 - Running tests or builds in the orchestrator thread → invoke `sdd-verify`.
 - Reading files as preparation for edits, then editing in the orchestrator thread → put both inside the same phase subagent.
 
-Phase boundaries are not optional once complexity appears. If a task crosses a trigger below, stop the monolithic flow, save or reference artifacts, and move through the smallest safe SDD phase instead of continuing ad hoc.
+Keep one writer and a short synthesized handoff. Delegation is mandatory at the mapping, write, preparation, and broad-research boundaries, but it remains a direct implementation route and must not synthesize SDD artifacts.
 
-#### Mandatory Phase-Boundary Triggers
+#### Mandatory Delegation Triggers
 
-These are orchestrator stop rules for Antigravity. Once any trigger fires, the orchestrator MUST defer to the right dynamic phase subagent or explicitly tell the user why deferral would be unsafe or wasteful for this exact case.
+These are parent-orchestrator routing boundaries. Use the smallest useful topology and keep the safety machinery behind the outcome-first interaction. Do not pass these rules to child agents as permission to orchestrate.
 
 1. **4-file rule**: if understanding requires reading 4+ files, invoke an exploration/mapping phase before implementation.
 2. **Multi-file write rule**: if implementation will touch 2+ non-trivial files, require an explicit apply phase and verify phase boundary.
@@ -112,8 +120,7 @@ These are orchestrator stop rules for Antigravity. Once any trigger fires, the o
 8. **Post-verify review rule**: after `sdd-verify` completes successfully, if the changes are not trivial and no valid content-bound receipt exists, the orchestrator MUST define and invoke the selected 4R lenses or Judgment Day reviewer dynamic subagents (`review-*` or `jd-judge-*`) to run a complete review before proceeding to `sdd-archive` or completing the cycle. Do not skip or bypass this review phase.
 9. **Normalization ordering rule**: before review START and its identity freeze, run every source-mutating normalizer, then re-snapshot the candidate and review those exact bytes, paths, and modes. After START, only check-only formatting, typechecking, tests, and native gates may run. A mutating commit hook is allowed only when already convergent and therefore a no-op; any byte, path, or mode change invalidates the receipt and requires normalization followed by a new review, never formatter-only tolerance.
 
-
-#### Review Lens Selection
+#### Native Checking Contract
 
 `reviewer` is an intent, not a concrete installed agent. When a review/audit trigger fires, triage the diff deterministically — this is a decision procedure, not advice:
 
@@ -169,7 +176,11 @@ Parent orchestrator and native CLI only. Never pass this contract to a reviewer,
 
 Call `gentle-ai review start` once. The native facade discovers the repository root and untracked scope, derives the immutable target, selects zero lenses for low risk, one focus lens for standard risk, or canonical 4R for high risk, and freezes the original line count, tier, and correction budget `min(200, ceil(original_changed_lines / 2))`. Goldens stay in snapshot identity but not that count. Correction and compatible base advance never recalculate risk or open review.
 
-Run each selected lens once in the foreground. Prefix its prompt with START's exact `GENTLE_AI_REVIEW_BINDING`, including `subject_hash`. Return one JSON object echoing `subject_hash`; require `inspection.status: "completed"`, all manifest paths in order as `inspection.paths`, `findings`/`evidence`, and severe `evidence_class`/`causal_disposition`; access failure is not completion. `gentle-ai review capture-result` follows the native transition; handles are cwd-independent and legacy bindings need `--cwd`. Pass manifests in lens order with repeated `--result-artifact-file <path>` arguments, BOM-less UTF-8 on Windows PowerShell 5.1. The POSIX inline `--result-artifact '<manifest-json>'` form remains compatible; so does provider-owned `--captured-results`; never pass raw `--result`. Native Go validates, canonicalizes, persists, hashes, reopens, and binds results; models never construct canonical bytes or hashes. Freeze merged findings. Only `introduced`, `behavior-activated`, or `worsened` with changed-hunk, candidate-created-path, differential-test, or before/after proof may block. Route `pre-existing` and `base-only` to follow-ups; `unknown` escalates. WARNING/SUGGESTION remain `info`. Deterministic blockers need no refuter; inferential blockers share one read-only refuter batch. Judgment Day uses two independent judges.
+A session that can relay a blocking question declares `--consent relay` on the negotiated START; a non-low tier then answers with the typed `gentle-ai.review-integration.consent/v1` envelope instead of proceeding. That envelope is a Lossless Blocking Prompt under the orchestrator contract: relay its complete choice envelope — headline, reason, risk evidence, both choices, and the documented off path — then run exactly the one named follow-up invocation for the human's answer, never answering on their behalf. A decline is scoped to that one candidate and is not the kill switch.
+
+A canonical four-lens selection is long work: before the first lens runs, give the one cost/side-effect forecast — four reviewer model runs over the frozen candidate, the frozen correction budget, and the at-most-one bounded correction it implies — once per candidate, never per lens.
+
+Run each selected lens once in the foreground, prefixed with `GENTLE_AI_REVIEW_BINDING` assembled from this exact START response as one JSON object: `lineage` from `lineage_id`, `target` from `target_identity`, `lens`/`order` from `lens_bindings`. Return one JSON object echoing `subject_hash`; require `inspection.status: "completed"`, all manifest paths in order as `inspection.paths`, `findings`/`evidence`, and severe `evidence_class`/`causal_disposition`; access failure is not completion. `gentle-ai review capture-result` follows the native transition; handles are cwd-independent and legacy bindings need `--cwd`. Pass manifests in lens order with repeated `--result-artifact-file <path>` arguments, BOM-less UTF-8 on Windows PowerShell 5.1. The POSIX inline `--result-artifact '<manifest-json>'` form remains compatible; so does provider-owned `--captured-results`; never pass raw `--result`. Native Go validates, canonicalizes, persists, hashes, reopens, and binds results; models never construct canonical bytes or hashes. Freeze merged findings. Only `introduced`, `behavior-activated`, or `worsened` with changed-hunk, candidate-created-path, differential-test, or before/after proof may block. Route `pre-existing` and `base-only` to follow-ups; `unknown` escalates. WARNING/SUGGESTION remain `info`. Deterministic blockers need no refuter; inferential blockers share one read-only refuter batch. Judgment Day uses two independent judges.
 
 Before each lens, append the exact immutable candidate diff and changed-path manifest from START; if unavailable, stop.
 
@@ -397,7 +408,7 @@ Use the provider-owned Git-common-dir runtime ledger for every runtime-bearing `
 2. If `active_attempt` is populated, do not launch again. Finish that charged ordinal with `gentle-ai sdd-attempt finish --cwd <repo> --change <change> --expected-revision <revision> ...`, recording passed, failed, or interrupted outcome plus evidence revision, diagnosis, harness disposition, cleanup evidence, and process evidence.
 3. If `decision_required` is true, stop execution and report the native diagnosis/budget state. Only an explicit maintainer scope decision may call `gentle-ai sdd-attempt reset --cwd <repo> --change <change> --expected-revision <revision> ...`; a renamed work unit or new process never resets cumulative budgets.
 4. When `next_action` is `begin`, consume the ordinal before launch with `gentle-ai sdd-attempt begin --cwd <repo> --change <change> --expected-revision <revision> ...`. After `next_action: complete`, never rerun the same objective; a genuinely distinct objective requires an explicit reset.
-5. A passing bound remediation MUST add `--expected-binding-revision`, `--successor-lineage`, and `--remediates-evidence-revision` to `gentle-ai sdd-attempt finish`. The native command charges the attempt, persists evidence, and selects the already-approved compact recovery successor in one HEAD CAS; do not publish those steps separately.
+5. A passing bound remediation MUST add `--expected-binding-revision`, `--successor-lineage`, and `--remediates-evidence-revision` to `gentle-ai sdd-attempt finish`; read their values from `gentle-ai sdd-attempt status --cwd <repo> --change <change>` as `binding_revision`, `binding.lineage`, and `evidence_revision`. When the corrected candidate is already approved on the bound lineage, the lineage the binding already names is itself the successor — do not run `review recover` to mint a distinct one, which is correctly refused for an unchanged approved scope and for a same-lineage successor. The native command charges the attempt, persists evidence, and binds the approved successor in one HEAD CAS; do not publish those steps separately.
 
 ### Artifact Store Mode
 
@@ -449,6 +460,8 @@ If it says `Chained PRs recommended: Yes`, `400-line budget risk: High`, estimat
 - **`auto-chain`**: Do not ask about splitting. If `chain_strategy` is not yet cached, ask which chain strategy to use. Then invoke `sdd-apply` for only the next autonomous chained/stacked PR slice using work-unit commits, clear start/finish boundaries, verification, and rollback.
 - **`single-pr`**: STOP and require/record `size:exception` before apply.
 - **`exception-ok`**: Continue, but tell `sdd-apply` this run uses `size:exception`.
+
+Any other `delivery_strategy` value is invalid. Do NOT pick the nearest branch and do NOT proceed: STOP, report the unrecognised value, and re-collect the delivery strategy before `sdd-apply` runs.
 
 Automatic mode does not override this guard. Always include the resolved `delivery_strategy` and `chain_strategy` in `sdd-apply` dynamic subagent context.
 
@@ -527,6 +540,10 @@ SDD phases run in dynamically defined phase subagents. The orchestrator provides
 
 For phases with required dependencies, retrieve artifact references from Engram using topic keys before invoking the phase. Pass artifact references (topic keys), NOT full content. The phase subagent retrieves full content only when actively working on that phase — do not inline entire specs or designs into the orchestrator conversation. Do NOT rely on conversation history alone — conversation context is lossy across sessions.
 
+#### Archive Final-State Handoff (MANDATORY)
+
+When launching `sdd-archive`, forward explicit final-state facts for any work completed after `apply-progress` or `verify-report` were persisted — verify warnings fixed in later commits, blockers resolved, tasks finished, updated test or issue counts — with commit or evidence references where available. Those two artifacts are intermediate snapshots, valid at the time they were written; the archive report records the state at close, and explicit final-state facts in the `sdd-archive` launch prompt outrank stale snapshot claims.
+
 #### Strict TDD Forwarding (MANDATORY)
 
 When invoking `sdd-apply` or `sdd-verify` phases, the orchestrator MUST:
@@ -589,21 +606,3 @@ DAG state is tracked in Engram under `sdd/{change-name}/state`. Update it after 
 - `openspec` → read `openspec/changes/*/state.yaml`
 - `none` → state not persisted — explain to user
 <!-- /gentle-ai:sdd-orchestrator -->
-
-<!-- gentle-ai:trigger-rules -->
-## Agent Trigger Rules
-
-Deterministic bounded-review lifecycle router; apply it as a decision procedure, not advice. Post-apply starts `review/start(target)` only when no valid receipt exists. Pre-commit, pre-push, and pre-PR validate the same content-bound receipt and never create a new review budget or silently start Judgment Day. Release from protected `main` may bypass receipt validation only when the tag targets the current immutable `origin/main` SHA, required CI for that exact SHA is successful, the remote head is rechecked before tag push, and no fresh risk evidence exists; otherwise fail closed through native receipt validation. Major and post-incident releases require explicit extraordinary review.
-
-Receipt action table: missing → start explicitly after implementation/post-apply; scope-changed → require explicit maintainer action; invalidated → require explicit maintainer action; escalated → stop. New CI, vulnerability, base, policy, provenance, or release evidence may invalidate/escalate without reopening unchanged code review.
-
-Inside explicit `review/start(target)` only, select initial lenses by deterministic risk: **Low** (only documentation, comments, formatting, or typo-only string edits; zero executable-code and configuration changes) → no lens; **Medium** (every remaining change; pure human documentation above 400 authored changed lines is pinned to `review-readability`) → exactly ONE dominant-risk lens; **High** (security/auth/update/payments, data loss or exposure, permission changes, shell/process integration, or more than 400 authored changed lines in code, configuration, prompts, agent rules, workflows, runtime instruction docs, mixed content, or active content) → four initial 4R lens sweeps. Generated goldens are excluded from the authored threshold but remain in snapshot identity. Model, provider, profile, and reasoning effort are never classifier inputs.
-
-Risk table: Clear naming, structure, maintainability, or small refactors → `review-readability`; Behavior, state, tests, determinism, or regressions → `review-reliability`; Shell/process integration, partial failures, recovery, or degraded dependencies → `review-resilience`; Security, permissions, data exposure/loss, architecture, or dependencies → `review-risk`.
-
-- At **pre-commit**, always: validate the existing content-bound receipt with native `gentle-ai review validate --gate <gate>`; never start a reviewer or reset its budget. (validate the staged/intended content against the existing receipt; never create a review budget)
-- At **pre-push**, always: validate the existing content-bound receipt with native `gentle-ai review validate --gate <gate>`; never start a reviewer or reset its budget. (validate pushed commits against the same content-bound receipt)
-- At **pre-pr**, always: validate the existing content-bound receipt with native `gentle-ai review validate --gate <gate>`; never start a reviewer or reset its budget. (validate candidate tree, paths, policy, evidence, base relationship, and receipt without reopening review)
-- At **release**, always: validate the existing content-bound receipt with native `gentle-ai review validate --gate <gate>`; never start a reviewer or reset its budget. (validate immutable release tree, provenance, evidence, and publication boundary)
-- At **post-sdd-phase**, after the apply phase completes: if no valid receipt exists, explicitly run `review/start(target)`; otherwise reuse the receipt. (explicitly start ordinary bounded implementation review after apply only when no valid receipt exists)
-<!-- /gentle-ai:trigger-rules -->

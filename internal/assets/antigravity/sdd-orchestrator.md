@@ -74,7 +74,7 @@ Regardless of the language (English, Spanish, etc.) or phrasing used by the user
 
 ### Delegation Rules
 
-Core principle: **does this inflate my context without need?** If yes → run the appropriate SDD phase through a dynamic subagent. If no → do small orchestration work directly.
+These rules select execution topology, not the implementation method. Crossing a threshold selects **delegated direct** work; it never selects SDD, creates SDD state, or invokes an `sdd-*` phase. Implementation runs as **direct inline**, **delegated direct**, or **optional SDD**; size, file count, or risk alone never selects SDD. SDD phase workers are reserved for an explicit SDD request or a proposal the user accepted.
 
 | Action | Orchestrator may do directly | Dynamic phase subagent |
 | -------- | ------------------------------ | ------------------------ |
@@ -86,7 +86,15 @@ Core principle: **does this inflate my context without need?** If yes → run th
 | Bash for state, e.g. `git status`, `gh issue view` | ✅ | — |
 | Bash for execution, tests, builds, installs | — | ✅ `sdd-verify` |
 
-All SDD phases are run via dynamic subagent delegation. "Defer" means complete orchestration for the current step, save or reference artifacts, pause for user approval when required, then invoke the next phase subagent.
+| Action | Direct inline | Delegated direct worker |
+|--------|---------------|-------------------------|
+| Read to decide/verify (1–3 files) | ✅ | — |
+| Read to explore/understand (4+ files) | — | ✅ one narrow mapper |
+| Read as preparation for writing | — | ✅ together with the write |
+| Write one mechanical, already-understood file | ✅ | — |
+| Write 2+ non-trivial files | — | ✅ one writer |
+| Bash for state (`git`, `gh`) | ✅ | — |
+| Tests, builds, installs, or native review actions | allowed as a bounded action | ✅ fresh per-action worker without changing route |
 
 Anti-patterns — these ALWAYS inflate context without need:
 
@@ -95,11 +103,11 @@ Anti-patterns — these ALWAYS inflate context without need:
 - Running tests or builds in the orchestrator thread → invoke `sdd-verify`.
 - Reading files as preparation for edits, then editing in the orchestrator thread → put both inside the same phase subagent.
 
-Phase boundaries are not optional once complexity appears. If a task crosses a trigger below, stop the monolithic flow, save or reference artifacts, and move through the smallest safe SDD phase instead of continuing ad hoc.
+Keep one writer and a short synthesized handoff. Delegation is mandatory at the mapping, write, preparation, and broad-research boundaries, but it remains a direct implementation route and must not synthesize SDD artifacts.
 
-#### Mandatory Phase-Boundary Triggers
+#### Mandatory Delegation Triggers
 
-These are orchestrator stop rules for Antigravity. Once any trigger fires, the orchestrator MUST defer to the right dynamic phase subagent or explicitly tell the user why deferral would be unsafe or wasteful for this exact case.
+These are parent-orchestrator routing boundaries. Use the smallest useful topology and keep the safety machinery behind the outcome-first interaction. Do not pass these rules to child agents as permission to orchestrate.
 
 1. **4-file rule**: if understanding requires reading 4+ files, invoke an exploration/mapping phase before implementation.
 2. **Multi-file write rule**: if implementation will touch 2+ non-trivial files, require an explicit apply phase and verify phase boundary.
@@ -111,8 +119,7 @@ These are orchestrator stop rules for Antigravity. Once any trigger fires, the o
 8. **Post-verify review rule**: after `sdd-verify` completes successfully, if the changes are not trivial and no valid content-bound receipt exists, the orchestrator MUST define and invoke the selected 4R lenses or Judgment Day reviewer dynamic subagents (`review-*` or `jd-judge-*`) to run a complete review before proceeding to `sdd-archive` or completing the cycle. Do not skip or bypass this review phase.
 9. **Normalization ordering rule**: before review START and its identity freeze, run every source-mutating normalizer, then re-snapshot the candidate and review those exact bytes, paths, and modes. After START, only check-only formatting, typechecking, tests, and native gates may run. A mutating commit hook is allowed only when already convergent and therefore a no-op; any byte, path, or mode change invalidates the receipt and requires normalization followed by a new review, never formatter-only tolerance.
 
-
-#### Review Lens Selection
+#### Native Checking Contract
 
 `reviewer` is an intent, not a concrete installed agent. When a review/audit trigger fires, triage the diff deterministically — this is a decision procedure, not advice:
 
@@ -398,7 +405,7 @@ Use the provider-owned Git-common-dir runtime ledger for every runtime-bearing `
 2. If `active_attempt` is populated, do not launch again. Finish that charged ordinal with `gentle-ai sdd-attempt finish --cwd <repo> --change <change> --expected-revision <revision> ...`, recording passed, failed, or interrupted outcome plus evidence revision, diagnosis, harness disposition, cleanup evidence, and process evidence.
 3. If `decision_required` is true, stop execution and report the native diagnosis/budget state. Only an explicit maintainer scope decision may call `gentle-ai sdd-attempt reset --cwd <repo> --change <change> --expected-revision <revision> ...`; a renamed work unit or new process never resets cumulative budgets.
 4. When `next_action` is `begin`, consume the ordinal before launch with `gentle-ai sdd-attempt begin --cwd <repo> --change <change> --expected-revision <revision> ...`. After `next_action: complete`, never rerun the same objective; a genuinely distinct objective requires an explicit reset.
-5. A passing bound remediation MUST add `--expected-binding-revision`, `--successor-lineage`, and `--remediates-evidence-revision` to `gentle-ai sdd-attempt finish`. The native command charges the attempt, persists evidence, and selects the already-approved compact recovery successor in one HEAD CAS; do not publish those steps separately.
+5. A passing bound remediation MUST add `--expected-binding-revision`, `--successor-lineage`, and `--remediates-evidence-revision` to `gentle-ai sdd-attempt finish`; read their values from `gentle-ai sdd-attempt status --cwd <repo> --change <change>` as `binding_revision`, `binding.lineage`, and `evidence_revision`. When the corrected candidate is already approved on the bound lineage, the lineage the binding already names is itself the successor — do not run `review recover` to mint a distinct one, which is correctly refused for an unchanged approved scope and for a same-lineage successor. The native command charges the attempt, persists evidence, and binds the approved successor in one HEAD CAS; do not publish those steps separately.
 
 ### Artifact Store Mode
 
@@ -450,6 +457,8 @@ If it says `Chained PRs recommended: Yes`, `400-line budget risk: High`, estimat
 - **`auto-chain`**: Do not ask about splitting. If `chain_strategy` is not yet cached, ask which chain strategy to use. Then invoke `sdd-apply` for only the next autonomous chained/stacked PR slice using work-unit commits, clear start/finish boundaries, verification, and rollback.
 - **`single-pr`**: STOP and require/record `size:exception` before apply.
 - **`exception-ok`**: Continue, but tell `sdd-apply` this run uses `size:exception`.
+
+Any other `delivery_strategy` value is invalid. Do NOT pick the nearest branch and do NOT proceed: STOP, report the unrecognised value, and re-collect the delivery strategy before `sdd-apply` runs.
 
 Automatic mode does not override this guard. Always include the resolved `delivery_strategy` and `chain_strategy` in `sdd-apply` dynamic subagent context.
 
@@ -527,6 +536,10 @@ SDD phases run in dynamically defined phase subagents. The orchestrator provides
 | `sdd-archive` | all artifacts | `archive-report` |
 
 For phases with required dependencies, retrieve artifact references from Engram using topic keys before invoking the phase. Pass artifact references (topic keys), NOT full content. The phase subagent retrieves full content only when actively working on that phase — do not inline entire specs or designs into the orchestrator conversation. Do NOT rely on conversation history alone — conversation context is lossy across sessions.
+
+#### Archive Final-State Handoff (MANDATORY)
+
+When launching `sdd-archive`, forward explicit final-state facts for any work completed after `apply-progress` or `verify-report` were persisted — verify warnings fixed in later commits, blockers resolved, tasks finished, updated test or issue counts — with commit or evidence references where available. Those two artifacts are intermediate snapshots, valid at the time they were written; the archive report records the state at close, and explicit final-state facts in the `sdd-archive` launch prompt outrank stale snapshot claims.
 
 #### Strict TDD Forwarding (MANDATORY)
 

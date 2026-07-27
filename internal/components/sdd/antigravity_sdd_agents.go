@@ -5,12 +5,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
-	"github.com/gentleman-programming/gentle-ai/internal/agents"
-	"github.com/gentleman-programming/gentle-ai/internal/agents/antigravity"
-	"github.com/gentleman-programming/gentle-ai/internal/components/filemerge"
+	"github.com/gentleman-programming/gentle-ai/v2/internal/agents"
+	"github.com/gentleman-programming/gentle-ai/v2/internal/agents/antigravity"
+	"github.com/gentleman-programming/gentle-ai/v2/internal/components/filemerge"
 )
 
 // Antigravity has no static sub-agent registry with `permission.task` blocks
@@ -441,10 +442,23 @@ func hasCanonicalCodeGraphServer(data []byte) bool {
 		return false
 	}
 	var server struct {
-		Command string `json:"command"`
+		Command string   `json:"command"`
+		Args    []string `json:"args"`
 	}
 	raw, ok := config.MCPServers["codegraph"]
-	return ok && json.Unmarshal(raw, &server) == nil && server.Command == "codegraph"
+	if !ok || json.Unmarshal(raw, &server) != nil {
+		return false
+	}
+	if server.Command != "codegraph" {
+		if !filepath.IsAbs(server.Command) {
+			return false
+		}
+		command := filepath.Base(server.Command)
+		if command != "codegraph" && !strings.EqualFold(command, "codegraph.exe") {
+			return false
+		}
+	}
+	return slices.Equal(server.Args, []string{"serve", "--mcp"})
 }
 
 func ensureAntigravitySkillRegistryHook(hooksPath string) (bool, error) {
