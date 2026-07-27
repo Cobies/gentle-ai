@@ -313,8 +313,8 @@ func TestCapabilities(t *testing.T) {
 	if a.SupportsSlashCommands() {
 		t.Fatal("SupportsSlashCommands() = true, want false")
 	}
-	if !a.SupportsSubAgents() {
-		t.Fatal("SupportsSubAgents() = false, want true")
+	if a.SupportsSubAgents() {
+		t.Fatal("SupportsSubAgents() = true, want false")
 	}
 	if got := a.OutputStyleDir("/tmp/home"); got != "" {
 		t.Fatalf("OutputStyleDir() = %q, want empty string", got)
