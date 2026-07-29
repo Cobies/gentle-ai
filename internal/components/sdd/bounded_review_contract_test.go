@@ -12,33 +12,105 @@ import (
 
 var boundedReviewRequiredClauses = []string{
 	"Parent orchestrator and native CLI only",
-	"gentle-ai review start",
-	"selected lens once in the foreground",
-	"assembled from this exact START response as one JSON object",
-	"`lineage` from `lineage_id`, `target` from `target_identity`, `lens`/`order` from `lens_bindings`",
-	"gentle-ai review capture-result",
-	"repeated `--result-artifact-file <path>` arguments",
+	"gentle-ai review status --cwd <repo> --contract gentle-ai.review-integration/v2 --next-transition",
+	"route only from the returned `next_transition`",
+	"exact operation and ordered argument tokens unchanged",
+	"exact `review.capture-result` collection input once in the foreground",
+	"exact literal prefix `GENTLE_AI_REVIEW_BINDING `",
+	"including the trailing space and never `=`",
+	"These are the prompt's first bytes",
+	"one-line JSON assembled only from that input",
+	"`revision` from `expected-revision`",
+	"`subject_hash` from `artifact_subject.subject_hash`",
+	"Capture follows the native transition",
+	"via repeated `--result-artifact-file <path>`",
 	"BOM-less UTF-8 on Windows PowerShell 5.1",
-	"POSIX inline `--result-artifact '<manifest-json>'` form remains compatible",
-	"Native Go validates, canonicalizes, persists, hashes, reopens, and binds results",
-	"Only `introduced`, `behavior-activated`, or `worsened`",
-	"Route `pre-existing` and `base-only` to follow-ups; `unknown` escalates",
+	"POSIX inline `--result-artifact '<manifest-json>'` and provider-owned `--captured-results` remain compatible",
+	"Native Go owns validation, canonicalization, persistence, hashing, reopening, and binding",
+	"Only candidate-caused severe findings block",
+	"pre-existing/base-only become follow-ups, unknown escalates",
 	"canonical four-lens selection is long work",
 	"one cost/side-effect forecast",
 	"four reviewer model runs",
-	"--consent relay",
+	"typed `gentle-ai.review-integration.consent/v2` envelope",
 	"Lossless Blocking Prompt",
 	"not the kill switch",
 	"one correction transaction",
-	"positive `--correction-lines` forecast before editing",
+	"positive forecast before editing",
 	"one read-only scoped fix validator",
+	// The fix validator's capability is named because leaving it unnamed cost a
+	// real correction attempt: an orchestrator routed targeted validation to the
+	// refuter, which has no shell by design, and its inconclusive answer was
+	// submitted as a failed check that escalated the lineage irreversibly.
+	"must hold read-only Git execution against the immutable trees",
+	"never route it to the refuter or any other actor that cannot run Git",
+	"produced no verdict",
+	"surface one blocked human decision and submit nothing",
 	"one independent requirements/runtime verification",
 	"### Authority-First Terminal Procedure",
-	"rerun the same facade operation",
+	"query STATUS again",
 	"Repository Git common-dir CAS remains authoritative",
 	"Existing transaction, policy, ledger, receipt, bundle, and gate-context schemas",
-	"gentle-ai review validate --gate <gate>",
+	"exact returned `review.validate`",
 	"Model/provider/profile selection remains user-owned",
+}
+
+func TestBoundedReviewContractRequiresProviderOwnedReviewerContext(t *testing.T) {
+	content := boundedReviewContract()
+	for _, want := range []string{
+		"Never hand candidate bytes through `/tmp`",
+		"another external file",
+		"a repository scratch file",
+		"`GENTLE_AI_FROZEN_CANDIDATE_CONTEXT`",
+		"OpenCode preflights the opaque binding, discards the caller-authored task body",
+		"injects only the provider's `artifact_subject`, `base_tree`, `candidate_tree`, and ordered manifest",
+		"broad deny precedes narrow allows",
+		"Runtimes that cannot enforce a per-command shell boundary expose no shell and stop incomplete",
+		"read-only native Git commands against those exact immutable trees",
+		"compact `--name-status`/`--numstat` discovery",
+		"replacement objects, external diff and textconv, forces `--text`",
+		"literal pathspecs",
+		"Never pass `--binary`",
+		"Never add `candidate_diff`",
+		"read live worktree/index/HEAD",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("orchestrator contract missing reviewer context rule %q", want)
+		}
+	}
+	if strings.Contains(content, "`GENTLE_AI_REVIEW_BINDING=") {
+		t.Fatal("orchestrator contract permits equals-delimited reviewer bindings")
+	}
+}
+
+func TestGeneratedOpenCodeReviewControllersUseNegotiatedStatusRouting(t *testing.T) {
+	controllers := map[string]string{
+		"orchestrator": renderSDDOrchestratorAsset(model.AgentOpenCode),
+		"post-apply":   renderBoundedReviewAsset("opencode/commands/sdd-apply.md"),
+	}
+	for name, content := range controllers {
+		t.Run(name, func(t *testing.T) {
+			for _, required := range []string{
+				"gentle-ai review status --cwd <repo> --contract gentle-ai.review-integration/v2 --next-transition",
+				"route only from the returned `next_transition`",
+				"exact operation and ordered argument tokens unchanged",
+				"`execute`", "`collect`", "`stop`",
+			} {
+				if !strings.Contains(content, required) {
+					t.Errorf("generated OpenCode %s controller missing negotiated routing clause %q", name, required)
+				}
+			}
+			for _, stale := range []string{
+				"Call `gentle-ai review start` once.",
+				"runs `gentle-ai review start --cwd <repo>`",
+				"| 01 | `gentle-ai review start`",
+			} {
+				if strings.Contains(content, stale) {
+					t.Errorf("generated OpenCode %s controller retains direct START route %q", name, stale)
+				}
+			}
+		})
+	}
 }
 
 func TestBoundedReviewContractRendersForEverySupportedAgent(t *testing.T) {
@@ -137,7 +209,7 @@ func TestRenderedReviewersAreReadOnlyAndSingleResult(t *testing.T) {
 			path := family + "/agents/review-" + lens + ".md"
 			t.Run(family+"/"+lens, func(t *testing.T) {
 				content := renderBoundedReviewAsset(path)
-				for _, want := range []string{"read-only reviewer", "immutable candidate diff once", "## Candidate-Causal Admission", "Return one JSON object and no prose", `"subject_hash":"<artifact_subject.subject_hash>"`, `"inspection":{"status":"completed","paths":["<every changed_path_manifest.path in exact order>"]}`, "Never emit summary, skill_resolution, or any other unknown field", "evidence contains only genuine inspection evidence"} {
+				for _, want := range []string{"Review once", "GENTLE_AI_REVIEW_CONTEXT", "sole source of artifact_subject", "changed_path_manifest", "base_tree", "candidate_tree", "env -i", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_ATTR_NOSYSTEM=1", "--no-replace-objects", "diff --name-status --text --no-ext-diff --no-textconv --no-renames", "diff --numstat --text --no-ext-diff --no-textconv --no-renames", "diff --patch --text --full-index --no-color --no-renames --no-ext-diff --no-textconv --diff-algorithm=myers --no-indent-heuristic --unified=3", "cat-file -p '<tree>:<path>'", ":(literal)<path>", "never pass --binary", "attributes must never suppress a hunk", "incomplete inspection", "Never read the live worktree", "## Candidate-Causal Admission", "Return one JSON object and no prose", `"subject_hash":"<artifact_subject.subject_hash>"`, "GENTLE_AI_REVIEW_BINDING.subject_hash", `"inspection":{"status":"completed","paths":["<every changed_path_manifest.path in exact order>"]}`, "lens triage", "Emit no unknown fields"} {
 					if !strings.Contains(content, want) {
 						t.Errorf("%s missing %q", path, want)
 					}
@@ -189,8 +261,8 @@ func TestBoundedReviewContractListsOnlySupportedLifecycleGates(t *testing.T) {
 func TestAuthorityFirstTerminalProcedureIsStructuredAndMirrorEligibilityIsClosed(t *testing.T) {
 	rows := parseAuthorityFirstRows(t, authorityFirstTerminalProcedure())
 	wantOperations := []string{
-		"gentle-ai review start", "gentle-ai review finalize",
-		"gentle-ai review validate --gate <gate> --cwd <repo>", "reconcile-terminal-mirrors",
+		"gentle-ai review status --cwd <repo> --contract gentle-ai.review-integration/v2 --next-transition",
+		"provider-returned transition", "repeat 01–02", "reconcile-terminal-mirrors",
 	}
 	if len(rows) != len(wantOperations) {
 		t.Fatalf("authority-first rows = %d, want %d", len(rows), len(wantOperations))
@@ -232,6 +304,12 @@ func TestOpenCodeAndClaudeApplyCommandsRequireAuthorityBeforeMirrors(t *testing.
 			content := renderBoundedReviewAsset(path)
 			if strings.Contains(content, authorityFirstProcedurePlaceholder) || strings.Count(content, authorityFirstTerminalProcedure()) != 1 {
 				t.Fatalf("%s did not render the centralized terminal procedure", path)
+			}
+			if !strings.Contains(content, "gentle-ai review status --cwd <repo> --contract gentle-ai.review-integration/v2 --next-transition") {
+				t.Fatalf("%s does not begin negotiated review routing with STATUS", path)
+			}
+			if strings.Contains(content, "runs `gentle-ai review start --cwd <repo>`") {
+				t.Fatalf("%s retains direct post-apply START routing", path)
 			}
 		})
 	}

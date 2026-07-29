@@ -480,10 +480,9 @@ func TestReviewResultArtifactsPluginContract(t *testing.T) {
 		`const current = fields === "lens,lineage,order,repository_context,revision,subject_hash,target"`,
 		`typeof subject.subject_hash !== "string"`,
 		`subject.subject_hash !== binding.subject_hash`,
-		`const FROZEN_CONTEXT = "GENTLE_AI_FROZEN_CANDIDATE_CONTEXT "`,
 		`artifact_subject`,
-		`candidate_diff`,
-		`changed_path_manifest`,
+		`GENTLE_AI_REVIEW_CONTEXT`,
+		`validManifest(manifest)`,
 		`output.args.prompt = await injectReviewerContext(`,
 		`"--lineage", binding.lineage`,
 		`"--target", binding.target`,
@@ -524,9 +523,9 @@ func TestReviewResultArtifactsPluginContract(t *testing.T) {
 		// bounded raw payload in the thrown error so the transcript retains it.
 		`raw reviewer result follows for manual recovery`,
 		`PRESERVE_EMBED_LIMIT`,
-		// An older installed gentle-ai without --preflight must degrade
-		// gracefully instead of hard-blocking every bound lens launch.
-		`flag provided but not defined`,
+		// Missing native preflight support must fail closed before a bound
+		// reviewer launches without provider-owned frozen context.
+		`The reviewer was not launched`,
 		`export default ReviewResultArtifactsPlugin`,
 	} {
 		if !strings.Contains(source, want) {
@@ -535,6 +534,11 @@ func TestReviewResultArtifactsPluginContract(t *testing.T) {
 	}
 	if strings.Contains(source, `.slice("review-".length)`) {
 		t.Fatal("review-result-artifacts.ts must preserve the exact full selected lens; found review- prefix stripping")
+	}
+	for _, forbidden := range []string{"GENTLE_AI_FROZEN_CANDIDATE_CONTEXT", "candidate_diff"} {
+		if strings.Contains(source, forbidden) {
+			t.Fatalf("review-result-artifacts.ts still transports obsolete candidate context %q", forbidden)
+		}
 	}
 	// Pin the split: the previously conflated empty/nested-envelope message
 	// must never regress back into one indistinguishable free-text throw.
