@@ -554,8 +554,8 @@ func (err *reviewStartContextError) Unwrap() error { return err.Cause }
 
 func RunReview(args []string, stdout io.Writer) error {
 	if len(args) == 0 || args[0] == "help" || args[0] == "-h" || args[0] == "--help" {
-		_, _ = fmt.Fprintln(stdout, "Usage: gentle-ai review <capabilities|start|finalize|validate|status|repair|invalidate|abandon|recover|retry-final-verification|reclaim|inspect-authority|reconcile-authority|reconcile-authority-batch|dispose-result|reopen-results|quarantine-legacy|quarantine-legacy-fix-scope|repair-legacy-alias|schema|bind-sdd> [flags]\n\nOrdinary review facade; repository scope, authority, canonical artifacts, and lifecycle transitions are derived by Go. Use review retry-final-verification only for a provider-proven completed failed final-verification tooling incident. Generic review recover remains unchanged. Use review repair --preflight for provider-owned classified authority repair; repair-legacy-alias is compatibility-only.")
-		_, _ = fmt.Fprintln(stdout, "Additive headless capabilities: gentle-ai review capture-result (with --preflight) and gentle-ai review preserve-result.")
+		_, _ = fmt.Fprintln(stdout, "Usage: gentle-ai review <capabilities|start|finalize|validate|status|repair|invalidate|abandon|recover|retry-final-verification|reclaim|inspect-authority|inspect-candidate|reconcile-authority|reconcile-authority-batch|dispose-result|reopen-results|quarantine-legacy|quarantine-legacy-fix-scope|repair-legacy-alias|schema|bind-sdd> [flags]\n\nOrdinary review facade; repository scope, authority, canonical artifacts, and lifecycle transitions are derived by Go. Use review retry-final-verification only for a provider-proven completed failed final-verification tooling incident. Generic review recover remains unchanged. Use review repair --preflight for provider-owned classified authority repair; repair-legacy-alias is compatibility-only.")
+		_, _ = fmt.Fprintln(stdout, "Additive headless capabilities: gentle-ai review capture-result (with --preflight), gentle-ai review inspect-candidate, and gentle-ai review preserve-result.")
 		return nil
 	}
 	operation, negotiated, preflightFailure := reviewIntegrationFailureRoute(args)
@@ -647,6 +647,8 @@ func runReviewCommand(args []string, stdout io.Writer) error {
 	switch args[0] {
 	case "capture-result":
 		return RunReviewCaptureResult(args[1:], stdout)
+	case "inspect-candidate":
+		return RunReviewInspectCandidate(args[1:], stdout)
 	case "capture-evidence":
 		return RunReviewCaptureEvidence(args[1:], stdout)
 	case "preserve-result":
@@ -926,7 +928,11 @@ func runReviewStatus(ctx context.Context, args []string, stdout io.Writer) error
 	if strings.TrimSpace(*lineage) != "" || strings.TrimSpace(*baseRef) != "" || strings.TrimSpace(*baseTree) != "" || *workspaceOverlay || *projection != string(reviewtransaction.ProjectionWorkspace) || *gate != string(reviewtransaction.GatePreCommit) || *recoverySuccessor != "" || *recoveryReason != "" || *recoveryActor != "" || *recoveryAuthorization != "" || *repairActor != "" || *repairReason != "" || *repairAuthorization != "" {
 		return errors.New(reviewStatusTargetSelectorsRequireContractReason)
 	}
-	report, err := reviewtransaction.InventoryAuthority(ctx, *cwd)
+	root, err := (reviewtransaction.SnapshotBuilder{Repo: *cwd}).ResolveRepositoryRoot(ctx)
+	if err != nil {
+		return fmt.Errorf("resolve review repository root: %w", err)
+	}
+	report, err := reviewtransaction.InventoryAuthority(ctx, root)
 	if err != nil {
 		return fmt.Errorf("inventory review authority: %w", err)
 	}
@@ -1494,9 +1500,9 @@ func runReviewFacadeStart(ctx context.Context, args []string, stdout io.Writer) 
 		return err
 	}
 	// The candidate is frozen and the tier is classified, so this is the one
-	// point where the kill switch can stop a start and the one-time question can
-	// name the real reason. Nothing has been persisted yet, so refusing here
-	// leaves no authority behind.
+	// point where the kill switch can stop a start and consent can name the real
+	// reason. Nothing has been persisted yet, so refusing here leaves no
+	// authority behind.
 	if err := authorizeReviewStart(ctx, root, assessment, consentMode); err != nil {
 		if errors.Is(err, errReviewConsentQuestionRequired) {
 			// The caller declared it can relay a blocking question, so the
@@ -2743,7 +2749,7 @@ func runReviewFacadeValidate(ctx context.Context, args []string, stdout io.Write
 		}
 	}
 	// The kill switch is consulted BEFORE the negotiation branch and for every
-	// discovery outcome. While reviews are off, review-driven development does
+	// discovery outcome. While reviews are off, receipt-driven development does
 	// not exist, so nothing it discovered — a missing receipt, a stale one, an
 	// unresolvable target, competing authority, or a damaged inventory — governs
 	// this candidate, and the gate reports rather than vetoes. It never
@@ -3696,7 +3702,7 @@ func rejectFacadeCorrectionUntracked(ctx context.Context, repo string, state rev
 
 // reviewDisabledUnmanagedReason is the shipped disposition sentence, unchanged
 // for every discovery outcome that already reported disabled/unmanaged.
-const reviewDisabledUnmanagedReason = "review-driven development is disabled and no receipt governs this candidate, so delivery follows ordinary repository policy"
+const reviewDisabledUnmanagedReason = "receipt-driven development is disabled and no receipt governs this candidate, so delivery follows ordinary repository policy"
 
 // reviewEmptyPublicationRangeReason states what the empty-range allow does and
 // does not mean. It is an allow because there is no delivery to gate, never

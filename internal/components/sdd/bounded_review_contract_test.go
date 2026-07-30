@@ -15,7 +15,11 @@ var boundedReviewRequiredClauses = []string{
 	"gentle-ai review status --cwd <repo> --contract gentle-ai.review-integration/v2 --next-transition",
 	"route only from the returned `next_transition`",
 	"exact operation and ordered argument tokens unchanged",
-	"exact `review.capture-result` collection input once in the foreground",
+	"exact `review.capture-result` collection input once per provider-returned collection attempt",
+	"After empty, malformed, schema-invalid, access/provider failure, or incomplete inspection, query negotiated STATUS again",
+	"fresh `next_transition` reoffers the exact same bound slot",
+	"If STATUS discovers a committed capture, continue without relaunching",
+	"Never infer a retry from transcript or error text alone",
 	"exact literal prefix `GENTLE_AI_REVIEW_BINDING `",
 	"including the trailing space and never `=`",
 	"These are the prompt's first bytes",
@@ -34,6 +38,14 @@ var boundedReviewRequiredClauses = []string{
 	"four reviewer model runs",
 	"typed `gentle-ai.review-integration.consent/v2` envelope",
 	"Lossless Blocking Prompt",
+	"Global RDD enabled permits reviews; it never grants consent for this candidate",
+	"Low-risk structural readback remains silent and asks no consent question",
+	"active conversation language",
+	"one narrow localization exception to the no-relabeling rule",
+	"original groups/order, selection mode, exact allowed-answer domain, and answer tokens",
+	"Project `value` as explicit benefits and every `effect` as explicit consequences",
+	"Never translate or alter machine answer tokens (`granted`, `declined`), commands, target IDs, or invocations",
+	"map the selected label back exactly once to the corresponding original answer token and exact invocation",
 	"not the kill switch",
 	"one correction transaction",
 	"positive forecast before editing",
@@ -53,6 +65,20 @@ var boundedReviewRequiredClauses = []string{
 	"Existing transaction, policy, ledger, receipt, bundle, and gate-context schemas",
 	"exact returned `review.validate`",
 	"Model/provider/profile selection remains user-owned",
+}
+
+func TestBoundedReviewConsentLocalizationPreservesMachineDomain(t *testing.T) {
+	content := boundedReviewContract()
+	for _, want := range []string{
+		"faithfully translate the headline, reason, `value`, risk evidence, choice labels, every choice `effect`, and the off-path note",
+		"Project `value` as explicit benefits and every `effect` as explicit consequences; labels alone are forbidden",
+		"Never translate or alter machine answer tokens (`granted`, `declined`), commands, target IDs, or invocations",
+		"map the selected label back exactly once to the corresponding original answer token and exact invocation",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("orchestrator contract missing localized consent rule %q", want)
+		}
+	}
 }
 
 func TestBoundedReviewContractRequiresProviderOwnedReviewerContext(t *testing.T) {
@@ -209,7 +235,7 @@ func TestRenderedReviewersAreReadOnlyAndSingleResult(t *testing.T) {
 			path := family + "/agents/review-" + lens + ".md"
 			t.Run(family+"/"+lens, func(t *testing.T) {
 				content := renderBoundedReviewAsset(path)
-				for _, want := range []string{"Review once", "GENTLE_AI_REVIEW_CONTEXT", "sole source of artifact_subject", "changed_path_manifest", "base_tree", "candidate_tree", "env -i", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_ATTR_NOSYSTEM=1", "--no-replace-objects", "diff --name-status --text --no-ext-diff --no-textconv --no-renames", "diff --numstat --text --no-ext-diff --no-textconv --no-renames", "diff --patch --text --full-index --no-color --no-renames --no-ext-diff --no-textconv --diff-algorithm=myers --no-indent-heuristic --unified=3", "cat-file -p '<tree>:<path>'", ":(literal)<path>", "never pass --binary", "attributes must never suppress a hunk", "incomplete inspection", "Never read the live worktree", "## Candidate-Causal Admission", "Return one JSON object and no prose", `"subject_hash":"<artifact_subject.subject_hash>"`, "GENTLE_AI_REVIEW_BINDING.subject_hash", `"inspection":{"status":"completed","paths":["<every changed_path_manifest.path in exact order>"]}`, "lens triage", "Emit no unknown fields"} {
+				for _, want := range []string{"Review once", "GENTLE_AI_REVIEW_CONTEXT", "sole source of artifact_subject", "changed_path_manifest", "base_tree", "candidate_tree", "gentle-ai review inspect-candidate", "--operation name-status", "--operation numstat", "--operation stat --path-index", "--operation patch --path-index", "--operation object --path-index", "--side base", "--side candidate", "provider binding", "zero-based changed_path_manifest index", "never pass --binary", "incomplete inspection", "Never read the live worktree", "## Candidate-Causal Admission", "Return one JSON object and no prose", `"subject_hash":"<artifact_subject.subject_hash>"`, "GENTLE_AI_REVIEW_BINDING.subject_hash", `"inspection":{"status":"completed","paths":["<every changed_path_manifest.path in exact order>"]}`, "lens triage", "Emit no unknown fields"} {
 					if !strings.Contains(content, want) {
 						t.Errorf("%s missing %q", path, want)
 					}

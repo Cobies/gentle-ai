@@ -346,10 +346,24 @@ func TestBuildStagedWorkspaceOverlayRecoveryUsesOnlyTheRealIndex(t *testing.T) {
 		len(snapshot.IntendedUntracked) != 0 || len(snapshot.LedgerIDs) != 0 {
 		t.Fatalf("staged recovery snapshot = %#v", snapshot)
 	}
-	for _, path := range []string{"tracked.txt", "untracked.txt"} {
-		if gitSnapshotSucceeds(repo, "cat-file", "-e", snapshot.CandidateTree+":"+path) && path == "untracked.txt" {
-			t.Fatalf("staged recovery snapshot included %s", path)
-		}
+	if got := gitSnapshot(t, repo, "show", snapshot.CandidateTree+":reviewed.txt"); got != "reviewed\n" {
+		t.Fatalf("staged recovery snapshot reviewed.txt = %q, want authorized staged bytes", got)
+	}
+	if got := gitSnapshot(t, repo, "show", snapshot.CandidateTree+":tracked.txt"); got != "base\n" {
+		t.Fatalf("staged recovery snapshot tracked.txt = %q, want base index bytes", got)
+	}
+	if gitSnapshotSucceeds(repo, "cat-file", "-e", snapshot.CandidateTree+":untracked.txt") {
+		t.Fatal("staged recovery snapshot included unrelated untracked.txt")
+	}
+
+	writeSnapshotFile(t, repo, "tracked.txt", "more unstaged\n")
+	writeSnapshotFile(t, repo, "untracked.txt", "more untracked\n")
+	rebuilt, err := builder.BuildStagedWorkspaceOverlayRecovery(context.Background(), target)
+	if err != nil {
+		t.Fatalf("rebuild staged recovery snapshot: %v", err)
+	}
+	if rebuilt.CandidateTree != snapshot.CandidateTree || rebuilt.Identity != snapshot.Identity {
+		t.Fatalf("staged recovery identity changed with only worktree bytes: before=%#v after=%#v", snapshot, rebuilt)
 	}
 	if afterIndex := gitSnapshot(t, repo, "diff", "--cached", "--binary"); afterIndex != beforeIndex {
 		t.Fatal("staged recovery snapshot mutated the real index")
@@ -1600,7 +1614,13 @@ func initSnapshotRepo(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("snapshot repo template: %v", err)
 	}
-	repo := t.TempDir()
+	// canonicalTempDir, not t.TempDir: every production resolver answers with
+	// the resolved spelling, so a fixture that keeps the raw one compares
+	// unequal to its own repository. On a Windows runner TEMP is reached
+	// through an 8.3 short name and the raw path says RUNNER~1 where the
+	// resolver correctly says runneradmin; on Darwin the same gap appears as
+	// /var versus /private/var.
+	repo := canonicalTempDir(t)
 	if err := os.CopyFS(repo, os.DirFS(template)); err != nil {
 		t.Fatalf("CopyFS(snapshot repo template): %v", err)
 	}
