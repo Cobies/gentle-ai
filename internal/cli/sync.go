@@ -561,6 +561,13 @@ func syncBackupTargets(homeDir, workspaceDir string, selection model.Selection, 
 		for _, path := range syncComponentPathsWithWorkspace(homeDir, workspaceDir, selection, adapters, component) {
 			paths[path] = struct{}{}
 		}
+		if component == model.ComponentEngram {
+			for _, adapter := range adapters {
+				if adapter.Agent() == model.AgentClaudeCode {
+					paths[adapter.MCPConfigPath(homeDir, "engram")] = struct{}{}
+				}
+			}
+		}
 	}
 	// Routing guidance is refreshed per agent outside the component loop, at
 	// ScopeGlobal like the step itself. A persisted selection whose components
@@ -1350,8 +1357,9 @@ func RunSyncWithSelection(homeDir string, selection model.Selection) (SyncResult
 		pipeline.WithFailurePolicy(pipeline.ContinueOnError),
 	)
 	result.Execution = orchestrator.Execute(stagePlan)
-	if result.Execution.Prepare.Err != nil {
-		return result, fmt.Errorf("execute sync pipeline prepare: %w", result.Execution.Prepare.Err)
+	rt.state.cleanupRollbackSnapshot()
+	if result.Execution.Err != nil {
+		return result, fmt.Errorf("execute sync pipeline: %w", result.Execution.Err)
 	}
 
 	// Capture how many managed assets were actually changed.
