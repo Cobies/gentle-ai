@@ -511,7 +511,7 @@ func TestStartCompactAuthorityRunsBeforeCreateGuardOnlyAtNewAuthorityBoundary(t 
 	}
 }
 
-func TestStartCompactAuthorityKeepsStagedAndWorkspaceAuthoritiesDistinct(t *testing.T) {
+func TestStartCompactAuthorityReusesContentEquivalentStagedAndWorkspaceAuthority(t *testing.T) {
 	repo := initSnapshotRepo(t)
 	writeSnapshotFile(t, repo, "tracked.txt", "candidate\n")
 	gitSnapshot(t, repo, "add", "--", "tracked.txt")
@@ -523,9 +523,9 @@ func TestStartCompactAuthorityKeepsStagedAndWorkspaceAuthoritiesDistinct(t *test
 	}
 	storeCompactStartAuthority(t, repo, staged)
 
-	created, err := StartCompactAuthority(context.Background(), repo, CompactStartRequest{State: workspace})
-	if err != nil || created.Action != CompactStartCreated || created.Record.State.LineageID != workspace.LineageID {
-		t.Fatalf("workspace start against staged authority = %#v, %v", created, err)
+	reused, err := StartCompactAuthority(context.Background(), repo, CompactStartRequest{State: workspace})
+	if err != nil || reused.Action != CompactStartResumed || reused.Record.State.LineageID != staged.LineageID {
+		t.Fatalf("workspace start against staged authority = %#v, %v", reused, err)
 	}
 	replayed, err := StartCompactAuthority(context.Background(), repo, CompactStartRequest{State: staged})
 	if err != nil || replayed.Action != CompactStartResumed || replayed.Record.State.LineageID != staged.LineageID {
@@ -533,7 +533,7 @@ func TestStartCompactAuthorityKeepsStagedAndWorkspaceAuthoritiesDistinct(t *test
 	}
 }
 
-func TestStartCompactAuthoritySelectsProjectionSpecificBaseDiffAuthorityAfterCommit(t *testing.T) {
+func TestStartCompactAuthorityRejectsAmbiguousProjectionCompatibleBaseDiffAuthorityAfterCommit(t *testing.T) {
 	repo := initSnapshotRepo(t)
 	base := strings.TrimSpace(gitSnapshot(t, repo, "rev-parse", "HEAD"))
 	writeSnapshotFile(t, repo, "tracked.txt", "candidate\n")
@@ -551,16 +551,15 @@ func TestStartCompactAuthoritySelectsProjectionSpecificBaseDiffAuthorityAfterCom
 	for _, tt := range []struct {
 		name       string
 		projection Projection
-		want       string
 	}{
-		{name: "staged", projection: ProjectionStaged, want: staged.LineageID},
-		{name: "workspace", projection: ProjectionWorkspace, want: workspace.LineageID},
+		{name: "staged", projection: ProjectionStaged},
+		{name: "workspace", projection: ProjectionWorkspace},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			requested := newCompactStartStateForTarget(t, repo, "compact-start-"+tt.name+"-base-request", Target{Kind: TargetBaseDiff, Projection: tt.projection, BaseRef: base, IntendedUntracked: []string{}})
 			result, err := StartCompactAuthority(context.Background(), repo, CompactStartRequest{State: requested})
-			if err != nil || result.Action != CompactStartResumed || result.Record.State.LineageID != tt.want {
-				t.Fatalf("%s base-diff authority selection = %#v, %v", tt.name, result, err)
+			if err != nil || result.Action != CompactStartBlocked {
+				t.Fatalf("%s ambiguous base-diff authority = %#v, %v", tt.name, result, err)
 			}
 		})
 	}
@@ -2742,6 +2741,39 @@ func newCompactStartStateForTarget(t *testing.T, repo, lineage string, target Ta
 		t.Fatal(err)
 	}
 	return state
+}
+
+func TestCompactCorrectionRemainingBudget(t *testing.T) {
+	tests := []struct {
+		name       string
+		budget     int
+		cumulative int
+		want       int
+		wantErr    bool
+	}{
+		{name: "unspent", budget: 2, want: 2},
+		{name: "partially spent", budget: 5, cumulative: 2, want: 3},
+		{name: "exhausted", budget: 2, cumulative: 2},
+		{name: "cumulative exceeds budget", budget: 2, cumulative: 3, wantErr: true},
+		{name: "negative cumulative", budget: 2, cumulative: -1, wantErr: true},
+		{name: "negative budget", budget: -1, wantErr: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			remaining, err := compactCorrectionRemainingBudget(CompactState{
+				CorrectionBudget: test.budget, CumulativeCorrectionLines: test.cumulative,
+			})
+			if test.wantErr {
+				if err == nil {
+					t.Fatal("remaining budget accepted invalid accounting")
+				}
+				return
+			}
+			if err != nil || remaining != test.want {
+				t.Fatalf("remaining budget = %d, %v; want %d, nil", remaining, err, test.want)
+			}
+		})
+	}
 }
 
 func newCompactTestState(t *testing.T, repo, lineage string) CompactState {

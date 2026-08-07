@@ -459,6 +459,10 @@ func newSyncRuntime(homeDir string, selection model.Selection) (*syncRuntime, er
 	backupRoot := filepath.Join(homeDir, ".gentle-ai", "backups")
 	workspaceDir, _ := os.Getwd()
 	workspaceDir = resolveOpenClawWorkspaceDir(homeDir, workspaceDir, selection.Agents)
+	compatibilityTransaction, err := newCompatibilityRefreshTransaction(homeDir, selection.Components, selection)
+	if err != nil {
+		return nil, err
+	}
 
 	return &syncRuntime{
 		homeDir:      homeDir,
@@ -466,7 +470,7 @@ func newSyncRuntime(homeDir string, selection model.Selection) (*syncRuntime, er
 		selection:    selection,
 		agentIDs:     selection.Agents,
 		backupRoot:   backupRoot,
-		state:        &runtimeState{},
+		state:        &runtimeState{compatibilityTransaction: compatibilityTransaction},
 	}, nil
 }
 
@@ -512,6 +516,8 @@ func (r *syncRuntime) stagePlan() pipeline.StagePlan {
 			components:   r.selection.Components,
 			selection:    r.selection,
 			changedFiles: &r.changedFiles,
+			transaction:  r.state.compatibilityTransaction,
+			anchored:     usesAnchoredCompatibilityTransaction(),
 		})
 	}
 
@@ -605,7 +611,7 @@ func syncBackupTargets(homeDir, workspaceDir string, selection model.Selection, 
 	for _, path := range adapterSkillPaths {
 		paths[path] = struct{}{}
 	}
-	if needsCompatibilitySkillsRefresh(selection.Components) {
+	if !usesAnchoredCompatibilityTransaction() && needsCompatibilitySkillsRefresh(selection.Components) {
 		skillDir, ok, err := compatibilitySkillsDir(homeDir)
 		if err != nil {
 			return nil, err
@@ -1406,6 +1412,7 @@ func RunSyncWithSelection(homeDir string, selection model.Selection) (SyncResult
 	if err != nil {
 		return result, err
 	}
+	defer rt.state.cleanupCompatibilityTransaction()
 
 	stagePlan := rt.stagePlan()
 	result.Plan = stagePlan
@@ -1419,6 +1426,7 @@ func RunSyncWithSelection(homeDir string, selection model.Selection) (SyncResult
 		pipeline.WithFailurePolicy(pipeline.ContinueOnError),
 	)
 	result.Execution = orchestrator.Execute(stagePlan)
+	compatibilityChanged := rt.state.compatibilityChangedFiles()
 	rt.state.cleanupRollbackSnapshot()
 	if result.Execution.Err != nil {
 		return result, fmt.Errorf("execute sync pipeline: %w", result.Execution.Err)
@@ -1431,6 +1439,7 @@ func RunSyncWithSelection(homeDir string, selection model.Selection) (SyncResult
 	if err != nil {
 		return result, err
 	}
+	result.ChangedFiles = dedupPaths(append(result.ChangedFiles, compatibilityChanged...))
 	result.FilesChanged = len(result.ChangedFiles)
 
 	// True no-op: agents were discovered but all managed assets were already
@@ -1583,6 +1592,7 @@ func RunSync(args []string) (SyncResult, error) {
 		if err != nil {
 			return result, err
 		}
+		defer rt.state.cleanupCompatibilityTransaction()
 		result.Plan = rt.stagePlan()
 		for _, step := range result.Plan.Prepare {
 			if prepare, ok := step.(prepareBackupStep); ok && prepare.targetErr != nil {

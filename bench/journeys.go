@@ -516,9 +516,13 @@ func Journeys() []Journey {
 	journeys := append(coreJourneys(), edgeJourneys()...)
 	journeys = append(journeys, sddJourneys()...)
 	journeys = append(journeys, sddChainJourneys()...)
+	journeys = append(journeys, captureEvidenceDescriptorJourneys()...)
 	journeys = append(journeys, waveOneJourneys()...)
 	journeys = append(journeys, waveThreeJourneys()...)
-	return append(journeys, waveFiveJourneys()...)
+	journeys = append(journeys, waveFiveJourneys()...)
+	journeys = append(journeys, advisoryJourneys()...)
+	journeys = append(journeys, zeroDeltaJourneys()...)
+	return append(journeys, localGateBaseAdvanceJourneys()...)
 }
 
 func coreJourneys() []Journey {

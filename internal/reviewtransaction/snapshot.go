@@ -772,6 +772,85 @@ func (builder SnapshotBuilder) HasDirtyTrackedChanges(ctx context.Context) (bool
 	return len(output) != 0, nil
 }
 
+func (builder SnapshotBuilder) WorktreeClean(ctx context.Context) (bool, error) {
+	root, err := builder.ResolveRepositoryRoot(ctx)
+	if err != nil {
+		return false, err
+	}
+	output, err := runGit(ctx, root, nil, nil, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+	if err != nil {
+		return false, err
+	}
+	return len(output) == 0, nil
+}
+
+// RebuildCommittedBaseDiffCorrectionCandidate derives a committed correction
+// from the immutable initial boundary, never from the mutable original ref.
+func RebuildCommittedBaseDiffCorrectionCandidate(ctx context.Context, repo string, state CompactState) (Snapshot, error) {
+	if err := state.Validate(); err != nil {
+		return Snapshot{}, fmt.Errorf("validate committed correction authority: %w", err)
+	}
+	initial := state.InitialSnapshot
+	if state.State != StateCorrectionRequired || state.ProposedCorrectionLines == nil || state.CorrectionAttemptConsumed() || initial.Kind != TargetBaseDiff {
+		return Snapshot{}, errors.New("committed correction reconstruction is not eligible") // refusal:by-design world-action: only an open committed correction can rebuild its frozen boundary
+	}
+	builder := SnapshotBuilder{Repo: repo}
+	clean, err := builder.WorktreeClean(ctx)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if !clean {
+		return Snapshot{}, errors.New("committed correction reconstruction requires a clean worktree") // refusal:by-design world-action: commit or discard workspace changes before recovering a committed-only correction
+	}
+	projection, err := canonicalProjection(initial.Projection)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	live, err := builder.BuildStoredSnapshot(ctx, Target{
+		Kind: TargetBaseDiff, Projection: projection, BaseRef: initial.BaseTree,
+		IntendedUntracked: append([]string(nil), initial.IntendedUntracked...),
+	})
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if err := builder.ValidateEvidence(ctx, live); err != nil {
+		return Snapshot{}, fmt.Errorf("validate rebuilt committed correction: %w", err)
+	}
+	if live.UnbornHead != initial.UnbornHead || live.BaseTree != initial.BaseTree || live.Projection != projection ||
+		!equalStrings(live.IntendedUntracked, initial.IntendedUntracked) || live.IntendedUntrackedProof != initial.IntendedUntrackedProof {
+		return Snapshot{}, errors.New("committed correction reconstruction does not match frozen authority") // refusal:by-design world-action: repository history must match the immutable authority before correction routing can continue
+	}
+	if err := pathsAreSubset(live.Paths, state.GenesisPaths); err != nil {
+		return Snapshot{}, fmt.Errorf("committed correction exceeds frozen genesis paths: %w", err)
+	}
+	intended := append([]string(nil), initial.IntendedUntracked...)
+	if intended == nil {
+		intended = []string{}
+	}
+	fix, err := builder.Build(ctx, Target{
+		Kind: TargetFixDiff, Projection: projection, BaseRef: state.CurrentSnapshot.CandidateTree,
+		IntendedUntracked: intended, LedgerIDs: append([]string(nil), state.FixFindingIDs...),
+	})
+	if err != nil {
+		return Snapshot{}, fmt.Errorf("rebuild committed correction delta: %w", err)
+	}
+	if fix.CandidateTree != live.CandidateTree {
+		return Snapshot{}, fmt.Errorf("%w: rebuilt committed correction candidate changed while measuring", ErrConcurrentUpdate)
+	}
+	remaining, err := compactCorrectionRemainingBudget(state)
+	if err != nil {
+		return Snapshot{}, fmt.Errorf("derive rebuilt committed correction remaining budget: %w", err)
+	}
+	actual, err := builder.ChangedLines(ctx, fix)
+	if err != nil {
+		return Snapshot{}, fmt.Errorf("measure rebuilt committed correction: %w", err)
+	}
+	if actual > remaining {
+		return Snapshot{}, fmt.Errorf("rebuild committed correction: %w", &CorrectionBudgetExceededError{Actual: actual, Remaining: remaining})
+	}
+	return live, nil
+}
+
 func canonicalRepositoryPath(path string) (string, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
@@ -1352,23 +1431,36 @@ func snapshotIdentity(kind TargetKind, baseTree, candidateTree, pathsDigest, pro
 	return snapshotIdentityForProjection(kind, "", baseTree, candidateTree, pathsDigest, proof, intended, ledgerIDs)
 }
 
+// snapshotIdentityForProjection mints the purified, content-addressed
+// identity domain (issue #2659, root 21 of #2471): a domain-separation tag
+// for kind/projection, then baseTree, candidateTree, pathsDigest, and
+// ledgerIDs. proof and intended are deliberately NOT part of this hash: they
+// describe HOW the candidate bytes were declared (a staged path vs. a
+// declared intended-untracked path), not WHAT those bytes are, so folding
+// them into identity let two byte-identical candidates carry different
+// identities. Maintainer decision D1 (recorded in #2471) keeps the
+// untracked-replay proof alive as SIDE-BAND evidence only -- still consumed
+// by BuildStagedWorkspaceOverlayRecovery and BuildCorrectedCandidate for
+// replay validation -- so the parameters stay for call-site compatibility
+// but are intentionally unused here.
+//
+// kind and projection stay in the hash domain on purpose: they are the
+// load-bearing separation that keeps a current-changes receipt from being
+// recognized as a base-workspace-overlay review of identical bytes.
 func snapshotIdentityForProjection(kind TargetKind, projection Projection, baseTree, candidateTree, pathsDigest, proof string, intended, ledgerIDs []string) string {
 	hash := sha256.New()
 	if kind == TargetBaseWorkspaceOverlay {
-		hash.Write([]byte("gentle-ai.review-snapshot/base-workspace-overlay/v1\x00"))
+		hash.Write([]byte("gentle-ai.review-snapshot/base-workspace-overlay/v2\x00"))
 	} else if projection == ProjectionStaged {
-		hash.Write([]byte("gentle-ai.review-snapshot/v2\x00"))
+		hash.Write([]byte("gentle-ai.review-snapshot/v4\x00"))
 	} else {
-		hash.Write([]byte("gentle-ai.review-snapshot/v1\x00"))
+		hash.Write([]byte("gentle-ai.review-snapshot/v3\x00"))
 	}
-	values := []string{string(kind), baseTree, candidateTree, pathsDigest, proof}
+	values := []string{string(kind), baseTree, candidateTree, pathsDigest}
 	if projection == ProjectionStaged {
-		values = []string{string(kind), string(projection), baseTree, candidateTree, pathsDigest, proof}
+		values = []string{string(kind), string(projection), baseTree, candidateTree, pathsDigest}
 	}
 	for _, value := range values {
-		writeLengthPrefixed(hash, []byte(value))
-	}
-	for _, value := range intended {
 		writeLengthPrefixed(hash, []byte(value))
 	}
 	for _, value := range ledgerIDs {
