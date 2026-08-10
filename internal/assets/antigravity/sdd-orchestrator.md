@@ -66,6 +66,12 @@ Do not execute SDD phase work in the orchestrator thread except for trivial rout
 
 All phase-execution commands (specifically `/sdd-init`, `/sdd-explore`, `/sdd-apply`, `/sdd-verify`, `/sdd-archive`, `/sdd-onboard`, and planning phases triggered during `/sdd-new`, `/sdd-continue`, or `/sdd-ff`) MUST be executed by defining and invoking the corresponding dynamic subagent (`sdd-init`, `sdd-explore`, `sdd-apply`, `sdd-verify`, `sdd-archive`, `sdd-onboard`, `sdd-propose`, `sdd-spec`, `sdd-design`, `sdd-tasks`). The orchestrator itself MUST NOT perform the execution, code writing, or analysis for these commands/phases inline in the parent thread.
 
+### Strict Phase Boundaries & Non-Compression Contract (MANDATORY)
+
+- **Do NOT fold planning phases into `sdd-explore`**: `sdd-explore` is strictly for reading/mapping the codebase. It MUST NOT write proposals, specifications, design documents, or task lists.
+- **Mandatory Sequential Delegation**: `sdd-init` MUST be invoked to initialize the change identity; `sdd-propose` MUST be invoked to create the proposal artifact; `sdd-spec` MUST be invoked to write the specification artifact; `sdd-design` MUST be invoked to write the design artifact; and `sdd-tasks` MUST be invoked to write the task DAG.
+- **No Inline or Compressed Planning**: Combining, skipping, or collapsing these distinct dynamic subagent invocations into `sdd-explore` or into the orchestrator thread is strictly prohibited and constitutes a contract failure.
+
 ### Robust Dynamic Execution & Linguistic Mapping (HARD CONTRACT)
 
 Regardless of the language (English, Spanish, etc.) or phrasing used by the user, the orchestrator MUST treat any request for execution, implementation, planning, analysis, or testing as a trigger for dynamic subagent delegation:
