@@ -70,6 +70,8 @@ const antigravitySddAgentsHardeningMessage = "Gentle AI SDD/Review/JD hardening 
 	"sdd-apply is prohibited from editing production files without first writing or modifying test files and running the test runner to observe test failure (Red phase). " +
 	"sdd-verify must run tests to verify behavior and is prohibited from editing source code. " +
 	"Any attempt to bypass the TDD Red-Green-Refactor sequence must fail closed. " +
+	"Dynamic subagent definition skill contract: Every define_subagent call MUST read the phase skill file (.agents/skills/{phase}/SKILL.md or ~/.gemini/antigravity-cli/skills/{phase}/SKILL.md) and pass its full content as the system_prompt parameter. Defining subagents with generic or empty system prompts is strictly prohibited. " +
+	"Engram memory contract: Both the orchestrator and dynamic subagents MUST use Engram (mem_save, mem_search, mem_get_observation) as the primary memory persistence and artifact store under topic keys sdd/{change-name}/{artifact}. " +
 	"Any define_subagent call that tries to widen its tool scope above the allowed scope for that role MUST fail closed and surface status: blocked with the missing capability. " +
 	"Dynamic sub-agents MUST NOT use broad repository search (grep -R, find sweeps, full-tree reads) until CodeGraph has failed or returned insufficient results. " +
 	"Web/internet search is denied by default for code implementation, review, and verification phases unless the task explicitly requires external research."
@@ -221,6 +223,8 @@ var antigravitySddAgentsHardeningContractPhrases = []string{
 	"review-resilience",
 	"jd-judge-a",
 	"jd-judge-b",
+	"Dynamic subagent definition skill contract",
+	"Engram memory contract",
 }
 
 // antigravitySddAgentsHardeningContractForbids is the set of substrings the
