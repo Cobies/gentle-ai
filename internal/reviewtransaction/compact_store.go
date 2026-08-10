@@ -349,11 +349,14 @@ func RecoverCompactAuthority(ctx context.Context, repo string, request CompactRe
 			importCompactRecoveredEvidence(&request.Successor, predecessor.State, evidence)
 		}
 	}
-	stores, err := DiscoverCompactStores(ctx, repo)
+	// The recovery graph is scoped the same way every other authority walk is
+	// (#2495, finished here for #2741/#2743): a foreign record nobody can read
+	// is ABSENT from the graph, never a repository-wide refusal issued to a
+	// healthy, unrelated recovery. scanCompactAuthority still propagates
+	// operational failures, and the predecessor's own readability was already
+	// proven by its explicit load above.
+	scan, err := scanCompactAuthority(ctx, repo)
 	if err != nil {
-		return CompactRecord{}, err
-	}
-	if _, err := CompactAuthorityLeaves(ctx, repo); err != nil {
 		return CompactRecord{}, err
 	}
 	if existingErr == nil {
@@ -362,11 +365,7 @@ func RecoverCompactAuthority(ctx context.Context, repo string, request CompactRe
 		}
 		return CompactRecord{}, errors.New("recovery successor lineage already exists with different authority")
 	}
-	for _, store := range stores {
-		record, loadErr := store.Load()
-		if loadErr != nil {
-			return CompactRecord{}, fmt.Errorf("validate recovery graph: %w", loadErr)
-		}
+	for _, record := range scan.records {
 		if record.State.Recovery != nil && record.State.Recovery.PredecessorLineageID == request.PredecessorLineageID {
 			return CompactRecord{}, errors.New("recovery predecessor already has successor")
 		}
@@ -1477,7 +1476,7 @@ func compactApprovedScopeChangedRecovery(existing CompactState, live Snapshot) b
 func compactApprovedRebasedScopeRecovery(ctx context.Context, repo string, existing CompactState, live Snapshot) (bool, error) {
 	original, approved := existing.InitialSnapshot, existing.CurrentSnapshot
 	if existing.State != StateApproved || original.Kind != TargetCurrentChanges || approved.Kind != TargetCurrentChanges ||
-		live.Kind != TargetBaseDiff || !sameRecoveryProjection(original.Projection, live.Projection) ||
+		live.Kind != TargetBaseDiff || !sameApprovedRebasedRecoveryProjection(original.Projection, live.Projection) ||
 		original.BaseTree != approved.BaseTree || original.BaseTree == live.BaseTree ||
 		approved.CandidateTree == live.CandidateTree || approved.Identity == live.Identity ||
 		len(existing.GenesisPaths) == 0 || !equalStrings(approved.Paths, existing.GenesisPaths) ||
@@ -1520,6 +1519,17 @@ func compactApprovedRebasedScopeRecovery(ctx context.Context, repo string, exist
 		return false, fmt.Errorf("derive live rebased patch identity: %w", err)
 	}
 	return originalPatch == livePatch, nil
+}
+
+// A base-diff has no index-backed staged execution mode. STATUS therefore
+// projects this narrow approved staged-current-changes rebase to its executable
+// committed-only base-diff form before identity derivation. No other mixed
+// projection is admitted here.
+func sameApprovedRebasedRecoveryProjection(original, live Projection) bool {
+	if live == "" {
+		live = ProjectionWorkspace
+	}
+	return sameRecoveryProjection(original, live) || original == ProjectionStaged && live == ProjectionWorkspace
 }
 
 // compactStartDeliveryScopeMatches compares the immutable delivery boundary
@@ -2044,7 +2054,7 @@ func validateCompactSuccessor(previousRevision string, previous, next CompactSta
 		!snapshotsEqual(previous.InitialSnapshot, next.InitialSnapshot) || !equalStrings(previous.GenesisPaths, next.GenesisPaths) ||
 		previous.PolicyHash != next.PolicyHash || previous.RiskLevel != next.RiskLevel ||
 		!equalStrings(previous.SelectedLenses, next.SelectedLenses) || previous.OriginalChangedLines != next.OriginalChangedLines ||
-		previous.CorrectionBudget != next.CorrectionBudget {
+		previous.CorrectionBudget != next.CorrectionBudget || previous.CorrectionBudgetPolicy != next.CorrectionBudgetPolicy {
 		return fmt.Errorf("%w: compact review scope, tier, policy, and budget are immutable", ErrInvalidSuccessor)
 	}
 	switch operation {
@@ -2245,7 +2255,8 @@ func parseCompactRecord(payload []byte, lineageID string) (CompactRecord, error)
 		return CompactRecord{}, errors.New("invalid compact review state record")
 	}
 	if err := record.State.Validate(); err != nil {
-		return CompactRecord{}, &CompactSemanticStateError{LineageID: record.State.LineageID, State: record.State.State, Problem: err.Error()}
+		return CompactRecord{}, &CompactSemanticStateError{LineageID: record.State.LineageID, State: record.State.State, Problem: err.Error(),
+			OutdatedIdentity: errors.Is(err, errCompactSnapshotIdentityMismatch)}
 	}
 	if lineageID != "" && record.State.LineageID != lineageID {
 		return CompactRecord{}, errors.New("compact state lineage does not match its directory")

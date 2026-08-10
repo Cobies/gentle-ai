@@ -96,6 +96,10 @@ type CompactSettleRequest struct {
 	RemediatesEvidenceRevision string
 }
 
+type CompactHandoffRequest struct {
+	HandoffAttemptRequest
+}
+
 // runtimeReadinessInput is everything the one readiness predicate reads. It
 // carries the whole AttemptTokens map rather than a pre-resolved token so the
 // predicate stays the only code that inspects the readiness triple; a caller
@@ -181,12 +185,12 @@ func (store RuntimeStore) Acquire(ctx context.Context, request CompactAcquireReq
 
 	replay, err := store.load()
 	if err != nil {
-		return compactBlocked(CompactBlockCorruptAuthority, ""), nil
+		return compactBlockedByUnreadableAuthority(err), nil
 	}
 	if receipt, exists := replay.Requests[begin.RequestID]; exists {
 		record, loadErr := store.loadRecord(receipt.Revision)
 		if loadErr != nil {
-			return compactBlocked(CompactBlockCorruptAuthority, ""), nil
+			return compactBlockedByUnreadableAuthority(loadErr), nil
 		}
 		begin.ExpectedRevision = record.PreviousRevision
 		if !compactAcquireMatches(record, begin) {
@@ -197,7 +201,7 @@ func (store RuntimeStore) Acquire(ctx context.Context, request CompactAcquireReq
 		}
 		current, loadErr := store.load()
 		if loadErr != nil {
-			return compactBlocked(CompactBlockCorruptAuthority, ""), nil
+			return compactBlockedByUnreadableAuthority(loadErr), nil
 		}
 		return compactAcquireResult(current, begin, receipt.Revision), nil
 	}
@@ -240,12 +244,12 @@ func (store RuntimeStore) Settle(ctx context.Context, request CompactSettleReque
 	}
 	replay, err := store.load()
 	if err != nil {
-		return compactBlocked(CompactBlockCorruptAuthority, ""), nil
+		return compactBlockedByUnreadableAuthority(err), nil
 	}
 	if receipt, exists := replay.Requests[request.RequestID]; exists {
 		record, loadErr := store.loadRecord(receipt.Revision)
 		if loadErr != nil {
-			return compactBlocked(CompactBlockCorruptAuthority, ""), nil
+			return compactBlockedByUnreadableAuthority(loadErr), nil
 		}
 		finish, ok := compactSettleReplayRequest(replay, record, request)
 		if !ok {
@@ -279,10 +283,7 @@ func (store RuntimeStore) Settle(ctx context.Context, request CompactSettleReque
 		ProcessEvidence: request.ProcessEvidence,
 	}
 	explicitSuccessor := request.SuccessorLineageID != ""
-	failedEvidence := status.EvidenceRevision
-	if failedEvidence == "" {
-		failedEvidence = request.RemediatesEvidenceRevision
-	}
+	failedEvidence, _ := runtimeChainFailedEvidence(status.Attempts)
 	if request.RemediatesEvidenceRevision != "" && failedEvidence != request.RemediatesEvidenceRevision {
 		return compactBlocked(CompactBlockInvalidContinuation, ""), nil
 	}
@@ -302,6 +303,18 @@ func (store RuntimeStore) Settle(ctx context.Context, request CompactSettleReque
 		return store.compactMutationFailure(err, true, BeginAttemptRequest{}), nil
 	}
 	return store.compactSettleResult()
+}
+
+func (store RuntimeStore) HandoffCompact(ctx context.Context, request CompactHandoffRequest) (CompactAttemptResult, error) {
+	_, err := store.Handoff(ctx, request.HandoffAttemptRequest)
+	if err == nil {
+		return CompactAttemptResult{State: CompactStateProceed}, nil
+	}
+	var publication *RuntimePublicationError
+	if errors.As(err, &publication) && publication.Committed {
+		return CompactAttemptResult{State: CompactStateProceed}, nil
+	}
+	return store.compactMutationFailure(err, false, BeginAttemptRequest{}), nil
 }
 
 // unmanagedRemediationSettleable reports whether a settle carrying
@@ -393,7 +406,7 @@ func compactAcquireResult(replay runtimeReplay, request BeginAttemptRequest, own
 func (store RuntimeStore) compactSettleResult(expected ...string) (CompactAttemptResult, error) {
 	replay, err := store.load()
 	if err != nil {
-		return compactBlocked(CompactBlockCorruptAuthority, ""), nil
+		return compactBlockedByUnreadableAuthority(err), nil
 	}
 	if len(expected) == 1 && replay.Status.Revision != expected[0] {
 		return compactBlocked(CompactBlockCorruptAuthority, ""), nil
@@ -415,7 +428,7 @@ func (store RuntimeStore) compactMutationFailure(err error, settle bool, begin B
 		}
 		replay, loadErr := store.load()
 		if loadErr != nil {
-			return compactBlocked(CompactBlockCorruptAuthority, "")
+			return compactBlockedByUnreadableAuthority(loadErr)
 		}
 		return compactAcquireResult(replay, begin, publication.Revision)
 	}
@@ -452,6 +465,10 @@ func (store RuntimeStore) compactMutationFailure(err error, settle bool, begin B
 	// authority_failure and lose the exact --cwd the refusal names.
 	case errors.Is(err, ErrRuntimeWorktreeMismatch):
 		reason = CompactBlockWorktreeMismatch
+	case errors.Is(err, ErrRuntimeHandoffSource):
+		reason = CompactBlockWorktreeMismatch
+	case errors.Is(err, ErrRuntimeHandoffDestination), errors.Is(err, ErrRuntimeHandoffAlreadyPerformed):
+		reason = CompactBlockInvalidContinuation
 	}
 	return CompactAttemptResult{State: CompactStateBlocked, Reason: reason, Exit: detail, Detail: detail}
 }
@@ -486,9 +503,14 @@ func compactBlockedExitText(reason CompactBlockReason, token string) string {
 			"`gentle-ai sdd-attempt status --cwd <repo> --change <change>` to see the live attempt and its " +
 			"current revision, then reissue this call against that state"
 	case CompactBlockMaintainerDecision:
+		// #2530: this said "rescope or reset", and rescope is structurally
+		// refused for exactly this state — runtimeObjectiveRescopeStructurally
+		// Permitted returns false whenever DecisionRequired is set, which is
+		// the only way this block is reached. Reset is the admitted one, and
+		// the ledger's own next_action has said so all along.
 		return "this work unit's attempt or changed-line budget needs a maintainer decision; run " +
 			"`gentle-ai sdd-attempt status --cwd <repo> --change <change>` for the accounting, then ask a " +
-			"maintainer to rescope or reset the objective, or run " + compactBlockedReviewModeDisableExit
+			"maintainer to reset the objective, or run " + compactBlockedReviewModeDisableExit
 	case CompactBlockActiveAttempt:
 		// Adversarial finding F2: the bare `sdd-attempt acquire --token <t>`
 		// / `settle --token <t>` forms are not complete commands -- each
@@ -511,6 +533,33 @@ func compactBlockedExitText(reason CompactBlockReason, token string) string {
 	default:
 		return ""
 	}
+}
+
+// compactBlockedByUnreadableAuthority is compactBlocked for the one reason
+// whose typed cause was being discarded at every site.
+//
+// #2829 / root 8's shape on a surface root 8 did not cover: seven call sites
+// wrote `compactBlocked(CompactBlockCorruptAuthority, "")`, throwing away the
+// error `store.load()` had just returned. The operator, and anyone triaging
+// their report, then saw "the attempt ledger cannot be read as valid
+// authority" with no way to tell an invalid HEAD encoding from a broken chain
+// link from a permissions refusal. Those need different repairs and looked
+// identical.
+//
+// Exit text is unchanged: this appends the cause to Detail only, so the
+// runnable continuation a caller routes on keeps its exact bytes.
+func compactBlockedByUnreadableAuthority(cause error) CompactAttemptResult {
+	result := compactBlocked(CompactBlockCorruptAuthority, "")
+	var repair *runtimeConsecutiveRescopeRepairRequiredError
+	if errors.As(cause, &repair) {
+		result.Exit = repair.Error()
+		result.Detail = repair.Error()
+		return result
+	}
+	if cause != nil {
+		result.Detail = result.Detail + " (cause: " + cause.Error() + ")"
+	}
+	return result
 }
 
 func compactBlocked(reason CompactBlockReason, token string) CompactAttemptResult {

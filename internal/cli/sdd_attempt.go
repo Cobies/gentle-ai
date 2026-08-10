@@ -38,6 +38,7 @@ func runSDDAttempt(ctx context.Context, args []string, stdout io.Writer) error {
 	flags.SetOutput(io.Discard)
 	cwd := registerSDDAttemptStringFlag(flags, operation, "cwd")
 	change := registerSDDAttemptStringFlag(flags, operation, "change")
+	destinationWorktree := registerSDDAttemptStringFlag(flags, operation, "destination-worktree")
 	expected := registerSDDAttemptStringFlag(flags, operation, "expected-revision")
 	token := registerSDDAttemptStringFlag(flags, operation, "token")
 	requestID := registerSDDAttemptStringFlag(flags, operation, "request-id")
@@ -84,6 +85,10 @@ func runSDDAttempt(ctx context.Context, args []string, stdout io.Writer) error {
 		return errors.New("sdd-attempt requires --change")
 	}
 
+	reviewDisabled, err := reviewDrivenDevelopmentDisabled(ctx, *cwd)
+	if err != nil {
+		return fmt.Errorf("read review mode: %w", err)
+	}
 	store, err := sddstatus.OpenRuntimeStore(ctx, *cwd, *change)
 	if err != nil {
 		return fmt.Errorf("open native SDD runtime authority: %w", err)
@@ -92,7 +97,7 @@ func runSDDAttempt(ctx context.Context, args []string, stdout io.Writer) error {
 	// knows how to read both of its sources. With reviews off, closing an
 	// attempt must not demand a review obligation the operator has no way to
 	// satisfy.
-	store.ReviewDisabled = reviewDrivenDevelopmentDisabled(ctx, *cwd)
+	store.ReviewDisabled = reviewDisabled
 	if missing := missingSDDAttemptOperationFlags(args[1:], operation); len(missing) != 0 {
 		return missingSDDAttemptOperationError(operation, missing)
 	}
@@ -128,6 +133,12 @@ func runSDDAttempt(ctx context.Context, args []string, stdout io.Writer) error {
 			ExpectedBindingRevision: *expectedBindingRevision, SuccessorLineageID: *successorLineage,
 			RemediatesEvidenceRevision: *remediatesEvidenceRevision,
 		})
+	case "handoff":
+		result, err = store.HandoffCompact(ctx, sddstatus.CompactHandoffRequest{
+			HandoffAttemptRequest: sddstatus.HandoffAttemptRequest{
+				ExpectedRevision: *expected, RequestID: *requestID, DestinationWorktree: *destinationWorktree,
+			},
+		})
 	case "reset":
 		result, err = store.Reset(ctx, sddstatus.ResetObjectiveRequest{
 			ExpectedRevision: *expected, RequestID: *requestID, Reason: *reason, Actor: *actor,
@@ -136,6 +147,10 @@ func runSDDAttempt(ctx context.Context, args []string, stdout io.Writer) error {
 		result, err = store.Rescope(ctx, sddstatus.RescopeObjectiveRequest{
 			ExpectedRevision: *expected, RequestID: *requestID, WorkUnit: *workUnit, EvidenceGoal: *evidenceGoal,
 			MaxAttempts: *maxAttempts, MaxChangedLines: *maxChangedLines, Reason: *reason, Actor: *actor,
+		})
+	case "repair":
+		result, err = store.RepairConsecutiveRescope(ctx, sddstatus.RepairConsecutiveRescopeRequest{
+			ExpectedRevision: *expected, RequestID: *requestID, Reason: *reason, Actor: *actor,
 		})
 	case "acquire":
 		result, err = store.Acquire(ctx, sddstatus.CompactAcquireRequest{
@@ -238,6 +253,12 @@ var sddAttemptOperationDefinitions = []sddAttemptOperationContract{
 		{name: "successor-lineage", usage: "optional; lowercase approved lineage, at most 128 bytes"},
 		{name: "remediates-evidence-revision", usage: "optional; repaired sha256:<64 lowercase hex> failed evidence"},
 	}},
+	{name: "handoff", purpose: "Atomically move the active attempt to one linked worktree", flags: []sddAttemptFlagDefinition{
+		sddAttemptCWDFlag, sddAttemptChangeFlag,
+		{name: "expected-revision", required: true, usage: "required; exact sha256:<64 lowercase hex> runtime revision"},
+		{name: "request-id", required: true, usage: "required; lowercase idempotency key, at most 128 bytes"},
+		{name: "destination-worktree", required: true, usage: "required; canonical registered linked worktree of the same Git common directory"},
+	}},
 	{name: "reset", purpose: "Reset a decision-required or complete objective", flags: []sddAttemptFlagDefinition{
 		sddAttemptCWDFlag, sddAttemptChangeFlag,
 		{name: "expected-revision", required: true, usage: "required; exact sha256:<64 lowercase hex> runtime revision"},
@@ -255,6 +276,13 @@ var sddAttemptOperationDefinitions = []sddAttemptOperationContract{
 		{name: "max-changed-lines", kind: sddAttemptIntFlag, required: true, usage: "required; explicit limit 1..1000000, cannot exceed current objective"},
 		{name: "reason", required: true, usage: "required; trimmed single-line text, at most 500 bytes"},
 		{name: "actor", required: true, usage: "required; trimmed single-line text, at most 128 bytes"},
+	}},
+	{name: "repair", purpose: "Repair the historical consecutive-rescope publication defect", flags: []sddAttemptFlagDefinition{
+		sddAttemptCWDFlag, sddAttemptChangeFlag,
+		{name: "expected-revision", required: true, usage: "required; exact unreadable sha256:<64 lowercase hex> runtime HEAD"},
+		{name: "request-id", required: true, usage: "required; lowercase idempotency key, at most 128 bytes"},
+		{name: "reason", required: true, usage: "required; trimmed single-line audit reason, at most 500 bytes"},
+		{name: "actor", required: true, usage: "required; trimmed single-line audit actor, at most 128 bytes"},
 	}},
 	{name: "acquire", purpose: "Claim a bounded attempt and return its token", flags: []sddAttemptFlagDefinition{
 		sddAttemptCWDFlag, sddAttemptChangeFlag,
@@ -496,7 +524,7 @@ func missingSDDAttemptOperationFlags(args []string, operation string) []string {
 func missingSDDAttemptOperationError(operation string, missing []string) error {
 	message := fmt.Sprintf("sdd-attempt %s requires %s", operation, strings.Join(missing, ", "))
 	switch operation {
-	case "acquire", "settle", "grant":
+	case "acquire", "settle", "handoff", "grant":
 		message += fmt.Sprintf("; rerun `gentle-ai sdd-attempt %s` with those missing flags", operation)
 	}
 	return errors.New(message)
