@@ -436,7 +436,7 @@ func Resolve(options ResolveOptions) (Status, error) {
 		case 1:
 			changeName = activeChanges[0]
 		default:
-			return blockedStatus(ArtifactStoreOpenSpec, workspaceRoot, nil, nil, "select-change", []string{fmt.Sprintf("Change selection is ambiguous: %s.", strings.Join(activeChanges, ", "))}, options.IncludeInstructions), nil
+			return blockedStatus(ArtifactStoreOpenSpec, workspaceRoot, nil, nil, "select-change", ambiguousChangeSelectionReasons("Change", workspaceRoot, activeChanges), options.IncludeInstructions), nil
 		}
 	}
 
@@ -919,7 +919,7 @@ func resolveEngramStatus(workspaceRoot string, requestedChange string, includeIn
 		case 1:
 			changeName = changes[0]
 		default:
-			return blockedEngramStatus(workspaceRoot, nil, "select-change", []string{fmt.Sprintf("Engram change selection is ambiguous: %s.", strings.Join(changes, ", "))}, includeInstructions), true, nil
+			return blockedEngramStatus(workspaceRoot, nil, "select-change", ambiguousChangeSelectionReasons("Engram change", workspaceRoot, changes), includeInstructions), true, nil
 		}
 	}
 
@@ -1551,6 +1551,29 @@ func absOrCWD(path string) (string, error) {
 	return filepath.Abs(path)
 }
 
+// ambiguousChangeSelectionReasons names one runnable command per candidate
+// change instead of listing names and stopping there.
+//
+// The markdown dispatcher already spelled these commands out, but --json never
+// reaches it, and --json is what machine consumers read. #2117 step 5 is the
+// cost: the SDD task-failure envelope hands back
+// `gentle-ai sdd-status --cwd <cwd> --json` as its continuation, which lands
+// here whenever more than one change is active, and the caller found a reason
+// that listed options and named no command. The list stays first because it is
+// what a human scanning the refusal wants; the commands follow because that is
+// what makes the refusal runnable.
+func ambiguousChangeSelectionReasons(subject, workspaceRoot string, changes []string) []string {
+	reasons := make([]string, 0, len(changes)+1)
+	reasons = append(reasons, fmt.Sprintf("%s selection is ambiguous: %s.", subject, strings.Join(changes, ", ")))
+	for _, change := range changes {
+		reasons = append(reasons, fmt.Sprintf(
+			"Run `gentle-ai sdd-status --cwd %s --change %s` to continue with %s.",
+			workspaceRoot, change, change,
+		))
+	}
+	return reasons
+}
+
 func blockedStatus(store ArtifactStore, workspaceRoot string, changeName *string, changeRoot *string, next string, reasons []string, includeInstructions bool) Status {
 	status := baseStatus(store, workspaceRoot, nil, changeName, changeRoot, next, reasons)
 	if includeInstructions {
@@ -1631,6 +1654,12 @@ func resolveArtifactPaths(changeRoot string) (ArtifactPaths, error) {
 	specFiles, err := findSpecFiles(filepath.Join(changeRoot, "specs"))
 	if err != nil {
 		return ArtifactPaths{}, err
+	}
+	if len(specFiles) == 0 {
+		flatSpec := filepath.Join(changeRoot, "spec.md")
+		if hasContent(flatSpec) {
+			specFiles = []string{flatSpec}
+		}
 	}
 	paths.Specs = specFiles
 	return paths, nil
@@ -1870,7 +1899,7 @@ func artifactBlockedReasons(artifacts map[string]ArtifactState, taskProgress Tas
 		reasons.expectedPlanning = append(reasons.expectedPlanning, "proposal.md is missing or partial.")
 	}
 	if artifacts["specs"] != ArtifactDone {
-		reasons.expectedPlanning = append(reasons.expectedPlanning, "specs/**/spec.md is missing or partial.")
+		reasons.expectedPlanning = append(reasons.expectedPlanning, "spec.md or specs/**/spec.md is missing or partial.")
 	}
 	if artifacts["design"] != ArtifactDone {
 		reasons.expectedPlanning = append(reasons.expectedPlanning, "design.md is missing or partial.")
@@ -2179,7 +2208,7 @@ func planningInstructionsForPhase(status Status, phase Phase) []string {
 		return []string{
 			fmt.Sprintf("Change: %s", change),
 			"Read proposal.md before writing specs.",
-			"Create specs/<domain>/spec.md with requirements and scenarios.",
+			"Create spec.md or specs/<domain>/spec.md with requirements and scenarios.",
 		}
 	case PhaseDesign:
 		return []string{
