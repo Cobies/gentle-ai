@@ -44,6 +44,11 @@ func TestBoundedReviewContractLeavesCanonicalizationToNativeGo(t *testing.T) {
 
 func TestDedicatedReviewAndJudgmentAssetsRenderRoleContracts(t *testing.T) {
 	assetsByFamily := map[string][]string{
+		"antigravity": {
+			"antigravity/agents/review-risk.md", "antigravity/agents/review-readability.md",
+			"antigravity/agents/review-reliability.md", "antigravity/agents/review-resilience.md",
+			"antigravity/agents/jd-judge-a.md", "antigravity/agents/jd-judge-b.md",
+		},
 		"claude": {
 			"claude/agents/review-risk.md", "claude/agents/review-readability.md",
 			"claude/agents/review-reliability.md", "claude/agents/review-resilience.md",

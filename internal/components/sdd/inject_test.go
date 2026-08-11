@@ -7012,3 +7012,51 @@ func TestInjectRefreshesStaleArchiveSkillWithFinalStateAuthority(t *testing.T) {
 		t.Fatal("installed lazy SDD workflow missing archive final-state handoff section")
 	}
 }
+
+func TestInjectAntigravitySubAgents(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	adapter, err := agents.NewAdapter(model.AgentAntigravity)
+	if err != nil {
+		t.Fatalf("NewAdapter(AgentAntigravity) error = %v", err)
+	}
+
+	result, err := Inject(home, adapter, model.SDDModeSingle, InjectOptions{WorkspaceDir: workspace})
+	if err != nil {
+		t.Fatalf("Inject(antigravity) error = %v", err)
+	}
+	if !result.Changed {
+		t.Fatal("Inject(antigravity) changed = false")
+	}
+
+	globalAgentsDir := adapter.SubAgentsDir(home)
+	expectedFiles := []string{
+		"sdd-init.md", "sdd-explore.md", "sdd-propose.md", "sdd-spec.md",
+		"sdd-design.md", "sdd-tasks.md", "sdd-apply.md", "sdd-verify.md",
+		"sdd-archive.md", "sdd-onboard.md", "review-risk.md", "review-readability.md",
+		"review-reliability.md", "review-resilience.md", "review-refuter.md",
+		"jd-judge-a.md", "jd-judge-b.md",
+	}
+	for _, file := range expectedFiles {
+		p := filepath.Join(globalAgentsDir, file)
+		info, err := os.Stat(p)
+		if err != nil {
+			t.Fatalf("global agent file %q missing: %v", p, err)
+		}
+		if info.Size() < 10 {
+			t.Fatalf("global agent file %q truncated (size %d)", p, info.Size())
+		}
+	}
+
+	wsAgentsDir := filepath.Join(workspace, ".agents", "agents")
+	for _, file := range expectedFiles {
+		p := filepath.Join(wsAgentsDir, file)
+		info, err := os.Stat(p)
+		if err != nil {
+			t.Fatalf("workspace agent file %q missing: %v", p, err)
+		}
+		if info.Size() < 10 {
+			t.Fatalf("workspace agent file %q truncated (size %d)", p, info.Size())
+		}
+	}
+}

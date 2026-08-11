@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/gentleman-programming/gentle-ai/v2/internal/agents"
@@ -627,13 +628,22 @@ func Inject(homeDir string, adapter agents.Adapter, sddMode model.SDDModeID, opt
 	}
 
 	// 3c. Write native sub-agent files for adapters that support them. Sub-agent files are
-	// written to the user's home directory (e.g. ~/.cursor/agents/), not to the
-	// workspace, so no project-root detection is needed here.
-	var agentsDir string
+	// written to the user's home directory (e.g. ~/.cursor/agents/), and for agents like
+	// Antigravity also to the workspace (.agents/agents/).
 	if adapter.SupportsSubAgents() {
-		agentsDir = adapter.SubAgentsDir(homeDir)
-		if err := os.MkdirAll(agentsDir, 0o755); err != nil {
-			return InjectionResult{}, fmt.Errorf("create agents dir: %w", err)
+		targetDirs := make([]string, 0, 2)
+		if mainDir := adapter.SubAgentsDir(homeDir); mainDir != "" {
+			targetDirs = append(targetDirs, mainDir)
+		}
+		if opts.WorkspaceDir != "" {
+			wsDir := opts.WorkspaceDir
+			if projectRoot, found := findProjectRoot(opts.WorkspaceDir); found {
+				wsDir = projectRoot
+			}
+			wsAgentsDir := filepath.Join(wsDir, ".agents", "agents")
+			if !slices.Contains(targetDirs, wsAgentsDir) {
+				targetDirs = append(targetDirs, wsAgentsDir)
+			}
 		}
 
 		embeddedDir := adapter.EmbeddedSubAgentsDir()
@@ -642,78 +652,84 @@ func Inject(homeDir string, adapter agents.Adapter, sddMode model.SDDModeID, opt
 			return InjectionResult{}, fmt.Errorf("read embedded agents dir: %w", err)
 		}
 
-		for _, entry := range entries {
-			if entry.IsDir() {
-				continue
-			}
-			// Copy all files (not just .md) to support Kimi's YAML-based agents
-			contentStr := renderBoundedReviewAsset(adapter.Agent(), embeddedDir+"/"+entry.Name())
-
-			if adapter.Agent() == model.AgentAntigravity {
-				contentStr = strings.ReplaceAll(contentStr, "{{KIRO_MODEL}}", "auto")
-				contentStr = strings.ReplaceAll(contentStr, "~/.kiro/skills", "~/.gemini/antigravity-cli/skills")
-				contentStr = strings.ReplaceAll(contentStr, "%USERPROFILE%\\.kiro\\skills", "%USERPROFILE%\\.gemini\\antigravity-cli\\skills")
+		for _, targetDir := range targetDirs {
+			if err := os.MkdirAll(targetDir, 0o755); err != nil {
+				return InjectionResult{}, fmt.Errorf("create agents dir: %w", err)
 			}
 
-			// Resolve {{KIRO_MODEL}} placeholder for adapters that support it (e.g. Kiro).
-			// Non-Kiro adapters (Cursor, etc.) don't implement kiroModelResolver and are unaffected.
-			if kmr, ok := adapter.(kiroModelResolver); ok {
-				phase := strings.TrimSuffix(entry.Name(), ".md")
-				alias := model.KiroModelAuto // safe default
-				if opts.KiroModelAssignments != nil {
-					if a, hasAlias := opts.KiroModelAssignments[phase]; hasAlias {
-						alias = a
-					} else if d, hasDefault := opts.KiroModelAssignments["default"]; hasDefault {
-						alias = d
-					}
-				} else if opts.ClaudeModelAssignments != nil {
-					// Backward-compatible fallback when Kiro-specific assignments are not provided.
-					if a, hasAlias := opts.ClaudeModelAssignments[phase]; hasAlias {
-						alias = model.KiroModelAlias(a)
-					} else if d, hasDefault := opts.ClaudeModelAssignments["default"]; hasDefault {
-						alias = model.KiroModelAlias(d)
-					}
+			for _, entry := range entries {
+				if entry.IsDir() {
+					continue
 				}
-				contentStr = strings.ReplaceAll(contentStr, "{{KIRO_MODEL}}", kmr.KiroModelID(alias))
-			}
+				// Copy all files (not just .md) to support Kimi's YAML-based agents
+				contentStr := renderBoundedReviewAsset(adapter.Agent(), embeddedDir+"/"+entry.Name())
 
-			// Resolve {{CLAUDE_MODEL}} placeholder for adapters that support it (e.g. Claude Code).
-			// Non-Claude adapters don't implement claudeModelResolver and are unaffected.
-			if cmr, ok := adapter.(claudeModelResolver); ok {
-				phase := strings.TrimSuffix(entry.Name(), ".md")
-				assignment := resolveClaudePhaseAssignment(opts.ClaudeModelAssignments, opts.ClaudePhaseAssignments, phase)
-				contentStr = strings.ReplaceAll(contentStr, "{{CLAUDE_MODEL}}", cmr.ClaudeModelID(assignment.Model))
-				contentStr = injectClaudeEffortFrontmatter(contentStr, assignment)
-			}
+				if adapter.Agent() == model.AgentAntigravity {
+					contentStr = strings.ReplaceAll(contentStr, "{{KIRO_MODEL}}", "auto")
+					contentStr = strings.ReplaceAll(contentStr, "~/.kiro/skills", "~/.gemini/antigravity-cli/skills")
+					contentStr = strings.ReplaceAll(contentStr, "%USERPROFILE%\\.kiro\\skills", "%USERPROFILE%\\.gemini\\antigravity-cli\\skills")
+				}
 
-			if isMarkdownSubAgentPromptFile(entry.Name()) {
-				contentStr = injectCodeGraphToolGrantIntoPrompt(contentStr, adapter.Agent(), opts.CodeGraphGuidanceMarkdown)
-				contentStr = injectCodeGraphGuidanceIntoPrompt(contentStr, opts.CodeGraphGuidanceMarkdown)
-				contentStr = injectLanguageContractIntoPrompt(contentStr)
-			}
-			outPath := filepath.Join(agentsDir, entry.Name())
-			writeResult, err := filemerge.WriteFileAtomic(outPath, []byte(contentStr), 0o644)
-			if err != nil {
-				return InjectionResult{}, fmt.Errorf("write agent %s: %w", entry.Name(), err)
-			}
-			changed = changed || writeResult.Changed
-			if writeResult.Changed {
-				files = append(files, outPath)
-			}
-		}
+				// Resolve {{KIRO_MODEL}} placeholder for adapters that support it (e.g. Kiro).
+				// Non-Kiro adapters (Cursor, etc.) don't implement kiroModelResolver and are unaffected.
+				if kmr, ok := adapter.(kiroModelResolver); ok {
+					phase := strings.TrimSuffix(entry.Name(), ".md")
+					alias := model.KiroModelAuto // safe default
+					if opts.KiroModelAssignments != nil {
+						if a, hasAlias := opts.KiroModelAssignments[phase]; hasAlias {
+							alias = a
+						} else if d, hasDefault := opts.KiroModelAssignments["default"]; hasDefault {
+							alias = d
+						}
+					} else if opts.ClaudeModelAssignments != nil {
+						// Backward-compatible fallback when Kiro-specific assignments are not provided.
+						if a, hasAlias := opts.ClaudeModelAssignments[phase]; hasAlias {
+							alias = model.KiroModelAlias(a)
+						} else if d, hasDefault := opts.ClaudeModelAssignments["default"]; hasDefault {
+							alias = model.KiroModelAlias(d)
+						}
+					}
+					contentStr = strings.ReplaceAll(contentStr, "{{KIRO_MODEL}}", kmr.KiroModelID(alias))
+				}
 
-		// Post-check: verify critical agent files exist (either .md or .yaml)
-		for _, phase := range []string{"sdd-apply", "sdd-verify"} {
-			found := false
-			for _, ext := range []string{".md", ".yaml"} {
-				checkPath := filepath.Join(agentsDir, phase+ext)
-				if info, err := os.Stat(checkPath); err == nil && info.Size() >= 10 {
-					found = true
-					break
+				// Resolve {{CLAUDE_MODEL}} placeholder for adapters that support it (e.g. Claude Code).
+				// Non-Claude adapters don't implement claudeModelResolver and are unaffected.
+				if cmr, ok := adapter.(claudeModelResolver); ok {
+					phase := strings.TrimSuffix(entry.Name(), ".md")
+					assignment := resolveClaudePhaseAssignment(opts.ClaudeModelAssignments, opts.ClaudePhaseAssignments, phase)
+					contentStr = strings.ReplaceAll(contentStr, "{{CLAUDE_MODEL}}", cmr.ClaudeModelID(assignment.Model))
+					contentStr = injectClaudeEffortFrontmatter(contentStr, assignment)
+				}
+
+				if isMarkdownSubAgentPromptFile(entry.Name()) {
+					contentStr = injectCodeGraphToolGrantIntoPrompt(contentStr, adapter.Agent(), opts.CodeGraphGuidanceMarkdown)
+					contentStr = injectCodeGraphGuidanceIntoPrompt(contentStr, opts.CodeGraphGuidanceMarkdown)
+					contentStr = injectLanguageContractIntoPrompt(contentStr)
+				}
+				outPath := filepath.Join(targetDir, entry.Name())
+				writeResult, err := filemerge.WriteFileAtomic(outPath, []byte(contentStr), 0o644)
+				if err != nil {
+					return InjectionResult{}, fmt.Errorf("write agent %s: %w", entry.Name(), err)
+				}
+				changed = changed || writeResult.Changed
+				if writeResult.Changed {
+					files = append(files, outPath)
 				}
 			}
-			if !found {
-				return InjectionResult{}, fmt.Errorf("post-check: sub-agent %q not written correctly (missing or truncated)", phase)
+
+			// Post-check: verify critical agent files exist (either .md or .yaml)
+			for _, phase := range []string{"sdd-apply", "sdd-verify"} {
+				found := false
+				for _, ext := range []string{".md", ".yaml"} {
+					checkPath := filepath.Join(targetDir, phase+ext)
+					if info, err := os.Stat(checkPath); err == nil && info.Size() >= 10 {
+						found = true
+						break
+					}
+				}
+				if !found {
+					return InjectionResult{}, fmt.Errorf("post-check: sub-agent %q not written correctly (missing or truncated)", phase)
+				}
 			}
 		}
 	}

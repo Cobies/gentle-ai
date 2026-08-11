@@ -247,6 +247,23 @@ func TestAllEmbeddedAssetsAreReadable(t *testing.T) {
 
 		// Antigravity agent files
 		"antigravity/sdd-orchestrator.md",
+		"antigravity/agents/sdd-init.md",
+		"antigravity/agents/sdd-explore.md",
+		"antigravity/agents/sdd-propose.md",
+		"antigravity/agents/sdd-spec.md",
+		"antigravity/agents/sdd-design.md",
+		"antigravity/agents/sdd-tasks.md",
+		"antigravity/agents/sdd-apply.md",
+		"antigravity/agents/sdd-verify.md",
+		"antigravity/agents/sdd-archive.md",
+		"antigravity/agents/sdd-onboard.md",
+		"antigravity/agents/review-risk.md",
+		"antigravity/agents/review-readability.md",
+		"antigravity/agents/review-reliability.md",
+		"antigravity/agents/review-resilience.md",
+		"antigravity/agents/review-refuter.md",
+		"antigravity/agents/jd-judge-a.md",
+		"antigravity/agents/jd-judge-b.md",
 
 		// Codex agent files
 		"codex/sdd-orchestrator.md",

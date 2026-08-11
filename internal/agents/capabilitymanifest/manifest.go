@@ -287,7 +287,7 @@ func digest(domain string, payload []byte) string {
 
 var featureClaimsByAgent = map[model.AgentID]AgentFeatureClaims{
 	model.AgentAntigravity: {
-		Skills: true, SystemPrompt: true, MCP: true,
+		FileSubAgents: true, Skills: true, SystemPrompt: true, MCP: true,
 	},
 	model.AgentClaudeCode: {
 		OutputStyles: true, SlashCommands: true,

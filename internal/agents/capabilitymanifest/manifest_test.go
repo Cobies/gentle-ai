@@ -130,7 +130,7 @@ func TestEveryManifestKeepsWorkRoutingDormantAndHashesCanonically(t *testing.T) 
 	// proof: TestRealCodexReviewerOrdinarySessionAdmitsRawOutput,
 	// e2e/organicruntime).
 	wantManifestDigests := map[model.AgentID]string{
-		model.AgentAntigravity:   "sha256:962eb63dc7f59a0b4c9c011dbb890aca1b40ecbfd3800c3e69b08f8b1639332c",
+		model.AgentAntigravity:   "sha256:72b7f61b40860d503992c53ad27760eaac42de8ed0271616f20524e98b5caea8",
 		model.AgentClaudeCode:    "sha256:132b9219b222d35b0e4eafce3dae965c56eb8d79f07dff6d45c42c137e36fd9b",
 		model.AgentCodex:         "sha256:dbf94a3b7815cf68ccd6299c634f3e17be9abc305b3849adee382c65055c5ed9",
 		model.AgentCursor:        "sha256:2cf80b9bd4cdc9a9d3586e6d02dc2207f326841bba935c6f11f257a20756d821",

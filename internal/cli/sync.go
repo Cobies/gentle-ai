@@ -1557,7 +1557,7 @@ func RunSyncWithSelection(homeDir string, selection model.Selection) (SyncResult
 	result.Execution = orchestrator.Execute(stagePlan)
 	compatibilityChanged := rt.state.compatibilityChangedFiles()
 	rt.state.cleanupRollbackSnapshot()
-	if result.Execution.Err != nil {
+	if result.Execution.Err != nil && orchestrator.FailurePolicy() != pipeline.ContinueOnError {
 		return result, fmt.Errorf("execute sync pipeline: %w", result.Execution.Err)
 	}
 
