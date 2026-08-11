@@ -11,9 +11,10 @@ import (
 )
 
 const (
-	reviewNextTransitionExecute = "execute"
-	reviewNextTransitionCollect = "collect"
-	reviewNextTransitionStop    = "stop"
+	reviewNextTransitionExecute     = "execute"
+	reviewNextTransitionCollect     = "collect"
+	reviewNextTransitionStop        = "stop"
+	reviewTargetedValidationPurpose = "targeted-validation"
 )
 
 // ReviewNextTransition is the sole negotiated routing decision. Its execute
@@ -233,7 +234,7 @@ func newReviewNextTransition(status ReviewTargetStatusResult, selectedLenses []s
 			}
 			return reviewCollectTransition("targeted_validation_required", ReviewTransitionInput{
 				Name: "targeted_validation", Schema: reviewtransaction.TargetedValidationRequestSchema,
-				CaptureOperation: "external.run_targeted_validation", Arguments: reviewBindingArguments(validationBinding),
+				CaptureOperation: "external.run_targeted_validation", Arguments: reviewTargetedValidationArguments(input.Contract, validationBinding, *input.ValidationRequest),
 				ValidationRequest: input.ValidationRequest,
 				Submission:        reviewTargetedValidationSubmission(input.Contract, validationBinding, *input.ValidationRequest),
 			})
@@ -284,6 +285,10 @@ func newReviewNextTransition(status ReviewTargetStatusResult, selectedLenses []s
 			return reviewRecoveryCollection(status, binding, input)
 		}
 		if status.Receipt.Status == ReviewReceiptPresent {
+			if input.gate() == reviewtransaction.GatePreCommit && input.PreCommitDeliveryAssessment != nil &&
+				*input.PreCommitDeliveryAssessment != reviewtransaction.CompactGateTargetExact {
+				return reviewStopTransition("staged_delivery_candidate_required")
+			}
 			if input.Selector != nil && input.gate() == reviewtransaction.GatePrePR && !input.Selector.PrePRRepresentable {
 				// Root 7 (#2471): the caller supplied a raw commit SHA where
 				// pre-PR needs a symbolic ref. That is a missing input, not a
@@ -496,6 +501,7 @@ type reviewNextTransitionInput struct {
 	IntendedUntracked                              reviewIntendedUntrackedScope
 	RDDMode                                        reviewtransaction.RDDModeStatus
 	RDDModeResolved                                bool
+	PreCommitDeliveryAssessment                    *reviewtransaction.CompactGateTargetApplicability
 }
 
 const reviewSubmissionValuePlaceholder = "{{value}}"
@@ -870,6 +876,15 @@ func reviewBindingArguments(binding ReviewTransitionBinding) []ReviewTransitionA
 	return []ReviewTransitionArgument{{Name: "lineage", Value: binding.LineageID}, {Name: "expected-revision", Value: binding.Revision}, {Name: "target", Value: binding.TargetIdentity}}
 }
 
+func reviewTargetedValidationArguments(contract string, binding ReviewTransitionBinding, request reviewtransaction.TargetedValidationRequest) []ReviewTransitionArgument {
+	arguments := reviewBindingArguments(binding)
+	if contract == ReviewIntegrationContractV2 {
+		arguments = append(arguments, ReviewTransitionArgument{Name: "repository-context", Value: binding.RepositoryContext},
+			ReviewTransitionArgument{Name: "purpose", Value: reviewTargetedValidationPurpose}, ReviewTransitionArgument{Name: "request-hash", Value: request.RequestHash})
+	}
+	return arguments
+}
+
 func reviewTransitionBinding(authority *ReviewTargetStatusAuthority, target string, repositoryContext ...string) ReviewTransitionBinding {
 	contextHandle := ""
 	if len(repositoryContext) > 0 {
@@ -1013,6 +1028,8 @@ func reviewReasonDescription(reason string) string {
 		return "Verification evidence required prior to finalization"
 	case "delivery_gate_required":
 		return "Delivery gate selection required before validation"
+	case "staged_delivery_candidate_required":
+		return "The staged delivery candidate must exactly match the approved review"
 	case "staged_workspace_overlay_recovery_unavailable":
 		return "Staged workspace overlay recovery is unavailable"
 	case "corrupted_or_unverifiable_authority":

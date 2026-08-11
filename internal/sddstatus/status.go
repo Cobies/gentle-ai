@@ -850,12 +850,35 @@ func applyNativeRuntimeRouting(status *Status) {
 		"native SDD runtime execution is blocked(%s) for %q in %s; compact acquire reports the same: %s",
 		readiness.Reason, change, pathquote.Quote(status.ActionContext.WorkspaceRoot), readiness.Exit,
 	)
+	// The attempt ledger governs exactly one question: may a bounded
+	// implementation work unit OPEN. A blocked answer is a true and permanent
+	// answer to that, so Apply is blocked.
+	//
+	// It is not an answer about anything else. Projecting it onto Verify and
+	// Archive stranded #2902's reporter: every task complete, the merged
+	// candidate green on repository CI, receipt-driven review off both
+	// globally and clone-locally, and one historical objective sitting at
+	// maintainer_decision from accounting on work that had already landed.
+	// The change could never be verified and never be archived.
+	//
+	// Nothing is laundered by letting the later phases answer for themselves.
+	// A change whose budget was exhausted mid-flight still has incomplete
+	// tasks and no passing verification, so its own Verify and Archive
+	// dependencies keep it exactly where it was. Those dependencies are the
+	// ones entitled to speak for those phases. The blocker stays in
+	// BlockedReasons either way, so it remains auditable.
 	status.Dependencies.Apply = DependencyBlocked
-	status.Dependencies.Verify = DependencyBlocked
-	status.Dependencies.Archive = DependencyBlocked
-	status.NextRecommended = "resolve-blockers"
 	if !contains(status.BlockedReasons, reason) {
 		status.BlockedReasons = append(status.BlockedReasons, reason)
+	}
+	// resolve-blockers is the right next step only while this block is
+	// actually in the change's way. Once implementation is done and verified,
+	// the change's next step is its own remaining phase, not a reset of an
+	// objective nobody needs to reopen.
+	if status.Dependencies.Verify != DependencyAllDone || status.Dependencies.Archive == DependencyBlocked {
+		status.Dependencies.Verify = DependencyBlocked
+		status.Dependencies.Archive = DependencyBlocked
+		status.NextRecommended = "resolve-blockers"
 	}
 }
 
@@ -1231,22 +1254,48 @@ func projectFromGitConfig(content string) string {
 	return ""
 }
 
-var engramTitlePattern = regexp.MustCompile(`^sdd/([^/]+)/(proposal|spec|design|tasks|apply-progress|verify-report|review/(?:transaction|policy|ledger|receipt|chain-bundle|gate-context)|state)$`)
+var engramTitlePattern = regexp.MustCompile(`^sdd/([^/]+)/(proposal|spec|design|tasks|apply-progress|verify-report|review/(?:transaction|policy|ledger|receipt|chain-bundle|gate-context)|state|archive-report)$`)
 
 func collectEngramChanges(observations []engramObservation, project string) []string {
+	// An Engram-backed change has no directory to move, so nothing about the
+	// store itself says a change is finished. OpenSpec derives "active" from
+	// what stays out of openspec/changes/archive/; Engram has no equivalent, so
+	// before this every change that ever persisted an artifact was reported
+	// active forever — thirty of them on one real project, seven of those
+	// archived weeks earlier (#3008).
+	//
+	// The archive phase already writes sdd/{change}/archive-report and calls it
+	// the audit trail. That report is the closure signal; it was simply not in
+	// the title pattern, so the one artifact proving a change is done was the
+	// one this never read.
+	archived := map[string]bool{}
 	seen := map[string]bool{}
 	for _, observation := range observations {
 		if !engramObservationMatchesProject(observation, project) {
 			continue
 		}
 		matches := engramTitlePattern.FindStringSubmatch(strings.TrimSpace(observation.Title))
-		if len(matches) != 3 || matches[2] == "state" {
+		if len(matches) != 3 {
 			continue
 		}
-		seen[matches[1]] = true
+		switch matches[2] {
+		case "archive-report":
+			archived[matches[1]] = true
+		case "state":
+			// Progress metadata, not evidence that work exists.
+		default:
+			seen[matches[1]] = true
+		}
 	}
 	changes := make([]string, 0, len(seen))
 	for change := range seen {
+		// Excluded from DISCOVERY only. Naming an archived change still
+		// resolves it through engramArtifactsForChange, because "which changes
+		// are in flight" and "show me this change" are different questions and
+		// the artifacts remain the audit trail.
+		if archived[change] {
+			continue
+		}
 		changes = append(changes, change)
 	}
 	sort.Strings(changes)
@@ -1480,6 +1529,17 @@ func resolveWorkspaceRoot(options ResolveOptions) (string, error) {
 	}
 	if !info.IsDir() {
 		return "", fmt.Errorf("workspace root is not a directory: %s", root)
+	}
+	// A filesystem root is never a workspace, and answering as if it might be
+	// is worse than refusing (#2790). A failure continuation that resolved its
+	// working directory to the drive root used to get a successful, empty,
+	// entirely plausible status back, so the operator read "SDD lost my
+	// project" instead of "that command was pointed at the wrong directory".
+	//
+	// Nothing legitimate is rejected: no project lives at `/` or at `C:\`, so
+	// there is no false positive to weigh against the confusion this prevents.
+	if filepath.Dir(root) == root {
+		return "", fmt.Errorf("workspace root %q is a filesystem root, which never holds an SDD project: whatever produced this call passed the wrong --cwd. Rerun it against the project: `gentle-ai sdd-status --cwd \"<project-directory>\" --json`. If the change is Engram-backed, this dispatcher is blind to it and should not be called at all", root)
 	}
 	return root, nil
 }
