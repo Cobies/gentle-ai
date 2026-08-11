@@ -7047,16 +7047,4 @@ func TestInjectAntigravitySubAgents(t *testing.T) {
 			t.Fatalf("global agent file %q truncated (size %d)", p, info.Size())
 		}
 	}
-
-	wsAgentsDir := filepath.Join(workspace, ".agents", "agents")
-	for _, file := range expectedFiles {
-		p := filepath.Join(wsAgentsDir, file)
-		info, err := os.Stat(p)
-		if err != nil {
-			t.Fatalf("workspace agent file %q missing: %v", p, err)
-		}
-		if info.Size() < 10 {
-			t.Fatalf("workspace agent file %q truncated (size %d)", p, info.Size())
-		}
-	}
 }

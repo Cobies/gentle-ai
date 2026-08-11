@@ -6,7 +6,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"github.com/gentleman-programming/gentle-ai/v2/internal/agents"
@@ -628,22 +627,11 @@ func Inject(homeDir string, adapter agents.Adapter, sddMode model.SDDModeID, opt
 	}
 
 	// 3c. Write native sub-agent files for adapters that support them. Sub-agent files are
-	// written to the user's home directory (e.g. ~/.cursor/agents/), and for agents like
-	// Antigravity also to the workspace (.agents/agents/).
+	// written exclusively to the user's global config directory (e.g. ~/.gemini/config/agents/).
 	if adapter.SupportsSubAgents() {
-		targetDirs := make([]string, 0, 2)
+		targetDirs := make([]string, 0, 1)
 		if mainDir := adapter.SubAgentsDir(homeDir); mainDir != "" {
 			targetDirs = append(targetDirs, mainDir)
-		}
-		if opts.WorkspaceDir != "" {
-			wsDir := opts.WorkspaceDir
-			if projectRoot, found := findProjectRoot(opts.WorkspaceDir); found {
-				wsDir = projectRoot
-			}
-			wsAgentsDir := filepath.Join(wsDir, ".agents", "agents")
-			if !slices.Contains(targetDirs, wsAgentsDir) {
-				targetDirs = append(targetDirs, wsAgentsDir)
-			}
 		}
 
 		embeddedDir := adapter.EmbeddedSubAgentsDir()
