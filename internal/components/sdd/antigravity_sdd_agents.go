@@ -55,9 +55,9 @@ const antigravitySddAgentsPluginJSON = `{
 // surface it as a system-level reminder. We do NOT invent Antigravity API
 // fields that the runtime does not consume; this is the safest supported
 // installable permission surface.
-const antigravitySddAgentsHardeningMessage = "Gentle AI SDD/Review/JD hardening contract for Antigravity sub-agents. " +
-	"Pre-registered static subagents in agents/ (sdd-explore, sdd-propose, sdd-spec, sdd-design, sdd-tasks, sdd-apply, sdd-verify, sdd-archive, sdd-onboard, review-*, jd-judge-*) MUST be invoked directly via invoke_subagent. " +
-	"If a static subagent definition is missing, define_subagent may be called as a dynamic fallback. " +
+const antigravitySddAgentsHardeningMessage = "Gentle AI SDD/Review/JD hardening contract for Antigravity dynamic sub-agents. " +
+	"This contract mirrors the OpenCode permission.task overlay; Antigravity has no static agent registry, " +
+	"so the policy is enforced as a runtime instruction bound to define_subagent calls. " +
 	"Allowed roles and their tool scopes: " +
 	"sdd-explore = read/search/CodeGraph/Engram only, no source writes; " +
 	"sdd-propose, sdd-spec, sdd-design, sdd-tasks = artifact reads/writes only, no source edits; " +
