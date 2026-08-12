@@ -1,6 +1,7 @@
 ---
 name: sdd-spec
 description: >
+model: antigravity/gemini-3.6-flash
   Write or update technical specifications and contract requirements.
 subagent: true
 mainAgent: false

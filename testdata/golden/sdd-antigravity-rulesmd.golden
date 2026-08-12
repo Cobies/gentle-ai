@@ -69,21 +69,21 @@ To run any SDD phase:
 
 Do not execute SDD phase work in the orchestrator thread except for trivial routing, artifact lookup, user clarification, and synthesis. Phase subagents own phase-specific reading, writing, testing, and artifact production. The parent stays thin; phase work runs in dynamic subagent context.
 
-All phase-execution commands (specifically `/sdd-init`, `/sdd-explore`, `/sdd-apply`, `/sdd-verify`, `/sdd-archive`, `/sdd-onboard`, and planning phases triggered during `/sdd-new`, `/sdd-continue`, or `/sdd-ff`) MUST be executed by defining and invoking the corresponding dynamic subagent (`sdd-init`, `sdd-explore`, `sdd-apply`, `sdd-verify`, `sdd-archive`, `sdd-onboard`, `sdd-propose`, `sdd-spec`, `sdd-design`, `sdd-tasks`). The orchestrator itself MUST NOT perform the execution, code writing, or analysis for these commands/phases inline in the parent thread.
+All phase-execution commands (specifically `/sdd-init`, `/sdd-explore`, `/sdd-apply`, `/sdd-verify`, `/sdd-archive`, `/sdd-onboard`, and planning phases triggered during `/sdd-new`, `/sdd-continue`, or `/sdd-ff`) MUST be executed by invoking the corresponding pre-registered static subagent (`sdd-init`, `sdd-explore`, `sdd-apply`, `sdd-verify`, `sdd-archive`, `sdd-onboard`, `sdd-propose`, `sdd-spec`, `sdd-design`, `sdd-tasks`) directly via `invoke_subagent` (calling `define_subagent` only as a dynamic fallback if the static subagent definition is missing). The orchestrator itself MUST NOT perform the execution, code writing, or analysis for these commands/phases inline in the parent thread.
 
 ### Strict Phase Boundaries & Non-Compression Contract (MANDATORY)
 
 - **Do NOT fold planning phases into `sdd-explore`**: `sdd-explore` is strictly for reading/mapping the codebase. It MUST NOT write proposals, specifications, design documents, or task lists.
 - **Mandatory Sequential Delegation**: `sdd-init` MUST be invoked to initialize the change identity; `sdd-propose` MUST be invoked to create the proposal artifact; `sdd-spec` MUST be invoked to write the specification artifact; `sdd-design` MUST be invoked to write the design artifact; and `sdd-tasks` MUST be invoked to write the task DAG.
-- **No Inline or Compressed Planning**: Combining, skipping, or collapsing these distinct dynamic subagent invocations into `sdd-explore` or into the orchestrator thread is strictly prohibited and constitutes a contract failure.
+- **No Inline or Compressed Planning**: Combining, skipping, or collapsing these distinct subagent invocations into `sdd-explore` or into the orchestrator thread is strictly prohibited and constitutes a contract failure.
 
 ### Robust Dynamic Execution & Linguistic Mapping (HARD CONTRACT)
 
-Regardless of the language (English, Spanish, etc.) or phrasing used by the user, the orchestrator MUST treat any request for execution, implementation, planning, analysis, or testing as a trigger for dynamic subagent delegation:
+Regardless of the language (English, Spanish, etc.) or phrasing used by the user, the orchestrator MUST treat any request for execution, implementation, planning, analysis, or testing as a trigger for subagent delegation:
 
 1. **Linguistic Scope & Synonyms**:
-   - Any instruction to **"run"**, **"execute"**, **"apply"**, **"start"**, **"continue"**, **"verify"**, **"test"**, **"explore"**, **"plan"**, **"archive"**, or their Spanish equivalents like **"correr"**, **"ejecutar"**, **"aplicar"**, **"comenzar"**, **"continuar"**, **"verificar"**, **"probar"**, **"explorar"**, **"planificar"**, **"archivar"**, **"hacer"** a phase MUST be mapped directly to defining and invoking the corresponding dynamic subagent.
-   - The terms **"subagent"**, **"agent"**, **"child"**, **"helper"**, **"task runner"** (and Spanish **"subagente"**, **"agente"**, **"hijo"**, **"ayudante"**) all refer to the dynamic subagent entity.
+   - Any instruction to **"run"**, **"execute"**, **"apply"**, **"start"**, **"continue"**, **"verify"**, **"test"**, **"explore"**, **"plan"**, **"archive"**, or their Spanish equivalents like **"correr"**, **"ejecutar"**, **"aplicar"**, **"comenzar"**, **"continuar"**, **"verificar"**, **"probar"**, **"explorar"**, **"planificar"**, **"archivar"**, **"hacer"** a phase MUST be mapped directly to invoking the corresponding static subagent directly via `invoke_subagent` (or defining it via `define_subagent` if missing).
+   - The terms **"subagent"**, **"agent"**, **"child"**, **"helper"**, **"task runner"** (and Spanish **"subagente"**, **"agente"**, **"hijo"**, **"ayudante"**) all refer to the subagent entity.
    - The actions **"define"**, **"register"**, **"create"** (and Spanish **"definir"**, **"registrar"**, **"crear"**) map to calling the `define_subagent` tool.
    - The actions **"invoke"**, **"call"**, **"run"**, **"spawn"**, **"delegate"** (and Spanish **"invocar"**, **"llamar"**, **"correr"**, **"delegar"**) map to calling the `invoke_subagent` tool.
 
@@ -98,9 +98,8 @@ Regardless of the language (English, Spanish, etc.) or phrasing used by the user
    - When the user asks the orchestrator to perform an action, the orchestrator clarifies/aligns on the plan in the main chat, then delegates the execution to a subagent, receives the result, and synthesizes it for the user.
 
 4. **Command Equivalency**:
-   - Natural language commands (e.g., "ejecutá la fase sdd-apply", "corre el verify", "hacé el espec", "start exploration") are functionally identical to slash commands (e.g., `/sdd-apply`, `/sdd-verify`, `/sdd-spec`, `/sdd-explore`). 
+   - Natural language commands (e.g., "ejecutá la fase sdd-apply", "corre el verify", "hacé el espec", "start exploration") are functionally identical to slash commands (e.g., `/sdd-apply`, `/sdd-verify`, `/sdd-spec`, `/sdd-explore`).
    - Both triggers require the orchestrator to immediately define and invoke the corresponding dynamic subagent (`sdd-apply`, `sdd-verify`, etc.) without performing the execution, code writing, or analysis inline.
-
 
 ### Language Domain Contract
 
@@ -115,7 +114,7 @@ Regardless of the language (English, Spanish, etc.) or phrasing used by the user
 These rules select execution topology, not the implementation method. Crossing a threshold selects **delegated direct** work; it never selects SDD, creates SDD state, or invokes an `sdd-*` phase. Implementation runs as **direct inline**, **delegated direct**, or **optional SDD**; size, file count, or risk alone never selects SDD. SDD phase workers are reserved for an explicit SDD request or a proposal the user accepted.
 
 | Action | Direct inline | Delegated direct worker |
-|--------|---------------|-------------------------|
+| -------- | --------------- | ------------------------- |
 | Read to decide/verify (1–3 files) | ✅ | — |
 | Read to explore/understand (4+ files) | — | ✅ one narrow mapper |
 | Read as preparation for writing | — | ✅ together with the write |
@@ -143,9 +142,10 @@ These are parent-orchestrator routing boundaries. Use the smallest useful topolo
 4. **Context rule**: delegate reading that prepares a write and broad research/context compression.
 5. **Per-action rule**: tests, builds, installs, and native review actors may use fresh workers without changing the implementation route or creating SDD state.
 6. **Optional SDD rule**: propose SDD only when durable proposal/spec/design/tasks materially reduce substantial ambiguity. Select SDD only after an explicit request or accepted proposal; risk alone never forces SDD.
-7. **Post-apply review rule**: after `sdd-apply` completes, if no valid content-bound receipt exists, explicitly start ordinary bounded review using the fresh review operation above before reporting the change ready for lifecycle gates. If a valid receipt exists, reuse it. This is a phase-boundary trigger, not a lifecycle gate; commit, push, PR, and release still validate the receipt only and never launch review actors.
-8. **Post-verify review rule**: after `sdd-verify` completes successfully, if the changes are not trivial and no valid content-bound receipt exists, the orchestrator MUST define and invoke the selected 4R lenses or Judgment Day reviewer dynamic subagents (`review-*` or `jd-judge-*`) to run a complete review before proceeding to `sdd-archive` or completing the cycle. Do not skip or bypass this review phase.
-9. **Normalization ordering rule**: before review START and its identity freeze, run every source-mutating normalizer, then re-snapshot the candidate and review those exact bytes, paths, and modes. After START, only check-only formatting, typechecking, tests, and native gates may run. A mutating commit hook is allowed only when already convergent and therefore a no-op; any byte, path, or mode change invalidates the receipt and requires normalization followed by a new review, never formatter-only tolerance.
+7. **Large-Context Window Rule (Gemini/Antigravity)**: Large context window capacity (e.g. 1M+ tokens) NEVER overrides delegation rules. Even if the active model can hold many files in memory, processing 4+ read files or 2+ write files in the parent thread is strictly forbidden and MUST be delegated to subagents.
+8. **Post-apply review rule**: after `sdd-apply` completes, if no valid content-bound receipt exists, explicitly start ordinary bounded review using the fresh review operation above before reporting the change ready for lifecycle gates. If a valid receipt exists, reuse it. This is a phase-boundary trigger, not a lifecycle gate; commit, push, PR, and release still validate the receipt only and never launch review actors.
+9. **Post-verify review rule**: after `sdd-verify` completes successfully, if the changes are not trivial and no valid content-bound receipt exists, the orchestrator MUST define and invoke the selected 4R lenses or Judgment Day reviewer dynamic subagents (`review-*` or `jd-judge-*`) to run a complete review before proceeding to `sdd-archive` or completing the cycle. Do not skip or bypass this review phase.
+10. **Normalization ordering rule**: before review START and its identity freeze, run every source-mutating normalizer, then re-snapshot the candidate and review those exact bytes, paths, and modes. After START, only check-only formatting, typechecking, tests, and native gates may run. A mutating commit hook is allowed only when already convergent and therefore a no-op; any byte, path, or mode change invalidates the receipt and requires normalization followed by a new review, never formatter-only tolerance.
 
 #### Native Checking Contract
 
@@ -321,7 +321,7 @@ Meta-commands (type directly — orchestrator handles them, will not appear in a
 - `/sdd-continue [change]` → inspect DAG state and invoke the next dependency-ready phase
 - `/sdd-ff <name>` → fast-forward planning by invoking `sdd-propose` → `sdd-spec` + `sdd-design` → `sdd-tasks` sequentially
 
-`/sdd-new`, `/sdd-continue`, and `/sdd-ff` are meta-commands handled by YOU. Do NOT invoke them as skills. You orchestrate the phase sequence through dynamic subagents, pausing for user approval between phases when required. When a meta-command demands running a phase, always define and invoke that phase's subagent using `define_subagent` and `invoke_subagent` rather than performing the phase work inline.
+`/sdd-new`, `/sdd-continue`, and `/sdd-ff` are meta-commands handled by YOU. Do NOT invoke them as skills. You orchestrate the phase sequence through subagents, pausing for user approval between phases when required. When a meta-command demands running a phase, always invoke that phase's pre-registered static subagent directly via `invoke_subagent` (or call `define_subagent` first if missing) rather than performing the phase work inline.
 
 ### Native SDD Dispatcher Guard
 
@@ -392,12 +392,12 @@ Cache the mode choice for the session — do not ask again unless the user expli
 For this agent (dynamic subagent execution): **Interactive** means the orchestrator pauses between dynamic phase invocations. **Automatic** means the orchestrator may invoke dependency-ready phase subagents back-to-back (except for `sdd-apply`, which always requires confirmation) only after each automatic gatekeeper check passes.
 
 **Absolute Stop Rules (MANDATORY)**:
+
 - **NEVER** apply code changes or write to files without explicit user confirmation first.
 - The orchestrator must present the proposed implementation plan, architecture, or task list and pause, waiting for the user to approve before delegating to `sdd-apply`. **This is a hard pause gate**: you **MUST NOT** call `define_subagent` or `invoke_subagent` for `sdd-apply` in the same turn that you ask for approval; you **MUST** end your turn and wait for the user's explicit response in the chat confirming they want to proceed.
 - The orchestrator must detail proposals, specs, tasks, and reports directly in the chat/conversation, and not just reference the created `.md` artifacts.
 - The orchestrator must block and wait synchronously for the completion of ALL dynamic subagents (including planning, apply, verification, and review/judging subagents) before proceeding to any subsequent step or responding to the user.
 - The orchestrator and any interactive tools must present all questions, prompts, and options to the user in the conversation's active language (matching the user's current language) rather than English.
-
 
 ### Automatic Mode Gatekeeper (MANDATORY)
 

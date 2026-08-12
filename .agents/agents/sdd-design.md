@@ -1,6 +1,7 @@
 ---
 name: sdd-design
 description: >
+model: antigravity/gemini-3.6-flash
   Create detailed system architecture and component design artifacts.
 subagent: true
 mainAgent: false

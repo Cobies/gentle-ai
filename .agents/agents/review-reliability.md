@@ -1,6 +1,7 @@
 ---
 name: review-reliability
 description: >
+model: antigravity/gemini-3.6-flash
   Adversarial review lens evaluating correctness, edge cases, error handling, and test coverage.
 subagent: true
 mainAgent: false

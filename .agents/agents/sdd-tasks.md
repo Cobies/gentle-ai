@@ -1,6 +1,7 @@
 ---
 name: sdd-tasks
 description: >
+model: antigravity/gemini-3.6-flash
   Generate structured task DAGs and implementation work units.
 subagent: true
 mainAgent: false

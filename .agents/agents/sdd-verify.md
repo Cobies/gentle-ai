@@ -1,6 +1,7 @@
 ---
 name: sdd-verify
 description: >
+model: antigravity/gemini-3.6-flash
   Validate implementation against specs using tests and verification builds.
 subagent: true
 mainAgent: false

@@ -1,6 +1,7 @@
 ---
 name: review-risk
 description: >
+model: antigravity/gemini-3.6-flash
   Adversarial review lens evaluating security risks, data exposure, and permission flaws.
 subagent: true
 mainAgent: false
