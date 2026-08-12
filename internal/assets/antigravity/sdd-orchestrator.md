@@ -162,44 +162,7 @@ These are parent-orchestrator routing boundaries. Use the smallest useful topolo
 
 The canonical native bounded-review contract is injected from the shared provider source at render time.
 
-### 4R & Judgment Day Review Execution Protocol (MANDATORY)
-
-To guarantee software quality and resilience before archiving or completing any SDD change:
-
-1. **4R Bounded Review Execution**:
-   - Immediately after `sdd-verify` completes successfully (and for non-trivial changes), the orchestrator MUST invoke the 4R review lens subagents: `review-readability`, `review-reliability`, `review-resilience`, `review-risk` (or `review-*`).
-   - Invoke them in parallel using `invoke_subagent` with `TypeName: "review-readability"`, `"review-reliability"`, etc.
-   - If findings are reported by any lens, invoke `review-refuter` to validate findings before logging to the review ledger.
-
-2. **Judgment Day (Blind Dual Review)**:
-   - For changes larger than 400 lines, security-sensitive edits, or hot-path architecture changes, activate the Judgment Day protocol.
-   - Invoke `jd-judge-a` and `jd-judge-b` concurrently via `invoke_subagent`.
-   - Compare their independent verdicts; if a discrepancy exists, invoke `review-refuter` to arbitrate the final ledger entries.
-
-3. **Archive Gate**:
-   - The orchestrator MUST NOT invoke `sdd-archive` or mark a change complete until the 4R or Judgment Day review has completed and all critical findings are resolved.
-
-### Lifecycle State Auto-Detection & Intent Mapping (MANDATORY)
-
-To prevent getting stuck or losing context during multi-phase workflows:
-
-1. **State Inspection**:
-   - At the beginning of any turn or natural language request, the orchestrator MUST check the current change state (via Engram `mem_search`, OpenSpec state, or `.agents/`).
-   - Identify the exact active stage:
-     - `uninitialized` → Suggest/invoke `sdd-init` or `sdd-onboard`.
-     - `explored` → Proceed to `sdd-propose`.
-     - `planning` (proposal/spec/design exists) → Complete `sdd-tasks`.
-     - `ready_to_apply` → Propose and wait for user approval, then invoke `sdd-apply`.
-     - `applied` → Invoke `sdd-verify`.
-     - `verified` → Invoke 4R lenses (`review-*`) or Judgment Day (`jd-judge-*`).
-     - `reviewed` → Invoke `sdd-archive`.
-
-2. **Linguistic Intent Mapping**:
-   - Map vague or natural language user prompts directly to the missing step based on the detected state:
-     - "sigamos" / "avanzá" / "siguiente paso" → Invoke the next sequential phase for the current state.
-     - "revisá" / "chequeá" → Invoke `sdd-explore` (if planning) or 4R `review-*` (if post-verify).
-     - "probá" / "testeá" → Invoke `sdd-verify`.
-     - "cerrá" / "terminá" → Invoke `sdd-archive`.
+#### Cost and Context Balance
 
 - Keep exploration, apply, and verify concerns separated through dynamic subagent context even though Antigravity does not install static subagent files.
 - Preserve one writer thread; do not interleave broad exploration with edits unless it is the explicit `sdd-apply` phase subagent.
@@ -596,3 +559,42 @@ DAG state is tracked in Engram under `sdd/{change-name}/state`. Update it after 
 - `engram` → `mem_search(...)` → `mem_get_observation(...)`
 - `openspec` → read `openspec/changes/*/state.yaml`
 - `none` → state not persisted — explain to user
+
+### 4R & Judgment Day Review Execution Protocol (MANDATORY)
+
+To guarantee software quality and resilience before archiving or completing any SDD change:
+
+1. **4R Bounded Review Execution**:
+   - Immediately after `sdd-verify` completes successfully (and for non-trivial changes), the orchestrator MUST invoke the 4R review lens subagents (`review-*`).
+   - Invoke them in parallel using `invoke_subagent`.
+   - If findings are reported by any lens, invoke `review-refuter` to validate findings before logging to the review ledger.
+
+2. **Judgment Day (Blind Dual Review)**:
+   - For changes larger than 400 lines, security-sensitive edits, or hot-path architecture changes, activate the Judgment Day protocol.
+   - Invoke `jd-judge-a` and `jd-judge-b` concurrently via `invoke_subagent`.
+   - Compare their independent verdicts; if a discrepancy exists, invoke `review-refuter` to arbitrate the final ledger entries.
+
+3. **Archive Gate**:
+   - The orchestrator MUST NOT invoke `sdd-archive` or mark a change complete until the 4R or Judgment Day review has completed and all critical findings are resolved.
+
+### Lifecycle State Auto-Detection & Intent Mapping (MANDATORY)
+
+To prevent getting stuck or losing context during multi-phase workflows:
+
+1. **State Inspection**:
+   - At the beginning of any turn or natural language request, the orchestrator MUST check the current change state (via Engram `mem_search`, OpenSpec state, or `.agents/`).
+   - Identify the exact active stage:
+     - `uninitialized` → Suggest/invoke `sdd-init` or `sdd-onboard`.
+     - `explored` → Proceed to `sdd-propose`.
+     - `planning` (proposal/spec/design exists) → Complete `sdd-tasks`.
+     - `ready_to_apply` → Propose and wait for user approval, then invoke `sdd-apply`.
+     - `applied` → Invoke `sdd-verify`.
+     - `verified` → Invoke 4R lenses (`review-*`) or Judgment Day (`jd-judge-*`).
+     - `reviewed` → Invoke `sdd-archive`.
+
+2. **Linguistic Intent Mapping**:
+   - Map vague or natural language user prompts directly to the missing step based on the detected state:
+     - "sigamos" / "avanzá" / "siguiente paso" → Invoke the next sequential phase for the current state.
+     - "revisá" / "chequeá" → Invoke `sdd-explore` (if planning) or 4R `review-*` (if post-verify).
+     - "probá" / "testeá" → Invoke `sdd-verify`.
+     - "cerrá" / "terminá" → Invoke `sdd-archive`.
