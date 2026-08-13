@@ -128,6 +128,52 @@ func TestReviewModeCloneScopeEnableIsIdempotentWhenGlobalOn(t *testing.T) {
 	}
 }
 
+func TestReviewModeCloneScopeEnableMigratesLegacyRevision(t *testing.T) {
+	reviewModeHome(t)
+	repo := initReviewCLIRepo(t)
+	ctx := context.Background()
+	disabled, err := reviewtransaction.SetCloneLocalRDDMode(ctx, repo, reviewtransaction.RDDModeOff, "", reviewtransaction.RDDGlobalMode{Value: "on"})
+	if err != nil {
+		t.Fatalf("seed clone-local override: %v", err)
+	}
+	current, err := reviewtransaction.CloneLocalRDDModeRecordPath(ctx, repo)
+	if err != nil {
+		t.Fatalf("current record path: %v", err)
+	}
+	legacyBytes, err := os.ReadFile(current)
+	if err != nil {
+		t.Fatalf("read current record: %v", err)
+	}
+	legacyRoot := filepath.Join(repo, ".git", "gentle-ai", "review-transactions")
+	if err := os.Rename(filepath.Join(repo, ".git", "gentle-ai", "review-mode"), legacyRoot); err != nil {
+		t.Fatalf("relocate secure legacy fixture: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(repo, ".git", "gentle-ai", "review-mode")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("legacy fixture left a separately created private directory: %v", err)
+	}
+	legacy := filepath.Join(legacyRoot, "rar-authority", "v1", "rdd-mode", filepath.Base(current))
+
+	var output bytes.Buffer
+	if err := RunReviewMode([]string{"status", "--cwd", repo, "--json"}, &output); err != nil {
+		t.Fatalf("legacy status: %v", err)
+	}
+	status := decodeReviewModeResult(t, output.Bytes()).Status
+	if status.Revision != disabled.Revision || status.CloneLocal != reviewtransaction.RDDModeOff {
+		t.Fatalf("legacy CLI status = %#v", status)
+	}
+	output.Reset()
+	if err := RunReviewMode([]string{"enable", "--cwd", repo, "--scope", "clone", "--expected-revision", status.Revision, "--json"}, &output); err != nil {
+		t.Fatalf("legacy CLI enable: %v", err)
+	}
+	migrated := decodeReviewModeResult(t, output.Bytes()).Status
+	if !migrated.Enabled() || migrated.Revision == "" || migrated.Revision == status.Revision {
+		t.Fatalf("migrated CLI status = %#v", migrated)
+	}
+	if after, err := os.ReadFile(legacy); err != nil || !bytes.Equal(after, legacyBytes) {
+		t.Fatalf("legacy CLI bytes changed: err=%v", err)
+	}
+}
+
 func TestReviewModeCloneScopeEnableRejectsGlobalOffWithoutLocalOverride(t *testing.T) {
 	home := reviewModeHome(t)
 	repo := initReviewCLIRepo(t)
