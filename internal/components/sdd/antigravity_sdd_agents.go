@@ -55,9 +55,8 @@ const antigravitySddAgentsPluginJSON = `{
 // surface it as a system-level reminder. We do NOT invent Antigravity API
 // fields that the runtime does not consume; this is the safest supported
 // installable permission surface.
-const antigravitySddAgentsHardeningMessage = "Gentle AI SDD/Review/JD hardening contract for Antigravity dynamic sub-agents. " +
-	"This contract mirrors the OpenCode permission.task overlay; Antigravity has no static agent registry, " +
-	"so the policy is enforced as a runtime instruction bound to define_subagent calls. " +
+const antigravitySddAgentsHardeningMessage = "Gentle AI SDD/Review/JD hardening contract for Antigravity sub-agents. " +
+	"This contract mirrors the OpenCode permission.task overlay. Antigravity supports pre-registered static subagents (sdd-*, review-*, jd-*), which MUST be invoked directly via invoke_subagent. Define dynamic subagents using define_subagent only as a fallback if a static subagent definition is missing. " +
 	"Allowed roles and their tool scopes: " +
 	"sdd-explore = read/search/CodeGraph/Engram only, no source writes; " +
 	"sdd-propose, sdd-spec, sdd-design, sdd-tasks = artifact reads/writes only, no source edits; " +
@@ -71,7 +70,7 @@ const antigravitySddAgentsHardeningMessage = "Gentle AI SDD/Review/JD hardening 
 	"sdd-verify must run tests to verify behavior and is prohibited from editing source code. " +
 	"Any attempt to bypass the TDD Red-Green-Refactor sequence must fail closed. " +
 	"Dynamic subagent definition skill contract: Every define_subagent call MUST read the phase skill file (.agents/skills/{phase}/SKILL.md or ~/.gemini/antigravity-cli/skills/{phase}/SKILL.md) and pass its full content as the system_prompt parameter. Defining subagents with generic or empty system prompts is strictly prohibited. " +
-	"Strict phase boundaries contract: sdd-explore MUST NOT write proposals, specifications, design documents, or task lists. Each phase (sdd-init, sdd-propose, sdd-spec, sdd-design, sdd-tasks) MUST be defined and invoked as its own distinct dynamic subagent. Folding planning phases into sdd-explore or doing them inline is strictly prohibited. " +
+	"Strict phase boundaries contract: sdd-explore MUST NOT write proposals, specifications, design documents, or task lists. Each phase (sdd-init, sdd-propose, sdd-spec, sdd-design, sdd-tasks) MUST be executed as its own distinct subagent (invoking pre-registered static subagents via invoke_subagent when available, or define_subagent as fallback). Folding planning phases into sdd-explore or doing them inline is strictly prohibited. " +
 	"Engram memory contract: Both the orchestrator and dynamic subagents MUST use Engram (mem_save, mem_search, mem_get_observation) as the primary memory persistence and artifact store under topic keys sdd/{change-name}/{artifact}. " +
 	"Any define_subagent call that tries to widen its tool scope above the allowed scope for that role MUST fail closed and surface status: blocked with the missing capability. " +
 	"Dynamic sub-agents MUST NOT use broad repository search (grep -R, find sweeps, full-tree reads) until CodeGraph has failed or returned insufficient results. " +
