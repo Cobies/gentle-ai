@@ -56,7 +56,7 @@ const antigravitySddAgentsPluginJSON = `{
 // fields that the runtime does not consume; this is the safest supported
 // installable permission surface.
 const antigravitySddAgentsHardeningMessage = "Gentle AI SDD/Review/JD hardening contract for Antigravity sub-agents. " +
-	"This contract mirrors the OpenCode permission.task overlay. Antigravity supports dynamic subagent creation and execution via define_subagent and invoke_subagent. " +
+	"This contract mirrors the OpenCode permission.task overlay. Antigravity supports static subagent invocation as primary with dynamic subagent creation (define_subagent) as resilient fallback. " +
 	"Allowed roles and their tool scopes: " +
 	"sdd-explore = read/search/CodeGraph/Engram only, no source writes (enable_write_tools: false); " +
 	"sdd-propose, sdd-spec, sdd-design, sdd-tasks = artifact reads/writes only, no source edits; " +
@@ -69,7 +69,7 @@ const antigravitySddAgentsHardeningMessage = "Gentle AI SDD/Review/JD hardening 
 	"sdd-apply is prohibited from editing production files without first writing or modifying test files and running the test runner to observe test failure (Red phase). " +
 	"sdd-verify must run tests to verify behavior and is prohibited from editing source code. " +
 	"Any attempt to bypass the TDD Red-Green-Refactor sequence must fail closed. " +
-	"Strict phase boundaries contract: sdd-explore MUST NOT write proposals, specifications, design documents, or task lists. Each phase (sdd-init, sdd-propose, sdd-spec, sdd-design, sdd-tasks, sdd-apply, sdd-verify) MUST be executed as its own distinct subagent (defined with define_subagent if not already defined, and invoked with invoke_subagent). Folding planning phases into sdd-explore or executing phases inline is strictly prohibited. " +
+	"Strict phase boundaries contract: sdd-explore MUST NOT write proposals, specifications, design documents, or task lists. Each phase (sdd-init, sdd-propose, sdd-spec, sdd-design, sdd-tasks, sdd-apply, sdd-verify) MUST be executed as its own distinct subagent (invoking directly via invoke_subagent, falling back to define_subagent if uninitialized). Folding planning phases into sdd-explore or executing phases inline is strictly prohibited. " +
 	"Engram memory contract: Both the orchestrator and subagents MUST use Engram (mem_save, mem_search, mem_get_observation) as the primary memory persistence and artifact store under topic keys sdd/{change-name}/{artifact}. " +
 	"Sub-agents MUST NOT use broad repository search (grep -R, find sweeps, full-tree reads) until CodeGraph has failed or returned insufficient results. " +
 	"Web/internet search is denied by default for code implementation, review, and verification phases unless the task explicitly requires external research."

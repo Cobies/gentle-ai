@@ -320,7 +320,7 @@ func injectInternal(homeDir, workspaceDir string, adapter agents.Adapter, person
 							warning := "> [!IMPORTANT]\n" +
 								"> ACTIVE MODEL CLASSIFIED AS LOW-TIER.\n" +
 								"> You MUST NOT execute SDD phases (sdd-explore, sdd-propose, sdd-spec, sdd-design, sdd-tasks, sdd-apply, sdd-verify) inline within the parent thread.\n" +
-								"> You MUST execute SDD phases via subagent delegation (define dynamic subagents with define_subagent if not already defined, and invoke them with invoke_subagent) rather than executing inline in the parent thread. Inline execution is strictly forbidden.\n"
+								"> You MUST execute SDD phases via subagent delegation (invoke pre-registered subagents directly via invoke_subagent, falling back to define_subagent if uninitialized) rather than executing inline in the parent thread. Inline execution is strictly forbidden.\n"
 							if rules != "" {
 								rules = warning + "\n" + rules
 							} else {
