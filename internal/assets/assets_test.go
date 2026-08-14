@@ -2385,3 +2385,79 @@ func TestSDDArchiveStoreSpecificFilesystemContract(t *testing.T) {
 		"if [ \"$diff_status\" -ne 0 ]; then\n  exit \"$diff_status\"",
 	)
 }
+
+func TestAntigravitySubagentsUseValidNativeTools(t *testing.T) {
+	validTools := map[string]bool{
+		"view_file":             true,
+		"write_to_file":         true,
+		"replace_file_content":  true,
+		"run_command":           true,
+		"list_dir":              true,
+		"grep_search":           true,
+		"find_by_name":          true,
+		"schedule":              true,
+		"manage_task":           true,
+		"invoke_subagent":       true,
+		"define_subagent":       true,
+		"call_mcp_tool":         true,
+		"read_resource":         true,
+		"list_resources":        true,
+		"send_message":          true,
+		"manage_subagents":      true,
+		"ask_question":          true,
+		"generate_image":        true,
+		"codegraph_explore":     true,
+		"mem_search":            true,
+		"mem_get_observation":   true,
+		"mem_save":              true,
+		"mem_update":            true,
+	}
+
+	antigravityAgentFiles := []string{
+		"antigravity/agents/jd-judge-a.md",
+		"antigravity/agents/jd-judge-b.md",
+		"antigravity/agents/review-readability.md",
+		"antigravity/agents/review-refuter.md",
+		"antigravity/agents/review-reliability.md",
+		"antigravity/agents/review-resilience.md",
+		"antigravity/agents/review-risk.md",
+		"antigravity/agents/sdd-apply.md",
+		"antigravity/agents/sdd-archive.md",
+		"antigravity/agents/sdd-design.md",
+		"antigravity/agents/sdd-explore.md",
+		"antigravity/agents/sdd-init.md",
+		"antigravity/agents/sdd-onboard.md",
+		"antigravity/agents/sdd-propose.md",
+		"antigravity/agents/sdd-spec.md",
+		"antigravity/agents/sdd-tasks.md",
+		"antigravity/agents/sdd-verify.md",
+	}
+
+	for _, agentPath := range antigravityAgentFiles {
+		t.Run(agentPath, func(t *testing.T) {
+			content := MustRead(agentPath)
+			if strings.Contains(content, "read_file") {
+				t.Fatalf("%s must not declare unsupported tool 'read_file' (use 'view_file')", agentPath)
+			}
+			if strings.Contains(content, "multi_replace_file_content") {
+				t.Fatalf("%s must not declare unsupported tool 'multi_replace_file_content' (use 'replace_file_content')", agentPath)
+			}
+
+			// Extract tools list from YAML frontmatter
+			for _, line := range strings.Split(content, "\n") {
+				if strings.HasPrefix(strings.TrimSpace(line), "tools:") {
+					// Parse tools: ["a", "b"]
+					raw := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "tools:"))
+					raw = strings.Trim(raw, "[]")
+					for _, item := range strings.Split(raw, ",") {
+						tool := strings.Trim(strings.TrimSpace(item), "\"")
+						if tool != "" && !validTools[tool] {
+							t.Fatalf("%s declares unknown/unsupported tool %q in Antigravity", agentPath, tool)
+						}
+					}
+				}
+			}
+		})
+	}
+}
+
