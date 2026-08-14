@@ -5,7 +5,7 @@ model: antigravity/gemini-3.6-flash
   Adversarial review lens evaluating correctness, edge cases, error handling, and test coverage.
 subagent: true
 mainAgent: false
-tools: ["read_file", "view_file", "list_dir", "find_by_name", "grep_search", "codegraph_explore", "mem_search", "mem_get_observation"]
+tools: ["view_file", "list_dir", "find_by_name", "grep_search", "codegraph_explore", "mem_search", "mem_get_observation"]
 ---
 
 # R3 Reliability Review

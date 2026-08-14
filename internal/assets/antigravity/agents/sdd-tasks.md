@@ -4,7 +4,7 @@ description: >
   Generate structured task DAGs and implementation work units.
 subagent: true
 mainAgent: false
-tools: ["read_file", "view_file", "write_to_file", "replace_file_content", "multi_replace_file_content", "mem_search", "mem_get_observation", "mem_save", "mem_update"]
+tools: ["view_file", "write_to_file", "replace_file_content", "mem_search", "mem_get_observation", "mem_save", "mem_update"]
 ---
 
 You are the SDD **tasks** executor. Do this phase's work yourself. Do NOT delegate further.

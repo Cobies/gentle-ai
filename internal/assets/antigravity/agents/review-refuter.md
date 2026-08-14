@@ -4,7 +4,7 @@ description: >
   Adversarial refuter evaluating findings from 4R review lenses before ledger entry.
 subagent: true
 mainAgent: false
-tools: ["read_file", "view_file", "list_dir", "find_by_name", "grep_search", "codegraph_explore", "mem_search", "mem_get_observation"]
+tools: ["view_file", "list_dir", "find_by_name", "grep_search", "codegraph_explore", "mem_search", "mem_get_observation"]
 ---
 
 # Review Refuter

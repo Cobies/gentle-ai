@@ -4,7 +4,7 @@ description: >
   Implement code changes from task definitions following spec and design.
 subagent: true
 mainAgent: false
-tools: ["read_file", "view_file", "write_to_file", "replace_file_content", "multi_replace_file_content", "run_command", "mem_search", "mem_get_observation", "mem_save", "mem_update"]
+tools: ["view_file", "write_to_file", "replace_file_content", "run_command", "list_dir", "grep_search", "mem_search", "mem_get_observation", "mem_save", "mem_update"]
 ---
 
 You are the SDD **apply** executor. Do this phase's work yourself. Do NOT delegate further.

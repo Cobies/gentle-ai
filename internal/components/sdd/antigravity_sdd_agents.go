@@ -56,7 +56,7 @@ const antigravitySddAgentsPluginJSON = `{
 // fields that the runtime does not consume; this is the safest supported
 // installable permission surface.
 const antigravitySddAgentsHardeningMessage = "Gentle AI SDD/Review/JD hardening contract for Antigravity sub-agents. " +
-	"This contract mirrors the OpenCode permission.task overlay. Antigravity supports pre-registered static subagents (sdd-*, review-*, jd-*), which MUST be invoked directly via invoke_subagent. Define dynamic subagents using define_subagent only as a fallback if a static subagent definition is missing. " +
+	"This contract mirrors the OpenCode permission.task overlay. Antigravity supports pre-registered static subagents (sdd-*, review-*, jd-*), which MUST be invoked directly via invoke_subagent. Dynamic subagent creation via define_subagent is strictly prohibited. If any required static subagent is missing from the agent registry, execution MUST fail closed with status: blocked (missing static subagent). " +
 	"Allowed roles and their tool scopes: " +
 	"sdd-explore = read/search/CodeGraph/Engram only, no source writes; " +
 	"sdd-propose, sdd-spec, sdd-design, sdd-tasks = artifact reads/writes only, no source edits; " +
@@ -69,11 +69,9 @@ const antigravitySddAgentsHardeningMessage = "Gentle AI SDD/Review/JD hardening 
 	"sdd-apply is prohibited from editing production files without first writing or modifying test files and running the test runner to observe test failure (Red phase). " +
 	"sdd-verify must run tests to verify behavior and is prohibited from editing source code. " +
 	"Any attempt to bypass the TDD Red-Green-Refactor sequence must fail closed. " +
-	"Dynamic subagent definition skill contract: Every define_subagent call MUST read the phase skill file (.agents/skills/{phase}/SKILL.md or ~/.gemini/antigravity-cli/skills/{phase}/SKILL.md) and pass its full content as the system_prompt parameter. Defining subagents with generic or empty system prompts is strictly prohibited. " +
-	"Strict phase boundaries contract: sdd-explore MUST NOT write proposals, specifications, design documents, or task lists. Each phase (sdd-init, sdd-propose, sdd-spec, sdd-design, sdd-tasks) MUST be executed as its own distinct subagent (invoking pre-registered static subagents via invoke_subagent when available, or define_subagent as fallback). Folding planning phases into sdd-explore or doing them inline is strictly prohibited. " +
-	"Engram memory contract: Both the orchestrator and dynamic subagents MUST use Engram (mem_save, mem_search, mem_get_observation) as the primary memory persistence and artifact store under topic keys sdd/{change-name}/{artifact}. " +
-	"Any define_subagent call that tries to widen its tool scope above the allowed scope for that role MUST fail closed and surface status: blocked with the missing capability. " +
-	"Dynamic sub-agents MUST NOT use broad repository search (grep -R, find sweeps, full-tree reads) until CodeGraph has failed or returned insufficient results. " +
+	"Strict phase boundaries contract: sdd-explore MUST NOT write proposals, specifications, design documents, or task lists. Each phase (sdd-init, sdd-propose, sdd-spec, sdd-design, sdd-tasks) MUST be executed as its own distinct pre-registered static subagent via invoke_subagent. Folding planning phases into sdd-explore, executing phases inline, or dynamically defining subagents is strictly prohibited. " +
+	"Engram memory contract: Both the orchestrator and subagents MUST use Engram (mem_save, mem_search, mem_get_observation) as the primary memory persistence and artifact store under topic keys sdd/{change-name}/{artifact}. " +
+	"Sub-agents MUST NOT use broad repository search (grep -R, find sweeps, full-tree reads) until CodeGraph has failed or returned insufficient results. " +
 	"Web/internet search is denied by default for code implementation, review, and verification phases unless the task explicitly requires external research."
 
 func antigravityActiveConfigDir(homeDir string) string {
@@ -223,7 +221,7 @@ var antigravitySddAgentsHardeningContractPhrases = []string{
 	"review-resilience",
 	"jd-judge-a",
 	"jd-judge-b",
-	"Dynamic subagent definition skill contract",
+	"Dynamic subagent creation via define_subagent is strictly prohibited",
 	"Strict phase boundaries contract",
 	"Engram memory contract",
 }
