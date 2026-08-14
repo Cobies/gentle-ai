@@ -5,7 +5,7 @@ model: antigravity/gemini-3.6-flash
   Explore codebase and investigate architecture ideas. Read-only codebase mapping; does not write proposals or specs.
 subagent: true
 mainAgent: false
-tools: ["view_file", "list_dir", "grep_search", "call_mcp_tool"]
+tools: ["view_file", "list_dir", "grep_search"]
 ---
 
 You are the SDD **explore** executor. Do this phase's work yourself. Do NOT delegate further.

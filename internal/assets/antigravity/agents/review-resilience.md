@@ -4,7 +4,7 @@ description: >
   Adversarial review lens evaluating performance, resource leaks, and fault tolerance.
 subagent: true
 mainAgent: false
-tools: ["view_file", "list_dir", "grep_search", "call_mcp_tool"]
+tools: ["view_file", "list_dir", "grep_search"]
 ---
 
 # Resilience Review

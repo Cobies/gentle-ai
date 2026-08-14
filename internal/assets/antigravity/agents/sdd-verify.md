@@ -4,7 +4,7 @@ description: >
   Validate implementation against specs using tests and verification builds.
 subagent: true
 mainAgent: false
-tools: ["view_file", "list_dir", "grep_search", "write_to_file", "replace_file_content", "run_command", "call_mcp_tool"]
+tools: ["view_file", "list_dir", "grep_search", "write_to_file", "replace_file_content", "run_command"]
 ---
 
 You are the SDD **verify** executor. Do this phase's work yourself. Do NOT delegate further.

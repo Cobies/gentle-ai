@@ -5,7 +5,7 @@ model: antigravity/gemini-3.6-flash
   Adversarial review lens evaluating code readability, maintainability, and naming.
 subagent: true
 mainAgent: false
-tools: ["view_file", "list_dir", "grep_search", "call_mcp_tool"]
+tools: ["view_file", "list_dir", "grep_search"]
 ---
 
 # R2 Readability Review

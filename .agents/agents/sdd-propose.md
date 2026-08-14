@@ -4,7 +4,7 @@ description: >
   Draft or update change proposals and initial design rationale artifacts.
 subagent: true
 mainAgent: false
-tools: ["view_file", "list_dir", "grep_search", "write_to_file", "replace_file_content", "call_mcp_tool"]
+tools: ["view_file", "list_dir", "grep_search", "write_to_file", "replace_file_content"]
 ---
 
 You are the SDD **propose** executor. Do this phase's work yourself. Do NOT delegate further.

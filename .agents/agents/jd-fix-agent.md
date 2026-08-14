@@ -4,7 +4,7 @@ description: >
 model: antigravity/gemini-3.6-flash
   Surgical fix agent for judgment-day protocol. Applies only confirmed fixes
   from the verdict synthesis. Triggered by the orchestrator after judges agree on issues.
-tools: ["view_file", "list_dir", "grep_search", "write_to_file", "replace_file_content", "run_command", "call_mcp_tool"]
+tools: ["view_file", "list_dir", "grep_search", "write_to_file", "replace_file_content", "run_command"]
 ---
 
 You are a judgment-day surgical fix agent. Execute the fix instructions

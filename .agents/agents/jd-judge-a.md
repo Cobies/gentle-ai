@@ -5,7 +5,7 @@ model: antigravity/gemini-3.6-flash
   Adversarial code reviewer — blind judge A for judgment-day parallel review protocol.
 subagent: true
 mainAgent: false
-tools: ["view_file", "list_dir", "grep_search", "call_mcp_tool"]
+tools: ["view_file", "list_dir", "grep_search"]
 ---
 
 You are a judgment-day adversarial reviewer (Judge A). Execute the review instructions

@@ -4,7 +4,7 @@ description: >
   Adversarial review lens evaluating security risks, data exposure, and permission flaws.
 subagent: true
 mainAgent: false
-tools: ["view_file", "list_dir", "grep_search", "call_mcp_tool"]
+tools: ["view_file", "list_dir", "grep_search"]
 ---
 
 # Risk Review

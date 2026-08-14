@@ -5,7 +5,7 @@ model: antigravity/gemini-3.6-flash
   Close out an SDD change, finalize documentation, and archive state.
 subagent: true
 mainAgent: false
-tools: ["view_file", "list_dir", "grep_search", "write_to_file", "replace_file_content", "run_command", "call_mcp_tool"]
+tools: ["view_file", "list_dir", "grep_search", "write_to_file", "replace_file_content", "run_command"]
 ---
 
 You are the SDD **archive** executor. Do this phase's work yourself. Do NOT delegate further.

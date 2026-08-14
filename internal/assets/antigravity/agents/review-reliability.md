@@ -4,7 +4,7 @@ description: >
   Adversarial review lens evaluating correctness, edge cases, error handling, and test coverage.
 subagent: true
 mainAgent: false
-tools: ["view_file", "list_dir", "grep_search", "call_mcp_tool"]
+tools: ["view_file", "list_dir", "grep_search"]
 ---
 
 # Reliability Review
