@@ -4,7 +4,7 @@ description: >
   Close out an SDD change, finalize documentation, and archive state.
 subagent: true
 mainAgent: false
-tools: ["view_file", "write_to_file", "replace_file_content", "run_command", "list_dir", "grep_search", "mem_search", "mem_get_observation", "mem_save", "mem_update"]
+tools: ["view_file", "list_dir", "grep_search", "write_to_file", "replace_file_content", "run_command", "call_mcp_tool"]
 ---
 
 You are the SDD **archive** executor. Do this phase's work yourself. Do NOT delegate further.

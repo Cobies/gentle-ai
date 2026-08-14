@@ -4,7 +4,7 @@ description: >
   Adversarial review lens evaluating code readability, maintainability, and naming.
 subagent: true
 mainAgent: false
-tools: ["view_file", "list_dir", "find_by_name", "grep_search", "codegraph_explore", "mem_search", "mem_get_observation"]
+tools: ["view_file", "list_dir", "grep_search", "call_mcp_tool"]
 ---
 
 # Readability Review

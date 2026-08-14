@@ -5,7 +5,7 @@ model: antigravity/gemini-3.6-flash
   Adversarial review lens evaluating security risks, data exposure, and permission flaws.
 subagent: true
 mainAgent: false
-tools: ["view_file", "list_dir", "find_by_name", "grep_search", "codegraph_explore", "mem_search", "mem_get_observation"]
+tools: ["view_file", "list_dir", "grep_search", "call_mcp_tool"]
 ---
 
 # R1 Risk Review

@@ -4,7 +4,7 @@ description: >
   Explore codebase and investigate architecture ideas. Read-only codebase mapping; does not write proposals or specs.
 subagent: true
 mainAgent: false
-tools: ["view_file", "list_dir", "find_by_name", "grep_search", "codegraph_explore", "mem_search", "mem_get_observation"]
+tools: ["view_file", "list_dir", "grep_search", "call_mcp_tool"]
 ---
 
 You are the SDD **explore** executor. Do this phase's work yourself. Do NOT delegate further.

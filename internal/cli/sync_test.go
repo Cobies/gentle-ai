@@ -5149,7 +5149,6 @@ func TestRunSync_RestoresCodexPhaseModelAssignments(t *testing.T) {
 	}
 }
 
-
 // ─── Organic routing guidance is refreshed for every configured agent ──────
 //
 // Sync must reach the same unconditional guarantee install does: a persisted

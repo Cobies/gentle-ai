@@ -4,7 +4,7 @@ description: >
   Adversarial code reviewer — blind judge B for judgment-day parallel review protocol.
 subagent: true
 mainAgent: false
-tools: ["view_file", "list_dir", "find_by_name", "grep_search", "codegraph_explore", "mem_search", "mem_get_observation"]
+tools: ["view_file", "list_dir", "grep_search", "call_mcp_tool"]
 ---
 
 You are a judgment-day adversarial reviewer (Judge B). Execute the review instructions

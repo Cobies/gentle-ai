@@ -5,7 +5,7 @@ model: antigravity/gemini-3.6-flash
   Guide new projects through initial SDD setup and workflow orientation.
 subagent: true
 mainAgent: false
-tools: ["view_file", "write_to_file", "replace_file_content", "run_command", "list_dir", "grep_search", "mem_search", "mem_get_observation", "mem_save", "mem_update"]
+tools: ["view_file", "list_dir", "grep_search", "write_to_file", "replace_file_content", "run_command", "call_mcp_tool"]
 ---
 
 You are the SDD **onboard** executor. Do this phase's work yourself. Do NOT delegate further.

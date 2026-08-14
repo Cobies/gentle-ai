@@ -56,30 +56,43 @@ const antigravitySddAgentsPluginJSON = `{
 // fields that the runtime does not consume; this is the safest supported
 // installable permission surface.
 const antigravitySddAgentsHardeningMessage = "Gentle AI SDD/Review/JD hardening contract for Antigravity sub-agents. " +
-	"This contract mirrors the OpenCode permission.task overlay. Antigravity supports pre-registered static subagents (sdd-*, review-*, jd-*), which MUST be invoked directly via invoke_subagent. Dynamic subagent creation via define_subagent is strictly prohibited. If any required static subagent is missing from the agent registry, execution MUST fail closed with status: blocked (missing static subagent). " +
+	"This contract mirrors the OpenCode permission.task overlay. Antigravity supports dynamic subagent creation and execution via define_subagent and invoke_subagent. " +
 	"Allowed roles and their tool scopes: " +
-	"sdd-explore = read/search/CodeGraph/Engram only, no source writes; " +
+	"sdd-explore = read/search/CodeGraph/Engram only, no source writes (enable_write_tools: false); " +
 	"sdd-propose, sdd-spec, sdd-design, sdd-tasks = artifact reads/writes only, no source edits; " +
 	"sdd-apply = source edits and targeted verification commands only, no commit/push/PR/publish/destructive git; " +
 	"sdd-verify = read plus test/build commands, no source edits unless explicitly approved; " +
 	"sdd-archive, sdd-onboard, sdd-init = read plus scoped writes; " +
-	"review-* (including review-risk, review-readability, review-reliability, review-resilience, and review-refuter) and jd-judge-* (including jd-judge-a, jd-judge-b) = read-only, emit ledger rows or verdicts only; " +
+	"review-* (including review-risk, review-readability, review-reliability, review-resilience, and review-refuter) and jd-judge-* (including jd-judge-a, jd-judge-b) = read-only, emit ledger rows or verdicts only (enable_write_tools: false); " +
 	"jd-fix-agent = edit only confirmed ledger findings, do not discover new findings. " +
 	"Strict TDD (Test-Driven Development) enforcement rules: When strict_tdd: true is active, " +
 	"sdd-apply is prohibited from editing production files without first writing or modifying test files and running the test runner to observe test failure (Red phase). " +
 	"sdd-verify must run tests to verify behavior and is prohibited from editing source code. " +
 	"Any attempt to bypass the TDD Red-Green-Refactor sequence must fail closed. " +
-	"Strict phase boundaries contract: sdd-explore MUST NOT write proposals, specifications, design documents, or task lists. Each phase (sdd-init, sdd-propose, sdd-spec, sdd-design, sdd-tasks) MUST be executed as its own distinct pre-registered static subagent via invoke_subagent. Folding planning phases into sdd-explore, executing phases inline, or dynamically defining subagents is strictly prohibited. " +
+	"Strict phase boundaries contract: sdd-explore MUST NOT write proposals, specifications, design documents, or task lists. Each phase (sdd-init, sdd-propose, sdd-spec, sdd-design, sdd-tasks, sdd-apply, sdd-verify) MUST be executed as its own distinct subagent (defined with define_subagent if not already defined, and invoked with invoke_subagent). Folding planning phases into sdd-explore or executing phases inline is strictly prohibited. " +
 	"Engram memory contract: Both the orchestrator and subagents MUST use Engram (mem_save, mem_search, mem_get_observation) as the primary memory persistence and artifact store under topic keys sdd/{change-name}/{artifact}. " +
 	"Sub-agents MUST NOT use broad repository search (grep -R, find sweeps, full-tree reads) until CodeGraph has failed or returned insufficient results. " +
 	"Web/internet search is denied by default for code implementation, review, and verification phases unless the task explicitly requires external research."
 
-func antigravityActiveConfigDir(homeDir string) string {
-	return antigravity.NewAdapter().GlobalConfigDir(homeDir)
+func antigravityActiveConfigDirs(homeDir string) []string {
+	dirs := []string{antigravity.NewAdapter().GlobalConfigDir(homeDir)}
+	for _, candidate := range []string{
+		filepath.Join(homeDir, ".gemini", "antigravity-cli"),
+		filepath.Join(homeDir, ".gemini", "antigravity-desktop"),
+		filepath.Join(homeDir, ".gemini", "antigravity"),
+		filepath.Join(homeDir, ".gemini", "config"),
+	} {
+		if stat, err := os.Stat(candidate); err == nil && stat.IsDir() {
+			if !slices.Contains(dirs, candidate) {
+				dirs = append(dirs, candidate)
+			}
+		}
+	}
+	return dirs
 }
 
 func antigravitySddAgentsPluginDir(homeDir string) string {
-	return filepath.Join(antigravityActiveConfigDir(homeDir), "plugins", antigravitySddAgentsPluginName)
+	return filepath.Join(antigravity.NewAdapter().GlobalConfigDir(homeDir), "plugins", antigravitySddAgentsPluginName)
 }
 
 func antigravitySddAgentsHooksJSON() []byte {
@@ -110,35 +123,32 @@ func mustJSONStringSDDAgents(v any) string {
 }
 
 // installAntigravitySddAgentsPlugin writes the gentle-ai-sdd-agents plugin
-// (plugin.json + hooks.json) under ~/.gemini/antigravity-cli/plugins/. It
-// returns (changed, files, err) so the SDD injector can fold the result into
-// its InjectionResult.
-//
-// This is the Antigravity equivalent of the OpenCode sdd-overlay-*.json
-// `permission.task.__replace__` block. We do NOT touch user-owned
-// settings.json or mcp_config.json here — the policy lives entirely inside
-// the plugin so a future uninstall deletes the plugin directory and
-// removes the hardening contract atomically.
+// (plugin.json + hooks.json) under ~/.gemini/antigravity-cli/plugins/ and other
+// active Antigravity config directories. It returns (changed, files, err) so the
+// SDD injector can fold the result into its InjectionResult.
 func installAntigravitySddAgentsPlugin(homeDir string) (bool, []string, error) {
-	pluginDir := antigravitySddAgentsPluginDir(homeDir)
-	files := make([]string, 0, 2)
+	configDirs := antigravityActiveConfigDirs(homeDir)
+	files := make([]string, 0, len(configDirs)*2)
 	changed := false
 
-	pluginPath := filepath.Join(pluginDir, "plugin.json")
-	pluginWrite, err := filemerge.WriteFileAtomic(pluginPath, []byte(antigravitySddAgentsPluginJSON), 0o644)
-	if err != nil {
-		return false, nil, fmt.Errorf("write Antigravity SDD agents plugin manifest: %w", err)
-	}
-	changed = changed || pluginWrite.Changed
-	files = append(files, pluginPath)
+	for _, cfgDir := range configDirs {
+		pluginDir := filepath.Join(cfgDir, "plugins", antigravitySddAgentsPluginName)
+		pluginPath := filepath.Join(pluginDir, "plugin.json")
+		pluginWrite, err := filemerge.WriteFileAtomic(pluginPath, []byte(antigravitySddAgentsPluginJSON), 0o644)
+		if err != nil {
+			return false, nil, fmt.Errorf("write Antigravity SDD agents plugin manifest (%s): %w", cfgDir, err)
+		}
+		changed = changed || pluginWrite.Changed
+		files = append(files, pluginPath)
 
-	hooksPath := filepath.Join(pluginDir, "hooks.json")
-	hooksWrite, err := mergeJSONFile(hooksPath, antigravitySddAgentsHooksJSON())
-	if err != nil {
-		return false, nil, fmt.Errorf("write Antigravity SDD agents plugin hooks: %w", err)
+		hooksPath := filepath.Join(pluginDir, "hooks.json")
+		hooksWrite, err := mergeJSONFile(hooksPath, antigravitySddAgentsHooksJSON())
+		if err != nil {
+			return false, nil, fmt.Errorf("write Antigravity SDD agents plugin hooks (%s): %w", cfgDir, err)
+		}
+		changed = changed || hooksWrite.writeResult.Changed
+		files = append(files, hooksPath)
 	}
-	changed = changed || hooksWrite.writeResult.Changed
-	files = append(files, hooksPath)
 
 	return changed, files, nil
 }
@@ -221,7 +231,8 @@ var antigravitySddAgentsHardeningContractPhrases = []string{
 	"review-resilience",
 	"jd-judge-a",
 	"jd-judge-b",
-	"Dynamic subagent creation via define_subagent is strictly prohibited",
+	"define_subagent",
+	"invoke_subagent",
 	"Strict phase boundaries contract",
 	"Engram memory contract",
 }

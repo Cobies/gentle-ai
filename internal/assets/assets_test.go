@@ -2388,29 +2388,29 @@ func TestSDDArchiveStoreSpecificFilesystemContract(t *testing.T) {
 
 func TestAntigravitySubagentsUseValidNativeTools(t *testing.T) {
 	validTools := map[string]bool{
-		"view_file":             true,
-		"write_to_file":         true,
-		"replace_file_content":  true,
-		"run_command":           true,
-		"list_dir":              true,
-		"grep_search":           true,
-		"find_by_name":          true,
-		"schedule":              true,
-		"manage_task":           true,
-		"invoke_subagent":       true,
-		"define_subagent":       true,
-		"call_mcp_tool":         true,
-		"read_resource":         true,
-		"list_resources":        true,
-		"send_message":          true,
-		"manage_subagents":      true,
-		"ask_question":          true,
-		"generate_image":        true,
-		"codegraph_explore":     true,
-		"mem_search":            true,
-		"mem_get_observation":   true,
-		"mem_save":              true,
-		"mem_update":            true,
+		"view_file":            true,
+		"write_to_file":        true,
+		"replace_file_content": true,
+		"run_command":          true,
+		"list_dir":             true,
+		"grep_search":          true,
+		"find_by_name":         true,
+		"schedule":             true,
+		"manage_task":          true,
+		"invoke_subagent":      true,
+		"define_subagent":      true,
+		"call_mcp_tool":        true,
+		"read_resource":        true,
+		"list_resources":       true,
+		"send_message":         true,
+		"manage_subagents":     true,
+		"ask_question":         true,
+		"generate_image":       true,
+		"codegraph_explore":    true,
+		"mem_search":           true,
+		"mem_get_observation":  true,
+		"mem_save":             true,
+		"mem_update":           true,
 	}
 
 	antigravityAgentFiles := []string{
@@ -2460,4 +2460,3 @@ func TestAntigravitySubagentsUseValidNativeTools(t *testing.T) {
 		})
 	}
 }
-
