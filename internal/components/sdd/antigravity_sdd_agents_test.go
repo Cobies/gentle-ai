@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/gentleman-programming/gentle-ai/v2/internal/agents"
+	"github.com/gentleman-programming/gentle-ai/v2/internal/assets"
 	"github.com/gentleman-programming/gentle-ai/v2/internal/model"
 )
 
@@ -136,9 +137,33 @@ func TestAntigravitySddAgentsHardeningContractPhrases(t *testing.T) {
 			t.Errorf("hardening message missing required TDD phrase %q", want)
 		}
 	}
+	// Assert Engram dual-path persistence contract phrases specifically
+	for _, want := range []string{"enable_mcp_tools: true", "fallback persistence"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("hardening message missing required Engram persistence phrase %q", want)
+		}
+	}
 	for _, forbidden := range antigravitySddAgentsHardeningContractForbids {
 		if strings.Contains(msg, forbidden) {
 			t.Errorf("hardening message must not contain %q (it would fake a real Antigravity API)", forbidden)
+		}
+	}
+}
+
+func TestAntigravityOrchestratorAssetContainsEngramPersistenceContract(t *testing.T) {
+	content, err := assets.FS.ReadFile("antigravity/sdd-orchestrator.md")
+	if err != nil {
+		t.Fatalf("ReadFile(antigravity/sdd-orchestrator.md) error = %v", err)
+	}
+	text := string(content)
+	for _, want := range []string{
+		"enable_mcp_tools: true",
+		"mem_save",
+		"sdd/{change-name}/{artifact-type}",
+		"fallback persistence",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("sdd-orchestrator.md missing required engram persistence directive %q", want)
 		}
 	}
 }

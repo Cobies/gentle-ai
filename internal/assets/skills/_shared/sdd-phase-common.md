@@ -63,6 +63,10 @@ mem_save(
 `topic_key` enables upserts — saving again updates, not duplicates.
 `capture_prompt: false` is mandatory for SDD artifacts because they are automated pipeline outputs, not human/proactive memory saves. Set it when the Engram tool schema supports it; if an older schema rejects or does not expose the field, omit it rather than failing.
 
+### Dual-Path Persistence Guarantee
+
+Subagents MUST attempt direct persistence via `mem_save` when MCP tools are available (`enable_mcp_tools: true`). The orchestrator provides an active fallback persistence guarantee: if a subagent completes without persisting directly to Engram, the orchestrator inspects the return envelope and saves the artifact under `sdd/{change-name}/{artifact-type}` before advancing the pipeline.
+
 ### OpenSpec mode
 
 File was already written during the phase's main step. No additional action needed.

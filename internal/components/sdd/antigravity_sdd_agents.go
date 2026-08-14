@@ -57,7 +57,7 @@ const antigravitySddAgentsPluginJSON = `{
 // installable permission surface.
 const antigravitySddAgentsHardeningMessage = "Gentle AI SDD/Review/JD hardening contract for Antigravity sub-agents. " +
 	"This contract mirrors the OpenCode permission.task overlay. Antigravity supports static subagent invocation as primary with dynamic subagent creation (define_subagent) as resilient fallback. " +
-	"Allowed roles and their tool scopes: " +
+	"Allowed roles and their tool scopes: dynamic subagents must set enable_mcp_tools: true so phase agents can use configured MCP tools such as Engram; " +
 	"sdd-explore = read/search/CodeGraph/Engram only, no source writes (enable_write_tools: false); " +
 	"sdd-propose, sdd-spec, sdd-design, sdd-tasks = artifact reads/writes only, no source edits; " +
 	"sdd-apply = source edits and targeted verification commands only, no commit/push/PR/publish/destructive git; " +
@@ -70,7 +70,7 @@ const antigravitySddAgentsHardeningMessage = "Gentle AI SDD/Review/JD hardening 
 	"sdd-verify must run tests to verify behavior and is prohibited from editing source code. " +
 	"Any attempt to bypass the TDD Red-Green-Refactor sequence must fail closed. " +
 	"Strict phase boundaries contract: sdd-explore MUST NOT write proposals, specifications, design documents, or task lists. Each phase (sdd-init, sdd-propose, sdd-spec, sdd-design, sdd-tasks, sdd-apply, sdd-verify) MUST be executed as its own distinct subagent (invoking directly via invoke_subagent, falling back to define_subagent if uninitialized). Folding planning phases into sdd-explore or executing phases inline is strictly prohibited. " +
-	"Engram memory contract: Both the orchestrator and subagents MUST use Engram (mem_save, mem_search, mem_get_observation) as the primary memory persistence and artifact store under topic keys sdd/{change-name}/{artifact}. " +
+	"Engram memory contract: Both the orchestrator and subagents MUST use Engram (mem_save, mem_search, mem_get_observation) as the primary memory persistence and artifact store under topic keys sdd/{change-name}/{artifact}. If a subagent does not persist directly, the orchestrator provides fallback persistence by saving returned artifacts under sdd/{change-name}/{artifact-type}. " +
 	"Sub-agents MUST NOT use broad repository search (grep -R, find sweeps, full-tree reads) until CodeGraph has failed or returned insufficient results. " +
 	"Web/internet search is denied by default for code implementation, review, and verification phases unless the task explicitly requires external research."
 
@@ -233,6 +233,8 @@ var antigravitySddAgentsHardeningContractPhrases = []string{
 	"jd-judge-b",
 	"define_subagent",
 	"invoke_subagent",
+	"enable_mcp_tools: true",
+	"fallback persistence",
 	"Strict phase boundaries contract",
 	"Engram memory contract",
 }
