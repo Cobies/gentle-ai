@@ -17,6 +17,14 @@ import (
 
 var errReviewProviderRefuterNotRequired = errors.New("provider refuter request has no inferential findings; continue with `gentle-ai review finalize --captured-results`")
 
+// errReviewProviderRefuterResultNotCaptured and its targeted-validator twin
+// are typed absence, not damage: finalize discovery distinguishes an
+// unoccupied slot (continue on the ordinary route) from unverifiable captured
+// bytes (fail closed).
+var errReviewProviderRefuterResultNotCaptured = errors.New("provider refuter result is not captured") // refusal:by-design operator-knowledge: capture the Go-issued provider refuter batch before finalizing
+
+var errReviewProviderTargetedValidatorResultNotCaptured = errors.New("provider targeted validator result is not captured") // refusal:by-design operator-knowledge: capture the Go-issued validator result before finalizing
+
 type reviewProviderRole = reviewerprovider.Role
 
 const reviewProviderTaskBindingHeader = "GENTLE_AI_REVIEW_PROVIDER_TASK"
@@ -243,9 +251,9 @@ func reviewProviderMaterializeEvidence(ctx context.Context, repo string, snapsho
 	}
 	defer deps.close(inspector)
 	frozen := inspector.FrozenCandidateContext()
-	if len(frozen.ChangedPathManifest) > reviewProviderMaxEvidenceEntries {
-		return nil, reviewLensContextRefusal("lens_context_budget_exceeded", reviewLensContextCapacityAction(len(frozen.ChangedPathManifest)))
-	}
+	// The aggregate byte budget is the whole bound. The 32-entry cap that used
+	// to sit above it measured the wrong thing and is gone (issue #3367); this
+	// role request is additionally bounded by its contract's prompt limit.
 	budget := reviewLensContextByteBudget
 	evidence := make([]reviewProviderEvidence, 0, len(frozen.ChangedPathManifest))
 	for index, entry := range frozen.ChangedPathManifest {
@@ -394,7 +402,7 @@ func readCapturedProviderRefuterResult(ctx context.Context, repo, storeDir strin
 		return facadeRefuterResult{}, err
 	}
 	if !slot.Occupied {
-		return facadeRefuterResult{}, errors.New("provider refuter result is not captured") // refusal:by-design operator-knowledge: capture the Go-issued provider refuter batch before finalizing
+		return facadeRefuterResult{}, errReviewProviderRefuterResultNotCaptured
 	}
 	request, err := reviewProviderNewRefuterRequest(ctx, repo, storeDir, state, revision)
 	if err != nil {
@@ -533,7 +541,7 @@ func readCapturedProviderTargetedValidatorResult(ctx context.Context, repo, stor
 		return facadeValidationResult{}, err
 	}
 	if !slot.Occupied {
-		return facadeValidationResult{}, errors.New("provider targeted validator result is not captured") // refusal:by-design operator-knowledge: capture the Go-issued validator result before finalizing
+		return facadeValidationResult{}, errReviewProviderTargetedValidatorResultNotCaptured
 	}
 	result, _, err := reviewProviderAdmitTargetedValidatorRaw(request, slot.Payload)
 	if err != nil {
