@@ -1,7 +1,6 @@
 ---
 name: review-resilience
 description: >
-model: antigravity/gemini-3.6-flash
   Adversarial review lens evaluating performance, resource leaks, and fault tolerance.
 subagent: true
 mainAgent: false

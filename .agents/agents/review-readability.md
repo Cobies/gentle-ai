@@ -1,7 +1,6 @@
 ---
 name: review-readability
 description: >
-model: antigravity/gemini-3.6-flash
   Adversarial review lens evaluating code readability, maintainability, and naming.
 subagent: true
 mainAgent: false

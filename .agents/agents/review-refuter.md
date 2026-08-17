@@ -1,7 +1,6 @@
 ---
 name: review-refuter
 description: >
-model: antigravity/gemini-3.6-flash
   Adversarial refuter evaluating findings from 4R review lenses before ledger entry.
 subagent: true
 mainAgent: false

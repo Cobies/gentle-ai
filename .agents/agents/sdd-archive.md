@@ -1,7 +1,6 @@
 ---
 name: sdd-archive
 description: >
-model: antigravity/gemini-3.6-flash
   Close out an SDD change, finalize documentation, and archive state.
 subagent: true
 mainAgent: false

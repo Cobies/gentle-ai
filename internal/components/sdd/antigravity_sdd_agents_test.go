@@ -138,7 +138,14 @@ func TestAntigravitySddAgentsHardeningContractPhrases(t *testing.T) {
 		}
 	}
 	// Assert Engram dual-path persistence contract phrases specifically
-	for _, want := range []string{"enable_mcp_tools: true", "fallback persistence"} {
+	for _, want := range []string{
+		"enable_mcp_tools: true",
+		"fallback persistence",
+		"call_mcp_tool",
+		`ServerName="engram"`,
+		`ToolName="mem_save"`,
+		"direct MCP access",
+	} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("hardening message missing required Engram persistence phrase %q", want)
 		}
@@ -161,6 +168,11 @@ func TestAntigravityOrchestratorAssetContainsEngramPersistenceContract(t *testin
 		"mem_save",
 		"sdd/{change-name}/{artifact-type}",
 		"fallback persistence",
+		"call_mcp_tool",
+		`ServerName="engram"`,
+		`ToolName="mem_save"`,
+		"direct MCP access",
+		"enable_write_tools",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("sdd-orchestrator.md missing required engram persistence directive %q", want)

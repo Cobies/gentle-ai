@@ -1,7 +1,6 @@
 ---
 name: sdd-onboard
 description: >
-model: antigravity/gemini-3.6-flash
   Guide new projects through initial SDD setup and workflow orientation.
 subagent: true
 mainAgent: false

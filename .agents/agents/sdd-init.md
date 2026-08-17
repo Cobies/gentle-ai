@@ -1,7 +1,6 @@
 ---
 name: sdd-init
 description: >
-model: antigravity/gemini-3.6-flash
   Initialize SDD context, detect project stack, testing capabilities, and bootstrap persistence backend.
 subagent: true
 mainAgent: false

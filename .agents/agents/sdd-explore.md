@@ -1,7 +1,6 @@
 ---
 name: sdd-explore
 description: >
-model: antigravity/gemini-3.6-flash
   Explore codebase and investigate architecture ideas. Read-only codebase mapping; does not write proposals or specs.
 subagent: true
 mainAgent: false

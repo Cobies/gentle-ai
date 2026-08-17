@@ -1,7 +1,6 @@
 ---
 name: jd-judge-b
 description: >
-model: antigravity/gemini-3.6-flash
   Adversarial code reviewer — blind judge B for judgment-day parallel review protocol.
 subagent: true
 mainAgent: false

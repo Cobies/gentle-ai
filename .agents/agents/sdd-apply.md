@@ -1,7 +1,6 @@
 ---
 name: sdd-apply
 description: >
-model: antigravity/gemini-3.6-flash
   Implement code changes from task definitions following spec and design.
 subagent: true
 mainAgent: false
