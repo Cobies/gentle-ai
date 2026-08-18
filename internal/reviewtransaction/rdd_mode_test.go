@@ -419,6 +419,66 @@ func TestCloneLocalRDDModeEnableRejectsGlobalOffWithoutChangingExplicitOff(t *te
 	}
 }
 
+func TestCloneLocalRDDModeEnableRejectsGlobalUnsetWithoutChangingExplicitOff(t *testing.T) {
+	repo := initSnapshotRepo(t)
+	ctx := context.Background()
+	disabled, err := SetCloneLocalRDDMode(ctx, repo, RDDModeOff, "", RDDGlobalMode{Value: "on"})
+	if err != nil {
+		t.Fatalf("SetCloneLocalRDDMode(off) error = %v", err)
+	}
+	record, err := CloneLocalRDDModeRecordPath(ctx, repo)
+	if err != nil {
+		t.Fatalf("CloneLocalRDDModeRecordPath error = %v", err)
+	}
+	before, err := os.ReadFile(record)
+	if err != nil {
+		t.Fatalf("read explicit-off record: %v", err)
+	}
+
+	status, err := SetCloneLocalRDDMode(ctx, repo, RDDModeUnset, disabled.Revision, RDDGlobalMode{})
+	var rejected *RDDDisabledError
+	if !errors.As(err, &rejected) || !errors.Is(err, ErrRDDDisabled) || rejected.Source != RDDModeSourceDefault {
+		t.Fatalf("clear explicit-off override error = %v, want default typed disabled error", err)
+	}
+	if !strings.Contains(err.Error(), "gentle-ai review mode enable --scope=global") {
+		t.Fatalf("clear explicit-off override error does not name the global continuation: %v", err)
+	}
+	if status.CloneLocal != RDDModeOff || status.Revision != disabled.Revision || status.Effective != RDDModeOff {
+		t.Fatalf("rejected clear changed the clone-local status: %#v", status)
+	}
+	recordAfter, err := CloneLocalRDDModeRecordPath(ctx, repo)
+	if err != nil {
+		t.Fatalf("CloneLocalRDDModeRecordPath after rejected clear error = %v", err)
+	}
+	after, err := os.ReadFile(recordAfter)
+	if err != nil {
+		t.Fatalf("read explicit-off record after rejected clear: %v", err)
+	}
+	if recordAfter != record || !bytes.Equal(after, before) {
+		t.Fatalf("rejected clear published a new generation")
+	}
+}
+
+func TestCloneLocalRDDModeEnableRejectsGlobalUnsetWithoutLocalOverride(t *testing.T) {
+	repo := initSnapshotRepo(t)
+	ctx := context.Background()
+
+	status, err := SetCloneLocalRDDMode(ctx, repo, RDDModeUnset, "", RDDGlobalMode{})
+	var rejected *RDDDisabledError
+	if !errors.As(err, &rejected) || !errors.Is(err, ErrRDDDisabled) || rejected.Source != RDDModeSourceDefault {
+		t.Fatalf("enable with global unset error = %v, want default typed disabled error", err)
+	}
+	if !strings.Contains(err.Error(), "gentle-ai review mode enable --scope=global") {
+		t.Fatalf("enable with global unset error does not name the global continuation: %v", err)
+	}
+	if status.Effective != RDDModeOff || status.Source != RDDModeSourceDefault || status.Revision != "" {
+		t.Fatalf("rejected enable returned invalid status: %#v", status)
+	}
+	if _, err := os.Lstat(filepath.Join(repo, ".git", "gentle-ai")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("rejected enable created repository state: %v", err)
+	}
+}
+
 func TestCloneLocalRDDModeEnableValidatesStaleRevisionBeforeGlobalOffRefusal(t *testing.T) {
 	repo := initSnapshotRepo(t)
 	ctx := context.Background()

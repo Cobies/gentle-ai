@@ -340,10 +340,14 @@ func SetCloneLocalRDDMode(
 		return failedClosedRDDModeStatus(RDDModeSourceCloneLocal), fmt.Errorf(
 			"%w: expected %q but the clone-local head is %q", ErrRDDModeRevisionMismatch, expectedRevision, currentStatus.Revision)
 	}
-	if currentErr == nil && mode == RDDModeUnset && globalMode == RDDModeOff {
+	if currentErr == nil && mode == RDDModeUnset && globalMode != RDDModeOn {
 		// Clearing this clone's off-only override cannot enable review while the
-		// global source remains off, so refuse without publishing a generation.
-		return currentStatus, &RDDDisabledError{Operation: RDDOperationStart, Source: RDDModeSourceGlobal}
+		// global source remains unset or off, so refuse without publishing a generation.
+		source := RDDModeSourceDefault
+		if globalMode == RDDModeOff {
+			source = RDDModeSourceGlobal
+		}
+		return currentStatus, &RDDDisabledError{Operation: RDDOperationStart, Source: source}
 	}
 	// A request that matches the mode this clone already carries publishes no
 	// new generation of its own -- but it is not finished until every gentle-ai

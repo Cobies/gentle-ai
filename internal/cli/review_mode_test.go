@@ -271,6 +271,74 @@ func TestReviewModeCloneScopeEnableRejectsGlobalOffWithoutLocalOverride(t *testi
 	}
 }
 
+func TestReviewModeCloneScopeEnableRejectsGlobalUnsetWithoutLocalOverride(t *testing.T) {
+	_ = reviewModeHome(t)
+	repo := initReviewCLIRepo(t)
+
+	var output bytes.Buffer
+	err := RunReviewMode([]string{"enable", "--cwd", repo, "--scope", "clone", "--json"}, &output)
+	var disabled *reviewtransaction.RDDDisabledError
+	if !errors.As(err, &disabled) || !errors.Is(err, reviewtransaction.ErrRDDDisabled) ||
+		disabled.Source != reviewtransaction.RDDModeSourceDefault {
+		t.Fatalf("clone enable error = %v, want default typed disabled error", err)
+	}
+	if !strings.Contains(err.Error(), "gentle-ai review mode enable --scope=global") {
+		t.Fatalf("clone enable error does not name the global continuation: %v", err)
+	}
+	if result := decodeReviewModeResult(t, output.Bytes()); result.Status.Effective != reviewtransaction.RDDModeOff ||
+		result.Status.Source != reviewtransaction.RDDModeSourceDefault || result.Status.Revision != "" {
+		t.Fatalf("clone enable result = %#v", result.Status)
+	}
+	if _, err := os.Lstat(filepath.Join(repo, ".git", "gentle-ai")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("rejected clone enable created repository state: %v", err)
+	}
+}
+
+func TestReviewModeCloneScopeEnableRejectsExplicitOffWhileGlobalUnset(t *testing.T) {
+	_ = reviewModeHome(t)
+	repo := initReviewCLIRepo(t)
+	disabled, err := reviewtransaction.SetCloneLocalRDDMode(
+		context.Background(), repo, reviewtransaction.RDDModeOff, "", reviewtransaction.RDDGlobalMode{Value: string(reviewtransaction.RDDModeOn)})
+	if err != nil {
+		t.Fatalf("SetCloneLocalRDDMode(off) error = %v", err)
+	}
+	record, err := reviewtransaction.CloneLocalRDDModeRecordPath(context.Background(), repo)
+	if err != nil {
+		t.Fatalf("CloneLocalRDDModeRecordPath error = %v", err)
+	}
+	before, err := os.ReadFile(record)
+	if err != nil {
+		t.Fatalf("read explicit-off record: %v", err)
+	}
+
+	var output bytes.Buffer
+	err = RunReviewMode([]string{"enable", "--cwd", repo, "--scope", "clone", "--json"}, &output)
+	var blocked *reviewtransaction.RDDDisabledError
+	if !errors.As(err, &blocked) || !errors.Is(err, reviewtransaction.ErrRDDDisabled) ||
+		blocked.Source != reviewtransaction.RDDModeSourceDefault {
+		t.Fatalf("explicit-off clone enable error = %v, want default typed disabled error", err)
+	}
+	if !strings.Contains(err.Error(), "gentle-ai review mode enable --scope=global") {
+		t.Fatalf("explicit-off clone enable error does not name the global continuation: %v", err)
+	}
+	result := decodeReviewModeResult(t, output.Bytes())
+	if result.Status.Effective != reviewtransaction.RDDModeOff || result.Status.CloneLocal != reviewtransaction.RDDModeOff ||
+		result.Status.Revision != disabled.Revision {
+		t.Fatalf("explicit-off clone enable result = %#v", result.Status)
+	}
+	recordAfter, err := reviewtransaction.CloneLocalRDDModeRecordPath(context.Background(), repo)
+	if err != nil {
+		t.Fatalf("CloneLocalRDDModeRecordPath after rejected enable error = %v", err)
+	}
+	after, err := os.ReadFile(recordAfter)
+	if err != nil {
+		t.Fatalf("read explicit-off record after rejected enable: %v", err)
+	}
+	if recordAfter != record || !bytes.Equal(after, before) {
+		t.Fatalf("explicit-off clone enable published a new generation")
+	}
+}
+
 func TestReviewModeCloneScopeEnableRejectsLegacyInheritWhileGlobalOff(t *testing.T) {
 	home := reviewModeHome(t)
 	repo := initReviewCLIRepo(t)
