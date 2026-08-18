@@ -229,9 +229,14 @@ type ReviewFacadeFinalizeResult struct {
 	// reviewtransaction.EscalationAccountingReasonTemplate. It is present only
 	// when the authority actually escalated with a derivable cause, so every
 	// other finalize shape keeps its exact existing output.
-	Escalation    string `json:"escalation,omitempty"`
-	StoreRevision string `json:"store_revision"`
-	ReceiptPath   string `json:"receipt_path,omitempty"`
+	Escalation string `json:"escalation,omitempty"`
+	// AdvisoryFindings names the disposition of every non-blocking frozen
+	// finding on a terminally approved lineage, plus the sentence saying the
+	// approval stands. It is present only when an approved lineage actually
+	// froze such a finding, so a clean approval's bytes are unchanged.
+	AdvisoryFindings *reviewtransaction.AdvisoryFindingSet `json:"advisory_findings,omitempty"`
+	StoreRevision    string                                `json:"store_revision"`
+	ReceiptPath      string                                `json:"receipt_path,omitempty"`
 }
 
 type ReviewReceiptDiscoveryKind string
@@ -317,7 +322,15 @@ func (err *ReviewReceiptDiscoveryError) Error() string {
 	case ReviewReceiptMissing:
 		message = "no terminal review receipt exists for gate validation"
 	case ReviewReceiptUnrelated:
-		message = "terminal review receipts exist only for unrelated targets"
+		// issue #3408: the old wording ("terminal review receipts exist only
+		// for unrelated targets") reported OTHER lineages' existence as
+		// though one of them were the obstacle, so an operator went looking
+		// for what those receipts had to do with their work and found
+		// nothing, because there is nothing. Discovery has proven the exact
+		// opposite: every terminal receipt on file was assessed against this
+		// candidate and none of them governs it. That is the candidate's own
+		// situation, and it has one route, so the denial states both.
+		message = "no approved review receipt covers this candidate; review it with gentle-ai review start"
 	case ReviewReceiptScopeChanged:
 		message = "terminal review receipts do not exactly match the live gate target"
 	case ReviewReceiptAmbiguous:
@@ -675,7 +688,7 @@ func (err *reviewStartContextError) Unwrap() error { return err.Cause }
 
 func RunReview(args []string, stdout io.Writer) error {
 	if len(args) == 0 || args[0] == "help" || args[0] == "-h" || args[0] == "--help" {
-		_, _ = fmt.Fprintln(stdout, "Usage: gentle-ai review <capture-result|capture-refuter|capture-validation|lens-context|capture-evidence|preserve-result|capabilities|start|finalize|validate|status|repair|invalidate|abandon|recover|retry-final-verification|reclaim|inspect-authority|inspect-candidate|dispose-result|reopen-results|schema|opencode-transport|bind-sdd> [flags]\n\nOrdinary review facade; repository scope, authority, canonical artifacts, and lifecycle transitions are derived by Go. Provider transports relay opaque bytes only; Go materializes, admits, captures, and decides delivery. Use review retry-final-verification only for a provider-proven completed failed final-verification tooling incident. Generic review recover remains unchanged. Use review repair --preflight for provider-owned classified authority repair.")
+		_, _ = fmt.Fprintln(stdout, "Usage: gentle-ai review <capture-result|capture-refuter|capture-validation|lens-context|capture-evidence|preserve-result|capabilities|start|finalize|validate|status|repair|invalidate|abandon|recover|retry-final-verification|reclaim|store-reset|inspect-authority|inspect-candidate|dispose-result|reopen-results|schema|opencode-transport|bind-sdd> [flags]\n\nOrdinary review facade; repository scope, authority, canonical artifacts, and lifecycle transitions are derived by Go. Provider transports relay opaque bytes only; Go materializes, admits, captures, and decides delivery. Use review retry-final-verification only for a provider-proven completed failed final-verification tooling incident. Generic review recover remains unchanged. Use review repair --preflight for provider-owned classified authority repair.")
 		return nil
 	}
 	operation, negotiated, preflightFailure := reviewIntegrationFailureRoute(args)
@@ -842,6 +855,8 @@ func runReviewCommand(args []string, stdout io.Writer) error {
 		return RunReviewRecover(args[1:], stdout)
 	case "reclaim":
 		return RunReviewReclaim(args[1:], stdout)
+	case "store-reset":
+		return RunReviewStoreReset(args[1:], stdout)
 	case "inspect-authority":
 		return RunReviewInspectAuthority(args[1:], stdout)
 	case "dispose-result":
@@ -3799,7 +3814,6 @@ func discoverCompactFacadeGateReview(ctx context.Context, repo, lineage string, 
 	}
 	targetResolution := []targetResolutionFailure{}
 	terminalCount := 0
-	allLineages := []string{}
 	// organic-dx Phase 3d: as terminal lineages accumulate, most of them can
 	// never govern the live candidate again, yet every gate call re-assessed
 	// every one of them with AssessCompactGateTarget's several git
@@ -3852,7 +3866,6 @@ func discoverCompactFacadeGateReview(ctx context.Context, repo, lineage string, 
 			return reviewtransaction.CompactStore{}, reviewtransaction.CompactRecord{}, &ReviewReceiptDiscoveryError{Kind: ReviewAuthorityCorrupted}
 		}
 		terminalCount++
-		allLineages = append(allLineages, record.State.LineageID)
 		if input.Gate == reviewtransaction.GatePreCommit {
 			if !preCommitBaselineTried {
 				preCommitBaselineTried = true
@@ -4037,8 +4050,16 @@ func discoverCompactFacadeGateReview(ctx context.Context, repo, lineage string, 
 	if len(targetResolution) > 0 {
 		return reviewtransaction.CompactStore{}, reviewtransaction.CompactRecord{}, &ReviewReceiptDiscoveryError{Kind: ReviewAuthorityCorrupted}
 	}
-	sort.Strings(allLineages)
-	return reviewtransaction.CompactStore{}, reviewtransaction.CompactRecord{}, &ReviewReceiptDiscoveryError{Kind: ReviewReceiptUnrelated, Candidates: allLineages}
+	// issue #3408: reaching here means every terminal lineage the walk above
+	// examined assessed as UNRELATED to this candidate -- it contributed to
+	// no discovery bucket, so none of them can be recovered, selected, or
+	// acted on for THIS candidate. The denial used to carry all of them as
+	// Candidates, an enumeration that grows with the store (lineages
+	// accumulate and nothing reaps them, #1656) and is actionable for
+	// nothing. Candidates stays empty here on purpose; the kinds that DO
+	// carry it -- ambiguous, scope-changed -- carry only lineages a caller
+	// can genuinely select or recover.
+	return reviewtransaction.CompactStore{}, reviewtransaction.CompactRecord{}, &ReviewReceiptDiscoveryError{Kind: ReviewReceiptUnrelated}
 }
 
 // reviewAuthorityCorruptionConfinedToLegacyEntries reports whether every cause
@@ -4825,10 +4846,18 @@ func encodeCompactFacadeFinalize(stdout io.Writer, negotiated bool, contract str
 		result.Escalation = fmt.Sprintf(reviewtransaction.EscalationAccountingReasonTemplate,
 			accounting.Cause, accounting.Spent, accounting.Remaining, accounting.Total)
 	}
+	// The disposition of a non-blocking finding is already decided by the time
+	// this lineage is approved -- it lives in state.Outcomes and its absence
+	// from state.FixFindingIDs. Saying it out loud changes no routing and
+	// blocks nothing new; it removes the inference a consumer previously had
+	// to make from a bare severity string, which is what let an approved
+	// WARNING be "fixed" and re-reviewed in the field.
+	result.AdvisoryFindings = reviewtransaction.AdvisoryFindingSetFor(state)
 	public := ReviewIntegrationFinalizeResult{
 		Operation: result.Operation, LineageID: result.LineageID, State: result.State,
-		Action: result.Action, Escalation: result.Escalation, StoreRevision: result.StoreRevision,
-		Eligibility: eligibility, NextTransition: transition, ValidationRequest: validationRequest,
+		Action: result.Action, Escalation: result.Escalation, AdvisoryFindings: result.AdvisoryFindings,
+		StoreRevision: result.StoreRevision,
+		Eligibility:   eligibility, NextTransition: transition, ValidationRequest: validationRequest,
 	}
 	return encodeReviewIntegrationOperation(stdout, negotiated, ReviewIntegrationOperationFinalize, result, public, contract)
 }
