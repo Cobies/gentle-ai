@@ -234,16 +234,18 @@ func antigravityCodeGraphMCPJSON() []byte {
 }
 
 func antigravityCodeGraphHooksJSON() []byte {
+	hookScript := `node -e 'let d="";process.stdin.on("data",c=>d+=c);process.stdin.on("end",()=>{try{let j=JSON.parse(d);if(j.invocationNum>1){console.log("{}");process.exit(0);}}catch(e){}console.log(JSON.stringify({injectSteps:[{ephemeralMessage:` + mustJSONString(antigravityCodeGraphHookMessage) + `}]}));});' || printf '%s\n' '` + mustJSONString(map[string]any{
+		"injectSteps": []any{
+			map[string]any{"ephemeralMessage": antigravityCodeGraphHookMessage},
+		},
+	}) + `'`
+
 	cfg := map[string]any{
 		"gentle-ai-codegraph-first": map[string]any{
 			"PreInvocation": []any{
 				map[string]any{
-					"type": "command",
-					"command": "printf '%s\\n' '" + mustJSONString(map[string]any{
-						"injectSteps": []any{
-							map[string]any{"ephemeralMessage": antigravityCodeGraphHookMessage},
-						},
-					}) + "'",
+					"type":    "command",
+					"command": hookScript,
 				},
 			},
 		},
@@ -260,44 +262,59 @@ func mustJSONString(v any) string {
 	return string(b)
 }
 
-func antigravityActiveConfigDir(homeDir string) string {
-	return antigravity.NewAdapter().GlobalConfigDir(homeDir)
-}
-
 func hasAntigravityCLIConfigDir(homeDir string) bool {
-	dir := antigravityActiveConfigDir(homeDir)
+	dir := antigravity.NewAdapter().GlobalConfigDir(homeDir)
 	info, err := os.Stat(dir)
 	return err == nil && info.IsDir()
 }
 
+func antigravityActiveConfigDirs(homeDir string) []string {
+	dirs := []string{antigravity.NewAdapter().GlobalConfigDir(homeDir)}
+	for _, candidate := range []string{
+		filepath.Join(homeDir, ".gemini", "antigravity-cli"),
+		filepath.Join(homeDir, ".gemini", "antigravity-desktop"),
+		filepath.Join(homeDir, ".gemini", "antigravity"),
+		filepath.Join(homeDir, ".gemini", "config"),
+	} {
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() && !slices.Contains(dirs, candidate) {
+			dirs = append(dirs, candidate)
+		}
+	}
+	return dirs
+}
+
 func installAntigravityCodeGraphPlugin(homeDir string) (bool, []string, error) {
-	pluginDir := filepath.Join(antigravityActiveConfigDir(homeDir), "plugins", "gentle-ai-codegraph")
-	files := make([]string, 0, 3)
+	configDirs := antigravityActiveConfigDirs(homeDir)
+	files := make([]string, 0, len(configDirs)*3)
 	changed := false
 
-	pluginPath := filepath.Join(pluginDir, "plugin.json")
-	pluginWrite, err := filemerge.WriteFileAtomic(pluginPath, []byte(antigravityCodeGraphPluginJSON), 0o644)
-	if err != nil {
-		return false, nil, fmt.Errorf("write Antigravity CodeGraph plugin manifest: %w", err)
-	}
-	changed = changed || pluginWrite.Changed
-	files = append(files, pluginPath)
+	for _, cfgDir := range configDirs {
+		pluginDir := filepath.Join(cfgDir, "plugins", "gentle-ai-codegraph")
 
-	pluginMCPPath := filepath.Join(pluginDir, "mcp_config.json")
-	mcpWrite, err := mergeJSONFile(pluginMCPPath, antigravityCodeGraphMCPJSON())
-	if err != nil {
-		return false, nil, fmt.Errorf("write Antigravity CodeGraph plugin MCP config: %w", err)
-	}
-	changed = changed || mcpWrite.Changed
-	files = append(files, pluginMCPPath)
+		pluginPath := filepath.Join(pluginDir, "plugin.json")
+		pluginWrite, err := filemerge.WriteFileAtomic(pluginPath, []byte(antigravityCodeGraphPluginJSON), 0o644)
+		if err != nil {
+			return false, nil, fmt.Errorf("write Antigravity CodeGraph plugin manifest (%s): %w", cfgDir, err)
+		}
+		changed = changed || pluginWrite.Changed
+		files = append(files, pluginPath)
 
-	hooksPath := filepath.Join(pluginDir, "hooks.json")
-	hooksWrite, err := mergeJSONFile(hooksPath, antigravityCodeGraphHooksJSON())
-	if err != nil {
-		return false, nil, fmt.Errorf("write Antigravity CodeGraph hooks: %w", err)
+		pluginMCPPath := filepath.Join(pluginDir, "mcp_config.json")
+		mcpWrite, err := mergeJSONFile(pluginMCPPath, antigravityCodeGraphMCPJSON())
+		if err != nil {
+			return false, nil, fmt.Errorf("write Antigravity CodeGraph plugin MCP config (%s): %w", cfgDir, err)
+		}
+		changed = changed || mcpWrite.Changed
+		files = append(files, pluginMCPPath)
+
+		hooksPath := filepath.Join(pluginDir, "hooks.json")
+		hooksWrite, err := mergeJSONFile(hooksPath, antigravityCodeGraphHooksJSON())
+		if err != nil {
+			return false, nil, fmt.Errorf("write Antigravity CodeGraph hooks (%s): %w", cfgDir, err)
+		}
+		changed = changed || hooksWrite.Changed
+		files = append(files, hooksPath)
 	}
-	changed = changed || hooksWrite.Changed
-	files = append(files, hooksPath)
 
 	return changed, files, nil
 }

@@ -96,16 +96,18 @@ func antigravitySddAgentsPluginDir(homeDir string) string {
 }
 
 func antigravitySddAgentsHooksJSON() []byte {
+	hookScript := `node -e 'let d="";process.stdin.on("data",c=>d+=c);process.stdin.on("end",()=>{try{let j=JSON.parse(d);if(j.invocationNum>1){console.log("{}");process.exit(0);}}catch(e){}console.log(JSON.stringify({injectSteps:[{ephemeralMessage:` + mustJSONStringSDDAgents(antigravitySddAgentsHardeningMessage) + `}]}));});' || printf '%s\n' '` + mustJSONStringSDDAgents(map[string]any{
+		"injectSteps": []any{
+			map[string]any{"ephemeralMessage": antigravitySddAgentsHardeningMessage},
+		},
+	}) + `'`
+
 	cfg := map[string]any{
 		"gentle-ai-sdd-agents-hardening": map[string]any{
 			"PreInvocation": []any{
 				map[string]any{
-					"type": "command",
-					"command": "printf '%s\\n' '" + mustJSONStringSDDAgents(map[string]any{
-						"injectSteps": []any{
-							map[string]any{"ephemeralMessage": antigravitySddAgentsHardeningMessage},
-						},
-					}) + "'",
+					"type":    "command",
+					"command": hookScript,
 				},
 			},
 		},
