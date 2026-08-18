@@ -139,30 +139,16 @@ func reviewPiRelayHandshakeIsSoleMissingCondition(agent model.AgentID) bool {
 	return err == nil && manifest.Advertises(capabilitymanifest.ContractImmutableReviewExecutorV1)
 }
 
-// reviewPiRelayHandshakeGuidance names the one missing condition instead of
-// the kill switch. reviewTransportSupportedRuntimeIDs can never name `pi`
-// here, because it is computed by calling reviewImmutableRuntimeCapability in
-// this same process, under the exact condition that is failing. Offering
-// `review mode disable` is worse than unhelpful: leaving receipt-driven
-// review is a legitimate choice, but it is not the remedy for a runtime one
-// declared contract away from eligible, and a reader who follows it concludes
-// the runtime was dropped.
-//
-// The guidance names the variable but NOT its value, and that is deliberate
-// rather than an oversight. This prose reaches the operator only as the
-// negotiated envelope's `cause`, which every refusal crosses
-// reviewScrubDefectReportField to reach: that gate rewrites any `KEY=VALUE`
-// token to `<redacted>` in full, and any `/`-rooted run to `<redacted>` from
-// the slash onward. The exact handshake collides with both rules, so
-// `GENTLE_PI_REVIEW_RELAY_CONTRACT=gentle-pi.review-relay/v1` renders as
-// `<redacted>` and `gentle-pi.review-relay/v1` renders as
-// `gentle-pi.review-relay<redacted>`. Naming the variable alone survives the
-// gate byte for byte (pinned by
-// TestPiRelayHandshakeGuidanceSurvivesTheFailureCausePrivacyGate), so it is
-// the most actionable cause that can actually reach the operator without
-// relaxing a privacy boundary from a diagnostics change.
+// reviewPiRelayHandshakeGuidance names the exact handshake condition.
+// reviewTransportSupportedRuntimeIDs can never name `pi` here, because it is
+// computed by calling reviewImmutableRuntimeCapability in this same process,
+// under the exact condition that is failing. Offering `review mode disable`
+// is worse than unhelpful: leaving receipt-driven review is a legitimate
+// choice, but it is not the remedy for a runtime one declared contract away
+// from eligible, and a reader who follows it concludes the runtime was
+// dropped.
 func reviewPiRelayHandshakeGuidance() string {
-	return "; pi is eligible only while " + reviewPiHostRelayContractEnvironment +
+	return "; pi is eligible only while " + reviewPiHostRelayContractEnvironment + "=" + reviewPiHostRelayContract +
 		" declares the exact relay contract this binary admits, which the gentle-pi host exports on every invocation it relays; export it in this shell and re-run"
 }
 

@@ -107,11 +107,12 @@ const reviewDefectReportRedactionMarker = "<redacted>"
 
 var (
 	// reviewDefectReportAbsolutePathRegexp matches a POSIX or Windows
-	// absolute path token. It is intentionally broad (any run of
-	// non-whitespace, non-quote characters following a path root) because a
-	// public issue tracker must never see a local filesystem layout,
-	// including a $HOME-rooted path.
-	reviewDefectReportAbsolutePathRegexp = regexp.MustCompile(`(?:[A-Za-z]:)?[\\/][^\s"'` + "`" + `]+`)
+	// absolute path token anchored to a path root (a leading slash or
+	// Windows drive letter following a token boundary). It deliberately
+	// ignores relative paths, URL schemes, and contract identifiers with
+	// slashes (like gentle-ai.review-integration/v2) because those do not
+	// represent local filesystem layout.
+	reviewDefectReportAbsolutePathRegexp = regexp.MustCompile(`(?:\b[A-Za-z]:[\\/]|(?:^|[\s"'` + "`" + `(=<\[])[\\/])[^\s"'` + "`" + `]+`)
 	// reviewDefectReportEmailRegexp matches any email-shaped substring.
 	// Every email is redacted unconditionally: a defect report has no
 	// legitimate use for one, "repo-identity" or not.
@@ -120,6 +121,46 @@ var (
 	// like an environment variable assignment.
 	reviewDefectReportEnvAssignmentRegexp = regexp.MustCompile(`\b[A-Z][A-Z0-9_]{2,}=\S+`)
 )
+
+var reviewKnownPublicContractEnvAssignments = map[string]string{
+	reviewPiHostRelayContractEnvironment: reviewPiHostRelayContract,
+}
+
+func reviewIsKnownPublicContractEnvAssignment(match string) bool {
+	key, val, ok := strings.Cut(match, "=")
+	if !ok {
+		return false
+	}
+	expectedVal, isKnown := reviewKnownPublicContractEnvAssignments[key]
+	if !isKnown {
+		return false
+	}
+	valClean := strings.Trim(val, "\"'`")
+	return valClean == expectedVal
+}
+
+func reviewScrubDefectReportEnvAssignment(value string) string {
+	return reviewDefectReportEnvAssignmentRegexp.ReplaceAllStringFunc(value, func(match string) string {
+		if reviewIsKnownPublicContractEnvAssignment(match) {
+			return match
+		}
+		return reviewDefectReportRedactionMarker
+	})
+}
+
+func reviewScrubDefectReportAbsolutePath(value string) string {
+	return reviewDefectReportAbsolutePathRegexp.ReplaceAllStringFunc(value, func(match string) string {
+		if len(match) == 0 {
+			return match
+		}
+		switch match[0] {
+		case ' ', '\t', '"', '\'', '`', '(', '=', '<', '[':
+			return string(match[0]) + reviewDefectReportRedactionMarker
+		default:
+			return reviewDefectReportRedactionMarker
+		}
+	})
+}
 
 // reviewScrubDefectReportField is the field-level privacy gate: every string
 // that reaches a rendered report passes through this exact function first.
@@ -133,9 +174,9 @@ func reviewScrubDefectReportField(value string) string {
 	if newline := strings.IndexByte(value, '\n'); newline >= 0 {
 		value = value[:newline]
 	}
-	value = reviewDefectReportEnvAssignmentRegexp.ReplaceAllString(value, reviewDefectReportRedactionMarker)
+	value = reviewScrubDefectReportEnvAssignment(value)
 	value = reviewDefectReportEmailRegexp.ReplaceAllString(value, reviewDefectReportRedactionMarker)
-	value = reviewDefectReportAbsolutePathRegexp.ReplaceAllString(value, reviewDefectReportRedactionMarker)
+	value = reviewScrubDefectReportAbsolutePath(value)
 	return strings.TrimSpace(value)
 }
 

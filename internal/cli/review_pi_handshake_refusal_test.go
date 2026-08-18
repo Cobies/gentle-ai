@@ -23,7 +23,7 @@ import (
 // message and concluded v2.4.0 had dropped Pi support, when the fix was one
 // exported variable.
 const piRelayHandshakeRefusalCause = "the active runtime is not eligible for immutable receipt review; " +
-	"pi is eligible only while GENTLE_PI_REVIEW_RELAY_CONTRACT declares the exact relay contract this binary admits, " +
+	"pi is eligible only while GENTLE_PI_REVIEW_RELAY_CONTRACT=gentle-pi.review-relay/v1 declares the exact relay contract this binary admits, " +
 	"which the gentle-pi host exports on every invocation it relays; export it in this shell and re-run"
 
 // TestPiTransportRefusalNamesTheHandshakeNotTheKillSwitch runs the exact
@@ -79,35 +79,23 @@ func TestPiTransportRefusalNamesTheHandshakeNotTheKillSwitch(t *testing.T) {
 	})
 }
 
-// TestPiRelayHandshakeGuidanceSurvivesTheFailureCausePrivacyGate is the guard
-// the first draft of this fix needed, and the reason the cause names the
-// variable without its value.
-//
-// This prose reaches the operator only as the negotiated envelope's `cause`,
-// and every refusal crosses reviewScrubDefectReportField to get there. That
-// gate rewrites any `KEY=VALUE` token to `<redacted>` in full, and any
-// `/`-rooted run to `<redacted>` from the slash onward. A cause that spells
-// the handshake out therefore arrives as advice to export `<redacted>`:
-// strictly worse than the misleading message it replaced.
+// TestPiRelayHandshakeGuidanceSurvivesTheFailureCausePrivacyGate asserts that
+// the exact handshake and contract value survive scrubbing intact (#3443).
 func TestPiRelayHandshakeGuidanceSurvivesTheFailureCausePrivacyGate(t *testing.T) {
 	guidance := reviewPiRelayHandshakeGuidance()
 	if scrubbed := reviewScrubDefectReportField(guidance); scrubbed != guidance {
 		t.Fatalf("the privacy gate rewrites the pi guidance before the operator reads it:\n\tguidance %q\n\tscrubbed %q", guidance, scrubbed)
 	}
-	if !strings.Contains(guidance, reviewPiHostRelayContractEnvironment) {
-		t.Fatalf("the pi guidance no longer names the missing condition: %q", guidance)
+	if !strings.Contains(guidance, reviewPiHostRelayContractEnvironment+"="+reviewPiHostRelayContract) {
+		t.Fatalf("the pi guidance no longer names the exact handshake condition: %q", guidance)
 	}
 
-	// The tripwire for the half of #3440 this change cannot deliver. While
-	// the gate still destroys the spelled-out handshake, the omission is a
-	// constraint. The day it stops, this fails and the cause owes the
-	// operator the exact value.
 	spelled := reviewPiHostRelayContractEnvironment + "=" + reviewPiHostRelayContract
-	if scrubbed := reviewScrubDefectReportField("export " + spelled + " and re-run"); scrubbed != "export "+reviewDefectReportRedactionMarker+" and re-run" {
-		t.Fatalf("the privacy gate no longer destroys %q (it now renders %q); the pi cause can carry the exact handshake and should", spelled, scrubbed)
+	if scrubbed := reviewScrubDefectReportField("export " + spelled + " and re-run"); scrubbed != "export "+spelled+" and re-run" {
+		t.Fatalf("the privacy gate destroyed %q (it rendered %q); the exact handshake must survive", spelled, scrubbed)
 	}
-	if scrubbed := reviewScrubDefectReportField("the value " + reviewPiHostRelayContract); scrubbed != "the value gentle-pi.review-relay"+reviewDefectReportRedactionMarker {
-		t.Fatalf("the privacy gate no longer truncates the bare contract value (it now renders %q); the pi cause can carry it and should", scrubbed)
+	if scrubbed := reviewScrubDefectReportField("the value " + reviewPiHostRelayContract); scrubbed != "the value "+reviewPiHostRelayContract {
+		t.Fatalf("the privacy gate destroyed bare contract value %q (it rendered %q); the contract value must survive", reviewPiHostRelayContract, scrubbed)
 	}
 }
 

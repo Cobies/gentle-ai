@@ -114,3 +114,105 @@ func TestReviewDefectReportScrubbedFieldIsSingleLineAndBounded(t *testing.T) {
 		})
 	}
 }
+
+// TestReviewDefectReportScrubberPreservesPublicContractsWhileRedactingSecretsAndPaths
+// asserts that public contract identifiers and known public contract environment
+// assignments survive scrubbing intact, while absolute paths, email addresses,
+// and sensitive environment assignments remain cleanly redacted (#3443).
+func TestReviewDefectReportScrubberPreservesPublicContractsWhileRedactingSecretsAndPaths(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "contract-integration-v1",
+			input: "gentle-ai.review-integration/v1",
+			want:  "gentle-ai.review-integration/v1",
+		},
+		{
+			name:  "contract-integration-v2",
+			input: "gentle-ai.review-integration/v2",
+			want:  "gentle-ai.review-integration/v2",
+		},
+		{
+			name:  "contract-pi-relay-v1",
+			input: "gentle-pi.review-relay/v1",
+			want:  "gentle-pi.review-relay/v1",
+		},
+		{
+			name:  "contract-failure-v2",
+			input: "gentle-ai.review-failure/v2",
+			want:  "gentle-ai.review-failure/v2",
+		},
+		{
+			name:  "contract-sdd-binding-v1",
+			input: "gentle-ai.sdd-review-binding/v1",
+			want:  "gentle-ai.sdd-review-binding/v1",
+		},
+		{
+			name:  "command-with-contract",
+			input: "gentle-ai review status --contract gentle-ai.review-integration/v2 --next-transition",
+			want:  "gentle-ai review status --contract gentle-ai.review-integration/v2 --next-transition",
+		},
+		{
+			name:  "public-contract-env-assignment",
+			input: "export GENTLE_PI_REVIEW_RELAY_CONTRACT=gentle-pi.review-relay/v1 and re-run",
+			want:  "export GENTLE_PI_REVIEW_RELAY_CONTRACT=gentle-pi.review-relay/v1 and re-run",
+		},
+		{
+			name:  "posix-absolute-path",
+			input: "see /home/someone/secret.txt for detail",
+			want:  "see <redacted> for detail",
+		},
+		{
+			name:  "windows-backslash-absolute-path",
+			input: `path C:\Users\someone\secret.txt is sensitive`,
+			want:  "path <redacted> is sensitive",
+		},
+		{
+			name:  "windows-slash-absolute-path",
+			input: "path C:/Users/someone/secret.txt is sensitive",
+			want:  "path <redacted> is sensitive",
+		},
+		{
+			name:  "windows-root-path",
+			input: `root \secret\path is sensitive`,
+			want:  "root <redacted> is sensitive",
+		},
+		{
+			name:  "secret-token-env",
+			input: "TOKEN=supersecret123",
+			want:  "<redacted>",
+		},
+		{
+			name:  "aws-secret-env",
+			input: "AWS_SECRET_ACCESS_KEY=supersecretkey",
+			want:  "<redacted>",
+		},
+		{
+			name:  "github-token-env",
+			input: "GITHUB_TOKEN=ghp_secrettoken123",
+			want:  "<redacted>",
+		},
+		{
+			name:  "email-address",
+			input: "contact definitely-a-real-user@example.com for access",
+			want:  "contact <redacted> for access",
+		},
+		{
+			name:  "multiline-truncated",
+			input: "first line\nsecond line",
+			want:  "first line",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := reviewScrubDefectReportField(tc.input)
+			if got != tc.want {
+				t.Fatalf("reviewScrubDefectReportField(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}
