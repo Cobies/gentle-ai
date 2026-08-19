@@ -205,6 +205,36 @@ func TestReviewDefectReportScrubberPreservesPublicContractsWhileRedactingSecrets
 			input: "first line\nsecond line",
 			want:  "first line",
 		},
+		{
+			name:  "colon-delimited-posix-path",
+			input: "open:/home/someone/secret.txt: permission denied",
+			want:  "open:<redacted>: permission denied",
+		},
+		{
+			name:  "url-preservation",
+			input: "see http://example.com/api/v1 and https://gentle.ai/docs and file:///var/log",
+			want:  "see http://example.com/api/v1 and https://gentle.ai/docs and file:///var/log",
+		},
+		{
+			name:  "public-contract-env-semicolon",
+			input: "export GENTLE_PI_REVIEW_RELAY_CONTRACT=gentle-pi.review-relay/v1;",
+			want:  "export GENTLE_PI_REVIEW_RELAY_CONTRACT=gentle-pi.review-relay/v1;",
+		},
+		{
+			name:  "public-contract-env-parens-period",
+			input: "(see GENTLE_PI_REVIEW_RELAY_CONTRACT=gentle-pi.review-relay/v1).",
+			want:  "(see GENTLE_PI_REVIEW_RELAY_CONTRACT=gentle-pi.review-relay/v1).",
+		},
+		{
+			name:  "sensitive-env-semicolon",
+			input: "AWS_SECRET_ACCESS_KEY=supersecretkey;",
+			want:  "<redacted>;",
+		},
+		{
+			name:  "curly-brace-delimited-path",
+			input: "path {/var/log/secret.log} enclosed",
+			want:  "path {<redacted>} enclosed",
+		},
 	}
 
 	for _, tc := range cases {

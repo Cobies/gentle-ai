@@ -108,11 +108,12 @@ const reviewDefectReportRedactionMarker = "<redacted>"
 var (
 	// reviewDefectReportAbsolutePathRegexp matches a POSIX or Windows
 	// absolute path token anchored to a path root (a leading slash or
-	// Windows drive letter following a token boundary). It deliberately
-	// ignores relative paths, URL schemes, and contract identifiers with
-	// slashes (like gentle-ai.review-integration/v2) because those do not
-	// represent local filesystem layout.
-	reviewDefectReportAbsolutePathRegexp = regexp.MustCompile(`(?:\b[A-Za-z]:[\\/]|(?:^|[\s"'` + "`" + `(=<\[])[\\/])[^\s"'` + "`" + `]+`)
+	// Windows drive letter following a token boundary, or a single slash/backslash
+	// following a colon delimiter). It deliberately ignores relative paths,
+	// URL schemes with :// (like http://, https://, file://), and contract
+	// identifiers with slashes (like gentle-ai.review-integration/v2) because
+	// those do not represent local filesystem layout.
+	reviewDefectReportAbsolutePathRegexp = regexp.MustCompile(`(?:\b[A-Za-z]:[\\/][^\s"'` + "`" + `]+|:[\\/][^\\/\s"'` + "`" + `][^\s"'` + "`" + `]*|(?:^|[\s"'` + "`" + `(=<\[{])[\\/][^\s"'` + "`" + `]+)`)
 	// reviewDefectReportEmailRegexp matches any email-shaped substring.
 	// Every email is redacted unconditionally: a defect report has no
 	// legitimate use for one, "repo-identity" or not.
@@ -121,6 +122,8 @@ var (
 	// like an environment variable assignment.
 	reviewDefectReportEnvAssignmentRegexp = regexp.MustCompile(`\b[A-Z][A-Z0-9_]{2,}=\S+`)
 )
+
+const reviewDefectReportTrailingPunctuation = ":;.,)]}>\"'`"
 
 var reviewKnownPublicContractEnvAssignments = map[string]string{
 	reviewPiHostRelayContractEnvironment: reviewPiHostRelayContract,
@@ -135,16 +138,18 @@ func reviewIsKnownPublicContractEnvAssignment(match string) bool {
 	if !isKnown {
 		return false
 	}
-	valClean := strings.Trim(val, "\"'`")
+	valClean := strings.Trim(val, reviewDefectReportTrailingPunctuation)
 	return valClean == expectedVal
 }
 
 func reviewScrubDefectReportEnvAssignment(value string) string {
 	return reviewDefectReportEnvAssignmentRegexp.ReplaceAllStringFunc(value, func(match string) string {
-		if reviewIsKnownPublicContractEnvAssignment(match) {
+		trimmed := strings.TrimRight(match, reviewDefectReportTrailingPunctuation)
+		trailing := match[len(trimmed):]
+		if reviewIsKnownPublicContractEnvAssignment(trimmed) {
 			return match
 		}
-		return reviewDefectReportRedactionMarker
+		return reviewDefectReportRedactionMarker + trailing
 	})
 }
 
@@ -153,11 +158,16 @@ func reviewScrubDefectReportAbsolutePath(value string) string {
 		if len(match) == 0 {
 			return match
 		}
-		switch match[0] {
-		case ' ', '\t', '"', '\'', '`', '(', '=', '<', '[':
-			return string(match[0]) + reviewDefectReportRedactionMarker
+		trimmed := strings.TrimRight(match, reviewDefectReportTrailingPunctuation)
+		trailing := match[len(trimmed):]
+		if len(trimmed) == 0 {
+			return match
+		}
+		switch trimmed[0] {
+		case ' ', '\t', '"', '\'', '`', '(', '=', '<', '[', '{', ':':
+			return string(trimmed[0]) + reviewDefectReportRedactionMarker + trailing
 		default:
-			return reviewDefectReportRedactionMarker
+			return reviewDefectReportRedactionMarker + trailing
 		}
 	})
 }
