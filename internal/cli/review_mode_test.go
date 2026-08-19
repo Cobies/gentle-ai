@@ -339,6 +339,30 @@ func TestReviewModeCloneScopeEnableRejectsExplicitOffWhileGlobalUnset(t *testing
 	}
 }
 
+func TestReviewModeCloneScopeEnableRejectsCorruptHeadWhileGlobalUnsetOrOff(t *testing.T) {
+	_ = reviewModeHome(t)
+	repo := initReviewCLIRepo(t)
+	if _, err := reviewtransaction.SetCloneLocalRDDMode(
+		context.Background(), repo, reviewtransaction.RDDModeOff, "", reviewtransaction.RDDGlobalMode{Value: string(reviewtransaction.RDDModeOn)}); err != nil {
+		t.Fatalf("SetCloneLocalRDDMode(off) error = %v", err)
+	}
+	corrupt := filepath.Join(repo, ".git", "gentle-ai", "review-mode", "rar-authority", "v1", "rdd-mode", "gen-0000000001.json")
+	if err := os.WriteFile(corrupt, []byte("{not json}\n"), 0o600); err != nil {
+		t.Fatalf("corrupt override: %v", err)
+	}
+
+	var output bytes.Buffer
+	err := RunReviewMode([]string{"enable", "--cwd", repo, "--scope", "clone", "--json"}, &output)
+	var disabled *reviewtransaction.RDDDisabledError
+	if !errors.As(err, &disabled) || !errors.Is(err, reviewtransaction.ErrRDDDisabled) ||
+		disabled.Source != reviewtransaction.RDDModeSourceDefault {
+		t.Fatalf("clone enable error = %v, want default typed disabled error", err)
+	}
+	if result := decodeReviewModeResult(t, output.Bytes()); result.Status.Effective != reviewtransaction.RDDModeOff {
+		t.Fatalf("clone enable result = %#v", result.Status)
+	}
+}
+
 func TestReviewModeCloneScopeEnableRejectsLegacyInheritWhileGlobalOff(t *testing.T) {
 	home := reviewModeHome(t)
 	repo := initReviewCLIRepo(t)

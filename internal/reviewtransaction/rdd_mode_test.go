@@ -641,6 +641,45 @@ func TestUnknownRDDModeFailsClosedAsDisabled(t *testing.T) {
 	}
 }
 
+func TestCloneLocalRDDModeEnableRejectsCorruptHeadWhenGlobalUnsetOrOff(t *testing.T) {
+	repo := initSnapshotRepo(t)
+	ctx := context.Background()
+
+	if _, err := SetCloneLocalRDDMode(ctx, repo, RDDModeOff, "", RDDGlobalMode{Value: "on"}); err != nil {
+		t.Fatalf("SetCloneLocalRDDMode(off) error = %v", err)
+	}
+	corrupt := filepath.Join(repo, ".git", "gentle-ai", "review-mode", "rar-authority", "v1", "rdd-mode", "gen-0000000001.json")
+	if err := os.WriteFile(corrupt, []byte("{not json}\n"), 0o600); err != nil {
+		t.Fatalf("corrupt override: %v", err)
+	}
+
+	_, err := SetCloneLocalRDDMode(ctx, repo, RDDModeUnset, "", RDDGlobalMode{})
+	var rejected *RDDDisabledError
+	if !errors.As(err, &rejected) || !errors.Is(err, ErrRDDDisabled) || rejected.Source != RDDModeSourceDefault {
+		t.Fatalf("enable with corrupt head and global unset error = %v, want default typed disabled error", err)
+	}
+	if !strings.Contains(err.Error(), "gentle-ai review mode enable --scope=global") {
+		t.Fatalf("enable with corrupt head and global unset error does not name global continuation: %v", err)
+	}
+
+	content, readErr := os.ReadFile(corrupt)
+	if readErr != nil || !bytes.Equal(content, []byte("{not json}\n")) {
+		t.Fatalf("corrupt file was modified: content=%q, err=%v", string(content), readErr)
+	}
+	gen2 := filepath.Join(repo, ".git", "gentle-ai", "review-mode", "rar-authority", "v1", "rdd-mode", "gen-0000000002.json")
+	if _, err := os.Lstat(gen2); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("gen-0000000002.json exists: %v", err)
+	}
+
+	_, err = SetCloneLocalRDDMode(ctx, repo, RDDModeUnset, "", RDDGlobalMode{Value: "off"})
+	if !errors.As(err, &rejected) || !errors.Is(err, ErrRDDDisabled) || rejected.Source != RDDModeSourceGlobal {
+		t.Fatalf("enable with corrupt head and global off error = %v, want global typed disabled error", err)
+	}
+	if !strings.Contains(err.Error(), "gentle-ai review mode enable --scope=global") {
+		t.Fatalf("enable with corrupt head and global off error does not name global continuation: %v", err)
+	}
+}
+
 func TestResolveRDDModeUnsafePrivatePathIsNotACorruptHead(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX permissions are covered by the Windows ACL test")

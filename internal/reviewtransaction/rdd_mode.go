@@ -340,7 +340,7 @@ func SetCloneLocalRDDMode(
 		return failedClosedRDDModeStatus(RDDModeSourceCloneLocal), fmt.Errorf(
 			"%w: expected %q but the clone-local head is %q", ErrRDDModeRevisionMismatch, expectedRevision, currentStatus.Revision)
 	}
-	if currentErr == nil && mode == RDDModeUnset && globalMode != RDDModeOn {
+	if (currentErr == nil || errors.Is(currentErr, ErrRDDModeCorrupt)) && mode == RDDModeUnset && globalMode != RDDModeOn {
 		// Clearing this clone's off-only override cannot enable review while the
 		// global source remains unset or off, so refuse without publishing a generation.
 		source := RDDModeSourceDefault
