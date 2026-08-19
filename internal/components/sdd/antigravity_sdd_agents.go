@@ -82,10 +82,8 @@ func antigravityActiveConfigDirs(homeDir string) []string {
 		filepath.Join(homeDir, ".gemini", "antigravity"),
 		filepath.Join(homeDir, ".gemini", "config"),
 	} {
-		if stat, err := os.Stat(candidate); err == nil && stat.IsDir() {
-			if !slices.Contains(dirs, candidate) {
-				dirs = append(dirs, candidate)
-			}
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() && !slices.Contains(dirs, candidate) {
+			dirs = append(dirs, candidate)
 		}
 	}
 	return dirs
@@ -102,12 +100,25 @@ func antigravitySddAgentsHooksJSON() []byte {
 		},
 	}) + `'`
 
+	preToolUseScript := `node -e 'let d="";process.stdin.on("data",c=>d+=c);process.stdin.on("end",()=>{try{let j=JSON.parse(d);let a=(j.toolCall&&j.toolCall.args)||j.args||j||{};let cmd=a.CommandLine||a.commandLine||a.command||a.cmd||"";let isDestructive=/(?:git\s+push\b.*(?:\s|^)(?:--force|-f)(?:\s|$)|git\s+reset\s+--hard\b|rm\s+-(?:[a-zA-Z]*r[a-zA-Z]*f|[a-zA-Z]*f[a-zA-Z]*r)[a-zA-Z]*\b|rm\s+.*-(?:r.*-f|f.*-r)\b)/i.test(cmd);if(isDestructive){console.log(JSON.stringify({decision:"deny",reason:"Destructive command blocked by Gentle AI SDD guard"}));process.exit(0);}}catch(e){}console.log(JSON.stringify({decision:"allow"}));});' || (d=$(cat); if echo "$d" | grep -Eqi '("(CommandLine|commandLine|command|cmd)"[[:space:]]*:[[:space:]]*"[^"]*(git[[:space:]]+push[^"]*(--force|-f([[:space:]]|"|$))|git[[:space:]]+reset[[:space:]]+--hard|rm[[:space:]]+-([a-zA-Z]*r[a-zA-Z]*f|[a-zA-Z]*f[a-zA-Z]*r)[a-zA-Z]*|rm[[:space:]]+[^"]*-(r[^"]*-f|f[^"]*-r)))'; then printf '%s\n' '{"decision":"deny","reason":"Destructive command blocked by Gentle AI SDD guard"}'; else printf '%s\n' '{"decision":"allow"}'; fi)`
+
 	cfg := map[string]any{
 		"gentle-ai-sdd-agents-hardening": map[string]any{
 			"PreInvocation": []any{
 				map[string]any{
 					"type":    "command",
 					"command": hookScript,
+				},
+			},
+			"PreToolUse": []any{
+				map[string]any{
+					"matcher": "run_command",
+					"hooks": []any{
+						map[string]any{
+							"type":    "command",
+							"command": preToolUseScript,
+						},
+					},
 				},
 			},
 		},
@@ -273,7 +284,16 @@ func AntigravitySddAgentsPluginDir(homeDir string) string {
 // plugin is installed AND the hardening contract is present in its hooks.json.
 // This is the read-only, conservative check used by diagnostic surfaces.
 func HasAntigravitySddAgentsHardeningContract(homeDir string) bool {
-	hooksPath := filepath.Join(antigravitySddAgentsPluginDir(homeDir), "hooks.json")
+	for _, cfgDir := range antigravityActiveConfigDirs(homeDir) {
+		hooksPath := filepath.Join(cfgDir, "plugins", antigravitySddAgentsPluginName, "hooks.json")
+		if hasHardeningContractInHooks(hooksPath) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasHardeningContractInHooks(hooksPath string) bool {
 	data, err := readFileOrEmpty(hooksPath)
 	if err != nil {
 		return false
