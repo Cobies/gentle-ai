@@ -915,6 +915,132 @@ func TestReviewNextTransitionRefusesTargetDriftAndUnverifiableCaptures(t *testin
 	}
 }
 
+func TestReviewNextTransitionUnachievableLensSlotDistinguishedFromUntried(t *testing.T) {
+	status := ReviewTargetStatusResult{
+		Applicability:  reviewtransaction.TargetApplicabilityCurrent,
+		Action:         reviewtransaction.TargetStatusActionFinalize,
+		Replayability:  reviewtransaction.ReplayabilityNotReplayable,
+		TargetIdentity: "sha256:" + strings.Repeat("b", 64),
+		Authority: &ReviewTargetStatusAuthority{
+			LineageID: "review-unachievable-slot",
+			Revision:  "sha256:" + strings.Repeat("a", 64),
+			State:     reviewtransaction.StateReviewing,
+		},
+		Frozen: &ReviewTargetStatusFrozen{Tier: reviewtransaction.RiskMedium},
+		Projection: ReviewTargetStatusProjection{
+			Projection:           reviewtransaction.ProjectionWorkspace,
+			BaseTree:             strings.Repeat("c", 40),
+			CurrentCandidateTree: strings.Repeat("d", 40),
+		},
+	}
+	lenses := []string{reviewtransaction.LensReliability, reviewtransaction.LensReadability}
+	input := reviewNextTransitionInput{
+		RepositoryContext: "rctx1_" + strings.Repeat("d", 64),
+		CaptureContext:    nextTransitionTestCaptureContext(t, status, lenses),
+	}
+
+	admitted0 := ReviewTransitionArtifact{
+		Schema:            reviewResultArtifactSchema,
+		Capability:        reviewResultArtifactCapability,
+		SHA256:            "sha256:" + strings.Repeat("1", 64),
+		LineageID:         status.Authority.LineageID,
+		TargetIdentity:    status.TargetIdentity,
+		Lens:              reviewtransaction.LensReliability,
+		SelectedOrder:     0,
+		SubjectHash:       "sha256:" + strings.Repeat("a", 64),
+		AdmissionDecision: reviewtransaction.ArtifactAdmissionCompleted,
+	}
+	admitted1 := ReviewTransitionArtifact{
+		Schema:            reviewResultArtifactSchema,
+		Capability:        reviewResultArtifactCapability,
+		SHA256:            "sha256:" + strings.Repeat("2", 64),
+		LineageID:         status.Authority.LineageID,
+		TargetIdentity:    status.TargetIdentity,
+		Lens:              reviewtransaction.LensReadability,
+		SelectedOrder:     1,
+		SubjectHash:       "sha256:" + strings.Repeat("b", 64),
+		AdmissionDecision: reviewtransaction.ArtifactAdmissionCompleted,
+	}
+	unachievable1 := ReviewTransitionArtifact{
+		Schema:            reviewResultArtifactSchema,
+		Capability:        reviewResultArtifactCapability,
+		SHA256:            "sha256:" + strings.Repeat("3", 64),
+		LineageID:         status.Authority.LineageID,
+		TargetIdentity:    status.TargetIdentity,
+		Lens:              reviewtransaction.LensReadability,
+		SelectedOrder:     1,
+		SubjectHash:       "sha256:" + strings.Repeat("b", 64),
+		AdmissionDecision: reviewtransaction.ArtifactAdmissionUnachievable,
+	}
+
+	t.Run("untried slots are offered normally", func(t *testing.T) {
+		got := newReviewNextTransition(status, lenses, nil, nil, nil, input)
+		if got.Kind != reviewNextTransitionCollect || got.Collect == nil || len(got.Collect.Inputs) != 2 {
+			t.Fatalf("expected collect transition with 2 inputs, got %#v", got)
+		}
+		if got.ReasonCode != "reviewer_results_required" {
+			t.Fatalf("expected reason reviewer_results_required, got %q", got.ReasonCode)
+		}
+	})
+
+	t.Run("admitted slot remains admitted and only untried slot is offered", func(t *testing.T) {
+		got := newReviewNextTransition(status, lenses, []ReviewTransitionArtifact{admitted0}, nil, nil, input)
+		if got.Kind != reviewNextTransitionCollect || got.Collect == nil || len(got.Collect.Inputs) != 1 {
+			t.Fatalf("expected collect transition with 1 input, got %#v", got)
+		}
+		if got.Collect.Inputs[0].ArtifactSubject.Lens != reviewtransaction.LensReadability {
+			t.Fatalf("expected untried readability lens offered, got %s", got.Collect.Inputs[0].ArtifactSubject.Lens)
+		}
+	})
+
+	t.Run("all admitted slots proceed to finalize", func(t *testing.T) {
+		got := newReviewNextTransition(status, lenses, []ReviewTransitionArtifact{admitted0, admitted1}, nil, nil, input)
+		if got.Kind != reviewNextTransitionExecute || got.Execute == nil || got.Execute.Operation != "review.finalize" {
+			t.Fatalf("expected execute finalize transition, got %#v", got)
+		}
+	})
+
+	t.Run("attempted and unachievable slot emits stop and does not reoffer", func(t *testing.T) {
+		got := newReviewNextTransition(status, lenses, []ReviewTransitionArtifact{admitted0, unachievable1}, nil, nil, input)
+		if got.Kind != reviewNextTransitionStop || got.ReasonCode != "captured_artifacts_unverifiable" {
+			t.Fatalf("expected stop captured_artifacts_unverifiable, got %#v", got)
+		}
+		if got.Collect != nil || got.Execute != nil {
+			t.Fatalf("stop transition exposed command or template: %#v", got)
+		}
+	})
+
+	t.Run("unachievable slot alone emits stop and does not reoffer as untried", func(t *testing.T) {
+		got := newReviewNextTransition(status, lenses, []ReviewTransitionArtifact{unachievable1}, nil, nil, input)
+		if got.Kind != reviewNextTransitionStop || got.ReasonCode != "captured_artifacts_unverifiable" {
+			t.Fatalf("expected stop captured_artifacts_unverifiable, got %#v", got)
+		}
+		if got.Collect != nil || got.Execute != nil {
+			t.Fatalf("stop transition exposed command or template: %#v", got)
+		}
+	})
+
+	t.Run("finalize next transition with unachievable slot emits stop", func(t *testing.T) {
+		state := reviewtransaction.CompactState{
+			LineageID:      status.Authority.LineageID,
+			State:          reviewtransaction.StateReviewing,
+			SelectedLenses: lenses,
+			InitialSnapshot: reviewtransaction.Snapshot{
+				Identity: status.TargetIdentity,
+			},
+		}
+		finalizeCtx := reviewFinalizeTransitionContext{
+			Contract:          ReviewIntegrationContractV2,
+			RepositoryContext: input.RepositoryContext,
+			CaptureContext:    input.CaptureContext,
+		}
+		got := reviewFinalizeNextTransition(state, status.Authority.Revision, []ReviewTransitionArtifact{admitted0, unachievable1}, nil, finalizeCtx)
+		if got.Kind != reviewNextTransitionStop || got.ReasonCode != "captured_artifacts_unverifiable" {
+			t.Fatalf("expected stop captured_artifacts_unverifiable on finalize, got %#v", got)
+		}
+	})
+}
+
 func TestReviewForecastMirrorsExactlyOneNextTransition(t *testing.T) {
 	for _, tt := range []struct {
 		name    string

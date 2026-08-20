@@ -222,6 +222,11 @@ func newReviewNextTransition(status ReviewTargetStatusResult, selectedLenses []s
 		if artifactErr != nil {
 			return reviewStopTransition("captured_artifacts_unverifiable")
 		}
+		for _, artifact := range artifacts {
+			if !isAdmittedArtifact(artifact) {
+				return reviewStopTransition("captured_artifacts_unverifiable")
+			}
+		}
 		if len(artifacts) != len(selectedLenses) {
 			return reviewMissingCaptureTransition(binding, selectedLenses, artifacts, input.CaptureContext, input.RuntimeAgent)
 		}
@@ -523,10 +528,15 @@ func reviewFinalizeNextTransition(state reviewtransaction.CompactState, revision
 		}
 		transitionContext.CorrectionRequest = &request
 	}
-	if state.State == reviewtransaction.StateReviewing && artifactErr == nil && len(artifacts) != len(state.SelectedLenses) {
-		return reviewMissingCaptureTransition(reviewTransitionBinding(status.Authority, status.TargetIdentity, transitionContext.RepositoryContext), state.SelectedLenses, artifacts, transitionContext.CaptureContext, transitionContext.RuntimeAgent)
-	}
 	if state.State == reviewtransaction.StateReviewing && artifactErr == nil {
+		for _, artifact := range artifacts {
+			if !isAdmittedArtifact(artifact) {
+				return reviewStopTransition("captured_artifacts_unverifiable")
+			}
+		}
+		if len(artifacts) != len(state.SelectedLenses) {
+			return reviewMissingCaptureTransition(reviewTransitionBinding(status.Authority, status.TargetIdentity, transitionContext.RepositoryContext), state.SelectedLenses, artifacts, transitionContext.CaptureContext, transitionContext.RuntimeAgent)
+		}
 		arguments := []ReviewTransitionArgument{{Name: "lineage", Value: state.LineageID}, {Name: "captured_results", Value: "true"}}
 		if reviewProviderCaptureRuntime(transitionContext.RuntimeAgent) {
 			// Finalize's preflight refuses --agent outside the negotiated v2
@@ -545,18 +555,25 @@ func reviewFinalizeNextTransition(state reviewtransaction.CompactState, revision
 	})
 }
 
+func isAdmittedArtifact(artifact ReviewTransitionArtifact) bool {
+	return artifact.AdmissionDecision == reviewtransaction.ArtifactAdmissionCompleted || artifact.AdmissionDecision == ""
+}
+
 func reviewMissingCaptureTransition(binding ReviewTransitionBinding, selectedLenses []string, artifacts []ReviewTransitionArtifact, context *reviewCaptureContext, runtime ...model.AgentID) ReviewNextTransition {
 	providerRuntime := model.AgentID("")
 	if len(runtime) > 0 && (reviewProviderCaptureRuntime(runtime[0]) || reviewProviderHostRelayMaterializeRuntime(runtime[0])) {
 		providerRuntime = runtime[0]
 	}
-	captured := make(map[int]bool, len(artifacts))
+	admitted := make(map[int]bool, len(artifacts))
 	for _, artifact := range artifacts {
-		captured[artifact.SelectedOrder] = true
+		if !isAdmittedArtifact(artifact) {
+			return reviewStopTransition("captured_artifacts_unverifiable")
+		}
+		admitted[artifact.SelectedOrder] = true
 	}
 	inputs := make([]ReviewTransitionInput, 0)
 	for order, lens := range selectedLenses {
-		if !captured[order] {
+		if !admitted[order] {
 			inputs = append(inputs, reviewCaptureInput(binding, lens, order, context, providerRuntime))
 		}
 	}
