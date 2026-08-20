@@ -44,6 +44,13 @@ main <- PR 1: foundation
 
 After a parent PR merges, rebase/retarget the next PR so GitHub shows only the current slice.
 
+## Issue References in Chained Stacks
+
+- **Intermediate PRs**: Link the parent epic/issue with `Refs #<N>` in `## 🔗 Linked Issue`. This satisfies `Check Issue Reference` and `Check Issue Has status:approved` without closing the issue when the slice merges.
+- **Terminal PR / Tracker PR**: Link with `Closes #<N>` so the issue closes only when the full chain or tracker lands.
+- **Partial or Abandoned Stacks**: If work is halted or abandoned, intermediate PRs already merged with `Refs #<N>` will have left the parent issue open.
+- **Reduced Scope**: If a stack is truncated and the remaining work is deemed complete or moved elsewhere, an explicit maintainer action/comment is required to close or update the parent issue.
+
 ## Chain Context Section
 
 Append this section to the repo PR template; do not replace required issue/checklist sections.

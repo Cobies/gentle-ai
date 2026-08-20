@@ -17,6 +17,8 @@ Load this skill when a planned PR may exceed **400 changed lines**, SDD forecast
 - Keep each PR reviewable in about **≤60 minutes**.
 - Use one deliverable work unit per PR; keep tests/docs with the unit they verify.
 - State start, end, prior dependencies, follow-up work, and out-of-scope items in every chained PR.
+- Intermediate chained PRs reference the parent epic with `Refs #N`; only the terminal PR (or tracker PR) uses `Closes #N`.
+- Partial or abandoned stacks keep the parent issue open; reduced scope requires an explicit maintainer decision.
 - Every child PR must include a dependency diagram marking the current PR with `📍`.
 - In Feature Branch Chain, create a draft/no-merge tracker PR; child PR #1 targets the tracker branch, later children target the immediate parent branch.
 - Treat polluted diffs as base bugs: retarget or rebase until only the current work unit appears.
