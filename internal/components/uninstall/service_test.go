@@ -1373,4 +1373,3 @@ Follow repository guidelines.
 		t.Fatalf("user content after marker was lost:\n%s", text)
 	}
 }
-

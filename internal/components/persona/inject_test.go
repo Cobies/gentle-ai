@@ -3203,5 +3203,3 @@ func TestInjectCodexHealsUnmanagedLegacyPersonaAsset(t *testing.T) {
 		t.Fatalf("AGENTS.md has duplicated persona content: %d instances of 'Senior Architect'", strings.Count(text, "Senior Architect"))
 	}
 }
-
-
