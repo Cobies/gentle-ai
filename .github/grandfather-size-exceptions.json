@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "description": "Frozen set of grandfathered PR numbers permitted to exceed the 400-line review budget with size:exception.",
+  "allowed_prs": []
+}
