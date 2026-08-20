@@ -265,6 +265,7 @@ func TestAllEmbeddedAssetsAreReadable(t *testing.T) {
 		"antigravity/agents/review-refuter.md",
 		"antigravity/agents/jd-judge-a.md",
 		"antigravity/agents/jd-judge-b.md",
+		"antigravity/agents/jd-fix-agent.md",
 
 		// Codex agent files
 		"codex/sdd-orchestrator.md",
@@ -2431,6 +2432,7 @@ func TestAntigravitySubagentsUseValidNativeTools(t *testing.T) {
 	}
 
 	antigravityAgentFiles := []string{
+		"antigravity/agents/jd-fix-agent.md",
 		"antigravity/agents/jd-judge-a.md",
 		"antigravity/agents/jd-judge-b.md",
 		"antigravity/agents/review-readability.md",
