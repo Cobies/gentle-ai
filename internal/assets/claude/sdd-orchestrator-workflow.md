@@ -179,6 +179,8 @@ When chained PRs are selected, treat `chained-pr` (registry skill `gentle-ai-cha
 
 Pass it as `chain_strategy` to `sdd-tasks` and `sdd-apply` prompts alongside `delivery_strategy`.
 
+Whenever delegating `sdd-tasks`, the orchestrator MUST resolve and inject both `work-unit-commits` (registry skill `gentle-ai-work-unit-commits`) and `chained-pr` (registry skill `gentle-ai-chained-pr`) under `## Skills to load before work` before task breakdown begins.
+
 ### Dependency Graph
 
 ```text
@@ -196,18 +198,21 @@ Every SDD phase returns: `status`, `executive_summary`, `artifacts`, `next_recom
 
 After `sdd-tasks` completes and before launching `sdd-apply`, inspect `Review Workload Forecast`.
 
-If it says `Chained PRs recommended: Yes`, `400-line budget risk: High`, estimated changed lines exceed 400, or `Decision needed before apply: Yes`, apply cached `delivery_strategy`:
+If it says `Chained PRs recommended: Yes`, `400-line budget risk: High`, estimated changed lines exceed 400, or `Decision needed before apply: Yes`, the orchestrator MUST block fail-closed before delegating `sdd-apply` unless an approved delivery strategy or maintainer `size:exception` has been explicitly resolved. Apply cached `delivery_strategy`:
 
-- `ask-on-risk`: stop and ask whether to split or proceed with `size:exception`.
-- `auto-chain`: split automatically; ask for `chain_strategy` only if missing.
-- `single-pr`: stop and require/record `size:exception` before apply.
-- `exception-ok`: continue and tell `sdd-apply` this run uses `size:exception`.
+- `ask-on-risk`: stop and ask whether to split into chained/stacked PRs or proceed with maintainer-approved `size:exception`.
+- `auto-chain`: split automatically; ask for `chain_strategy` only if missing. Then launch `sdd-apply` for only the next autonomous chained/stacked PR slice (a single Work Unit bounded to <=400 lines).
+- `single-pr`: stop and require/record maintainer-approved `size:exception` before apply.
+- `exception-ok`: continue and tell `sdd-apply` this run uses maintainer-approved `size:exception`.
 
 Any other `delivery_strategy` value is invalid. Do NOT pick the nearest branch and do NOT proceed: STOP, report the unrecognised value, and re-collect the delivery strategy before launching `sdd-apply`.
 
-Always pass the resolved `delivery_strategy`, `chain_strategy`, and PR boundary/exception to `sdd-apply`.
+The orchestrator MUST delegate `sdd-apply` strictly in single Work Unit batches bounded to <=400 changed lines (`additions + deletions`). Monolithic task delegation across multiple work units exceeding 400 lines in a single dispatch is forbidden. Subsequent units are deferred to future apply dispatches.
+
+Always pass the resolved `delivery_strategy`, `chain_strategy`, and any chosen single Work Unit boundary or maintainer `size:exception` to `sdd-apply`.
 
 When launching `sdd-apply`, always include the resolved `delivery_strategy`, `chain_strategy`, and any chosen PR boundary/exception in the prompt.
+
 
 <!-- gentle-ai:sdd-model-assignments -->
 
@@ -239,7 +244,7 @@ Maintain a session-scoped launch log of `(phase, task-fingerprint)` pairs. If th
 
 ### Sub-Agent Launch Protocol
 
-ALL sub-agent launch prompts that involve reading, writing, or reviewing code MUST include pre-resolved skill paths from the skill registry. Follow `~/.claude/skills/_shared/skill-resolver.md`.
+ALL sub-agent launch prompts that involve reading, writing, or reviewing code MUST include pre-resolved skill paths from the skill registry under `## Skills to load before work`. Follow `~/.claude/skills/_shared/skill-resolver.md`.
 
 Pre-flight before every SDD/Judgment-Day Agent call:
 
@@ -248,7 +253,8 @@ Pre-flight before every SDD/Judgment-Day Agent call:
 3. Include `model: "<alias>"` in SDD/Judgment-Day Agent calls.
 4. For generic/non-SDD delegation, omit `model` unless the user explicitly requested one.
 
-Resolve skills once per session, cache the registry, and pass exact `SKILL.md` paths. If a delegated result reports `skill_resolution` as `fallback-registry`, `fallback-path`, or `none`, re-read the registry before subsequent delegations.
+Resolve skills once per session, cache the registry, and pass exact `SKILL.md` paths under `## Skills to load before work`. Sub-agents report `skill_resolution` (`paths-injected`, `fallback-registry`, `fallback-path`, `none`). If a delegated result reports `skill_resolution` as `fallback-registry`, `fallback-path`, or `none` (or anything other than `paths-injected`), invalidate the cached skill registry immediately and re-read the registry from persistent store before subsequent delegations.
+
 
 **Key Learnings closing (generic delegations):** When delegating to generic agents (Explore, general-purpose), instruct the sub-agent to close its final message with a `## Key Learnings` section containing 1–5 numbered items, each a standalone factual sentence of ≥4 words and ≥20 characters. This enables engram passive capture of learnings across delegation boundaries. SDD phase agents load this requirement from `~/.claude/skills/_shared/sdd-phase-common.md` section F automatically.
 

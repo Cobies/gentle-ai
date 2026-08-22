@@ -35,7 +35,7 @@ Prefer the smallest useful set. If more than five skills match, keep the five mo
 
 ### Step 3: Pass Skill Paths
 
-Inject paths, not summaries:
+Inject exact paths, not summaries:
 
 ```markdown
 ## Skills to load before work
@@ -46,18 +46,21 @@ Read these exact files before reading, writing, reviewing, testing, or creating 
 - /absolute/path/to/skills/typescript/SKILL.md
 ```
 
+Delegating agents MUST resolve skills from the skill registry by canonical name and inject absolute filesystem paths to `SKILL.md` files under `## Skills to load before work`. Delegators MUST NOT inject inline summaries or hardcoded fallback paths.
+
 The sub-agent MUST read those files before task-specific work. `SKILL.md` is the runtime contract and source of truth.
 
-### Step 4: Report Resolution
+### Step 4: Report Resolution and Cache Invalidation
 
-Sub-agents MUST report `skill_resolution`:
+Sub-agents MUST report `skill_resolution` in their return envelope:
 
 - `paths-injected` — received exact skill paths from the delegator and loaded them.
 - `fallback-registry` — no paths received, self-loaded paths from the registry.
 - `fallback-path` — loaded an explicit fallback path outside the registry.
 - `none` — no skills loaded.
 
-If a sub-agent reports anything other than `paths-injected`, the orchestrator MUST re-read the registry before the next delegation.
+When any sub-agent returns a `skill_resolution` value other than `paths-injected` (`fallback-registry`, `fallback-path`, or `none`), the delegator MUST invalidate its cached skill registry and re-read the registry from persistent store before the next delegation.
+
 
 ## Compaction Safety
 

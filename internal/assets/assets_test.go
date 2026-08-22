@@ -2533,3 +2533,140 @@ func TestAntigravitySubagentsUseValidNativeTools(t *testing.T) {
 		})
 	}
 }
+
+func TestOrchestratorsMandateTaskSkillsInjection(t *testing.T) {
+	paths := allSDDOrchestratorAssetPaths(t)
+	if len(paths) != 12 {
+		t.Fatalf("expected 12 orchestrators, got %d", len(paths))
+	}
+
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			content := MustRead(path)
+			if path == "claude/sdd-orchestrator.md" {
+				content += "\n" + MustRead("claude/sdd-orchestrator-workflow.md")
+			}
+
+			// When delegating sdd-tasks, both work-unit-commits and chained-pr must be injected
+			for _, required := range []string{
+				"work-unit-commits",
+				"chained-pr",
+				"sdd-tasks",
+				"Skills to load before work",
+			} {
+				if !strings.Contains(content, required) {
+					t.Fatalf("%s missing required task skill injection contract %q", path, required)
+				}
+			}
+		})
+	}
+}
+
+func TestOrchestratorsEnforceBoundedWorkUnitApplyAndFailClosedGuard(t *testing.T) {
+	paths := allSDDOrchestratorAssetPaths(t)
+	if len(paths) != 12 {
+		t.Fatalf("expected 12 orchestrators, got %d", len(paths))
+	}
+
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			content := MustRead(path)
+			if path == "claude/sdd-orchestrator.md" {
+				content += "\n" + MustRead("claude/sdd-orchestrator-workflow.md")
+			}
+
+			for _, required := range []string{
+				"sdd-apply",
+				"400",
+				"Work Unit",
+				"Review Workload Guard",
+				"Decision needed before apply",
+				"size:exception",
+			} {
+				if !strings.Contains(content, required) {
+					t.Fatalf("%s missing bounded apply or fail-closed workload guard contract %q", path, required)
+				}
+			}
+		})
+	}
+}
+
+func TestUniversalSkillCacheInvalidationOnFallbackResolution(t *testing.T) {
+	paths := allSDDOrchestratorAssetPaths(t)
+	if len(paths) != 12 {
+		t.Fatalf("expected 12 orchestrators, got %d", len(paths))
+	}
+
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			content := MustRead(path)
+			if path == "claude/sdd-orchestrator.md" {
+				content += "\n" + MustRead("claude/sdd-orchestrator-workflow.md")
+			}
+
+			for _, required := range []string{
+				"skill_resolution",
+				"paths-injected",
+				"fallback-registry",
+			} {
+				if !strings.Contains(content, required) {
+					t.Fatalf("%s missing skill resolution invalidation check %q", path, required)
+				}
+			}
+		})
+	}
+
+	// Also check shared files
+	for _, sharedPath := range []string{
+		"skills/_shared/skill-resolver.md",
+		"skills/_shared/sdd-phase-common.md",
+	} {
+		t.Run(sharedPath, func(t *testing.T) {
+			content := MustRead(sharedPath)
+			for _, required := range []string{
+				"skill_resolution",
+				"paths-injected",
+				"fallback-registry",
+			} {
+				if !strings.Contains(content, required) {
+					t.Fatalf("%s missing skill resolution invalidation check %q", sharedPath, required)
+				}
+			}
+		})
+	}
+}
+
+func TestSDDTaskAndApplySkills(t *testing.T) {
+	tasksContent := MustRead("skills/sdd-tasks/SKILL.md")
+	for _, required := range []string{
+		"Decision needed before apply:",
+		"Chained PRs recommended:",
+		"Chain strategy:",
+		"400-line budget risk:",
+		"Focused test command",
+		"Runtime harness",
+		"Rollback boundary",
+	} {
+		if !strings.Contains(tasksContent, required) {
+			t.Fatalf("skills/sdd-tasks/SKILL.md missing required workload forecast/work unit contract %q", required)
+		}
+	}
+
+	applyContent := MustRead("skills/sdd-apply/SKILL.md")
+	for _, required := range []string{
+		"Step 2a: Enforce Review Workload Decision",
+		"400-line budget risk: High",
+		"Chained PRs recommended: Yes",
+		"Decision needed before apply: Yes",
+		"status: blocked",
+		"Work Unit Evidence",
+		"Focused test command",
+		"Runtime harness",
+		"Rollback boundary",
+	} {
+		if !strings.Contains(applyContent, required) {
+			t.Fatalf("skills/sdd-apply/SKILL.md missing required apply workload guard/evidence contract %q", required)
+		}
+	}
+}
+

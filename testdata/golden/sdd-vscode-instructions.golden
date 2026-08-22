@@ -252,6 +252,8 @@ Cache the chain strategy for the session. Pass it as `chain_strategy` to `sdd-ta
 
 When delivery planning yields chained PRs, treat `chained-pr` (registry skill `gentle-ai-chained-pr`) as a required skill match: resolve it by registry name through this template's existing skill-resolution mechanism (the same one it already uses to pass skills to phases) and ensure the `sdd-tasks` and `sdd-apply` phases load and follow it BEFORE planning or creating any PR. Do not hardcode the skill path; defer resolution to that mechanism.
 
+Whenever delegating `sdd-tasks`, the orchestrator MUST resolve and inject both `work-unit-commits` (registry skill `gentle-ai-work-unit-commits`) and `chained-pr` (registry skill `gentle-ai-chained-pr`) under `## Skills to load before work` before task breakdown begins.
+
 ### Dependency Graph
 
 ```
@@ -269,13 +271,16 @@ Each phase returns: `status`, `executive_summary`, `artifacts`, `next_recommende
 
 After `sdd-tasks` completes and before launching `sdd-apply`, inspect the task result summary for `Review Workload Forecast`.
 
-If it says `Chained PRs recommended: Yes`, `400-line budget risk: High`, estimated changed lines exceed 400, or `Decision needed before apply: Yes`, apply the cached `delivery_strategy`: `ask-on-risk` asks, `auto-chain` asks for a missing `chain_strategy` and applies only the next PR slice, `single-pr` requires `size:exception`, and `exception-ok` records the exception.
+If it says `Chained PRs recommended: Yes`, `400-line budget risk: High`, estimated changed lines exceed 400, or `Decision needed before apply: Yes`, the orchestrator MUST block fail-closed before delegating `sdd-apply` unless an approved delivery strategy or maintainer `size:exception` has been explicitly resolved. Apply the cached `delivery_strategy`: `ask-on-risk` asks, `auto-chain` asks for a missing `chain_strategy` and applies only the next PR slice (a single Work Unit bounded to <=400 lines), `single-pr` requires maintainer-approved `size:exception`, and `exception-ok` records the exception.
 
 Any other `delivery_strategy` value is invalid. Do NOT pick the nearest branch and do NOT proceed: STOP, report the unrecognised value, and re-collect the delivery strategy before `sdd-apply` runs.
 
+The orchestrator MUST delegate `sdd-apply` strictly in single Work Unit batches bounded to <=400 changed lines (`additions + deletions`). Monolithic task delegation across multiple work units exceeding 400 lines in a single dispatch is forbidden. Subsequent units are deferred to future apply dispatches.
+
 Do this even in Automatic mode. Automatic mode does not override reviewer burnout protection.
 
-When launching `sdd-apply`, include the resolved `delivery_strategy`, `chain_strategy`, and any chosen PR boundary/exception in the prompt.
+When launching `sdd-apply`, include the resolved `delivery_strategy`, `chain_strategy`, and any chosen single Work Unit boundary or maintainer `size:exception` in the prompt.
+
 
 <!-- /section:model-capable -->
 
@@ -366,9 +371,10 @@ For each sub-agent launch:
 After every delegation that returns a result, check the `skill_resolution` field:
 
 - `paths-injected` → all good, exact skill paths were passed and loaded
-- `fallback-registry`, `fallback-path`, or `none` → skill cache was lost (likely compaction). Re-read the registry immediately and pass skill paths in all subsequent delegations.
+- `fallback-registry`, `fallback-path`, or `none` → skill cache was lost (likely compaction). Invalidate the cached skill registry immediately, re-read the registry from persistent store, and pass skill paths in all subsequent delegations.
 
 This is a self-correction mechanism. Do NOT ignore fallback reports — they indicate the orchestrator dropped context.
+
 
 ### Sub-Agent Context Protocol
 

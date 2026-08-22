@@ -462,11 +462,14 @@ func TestKilocodeReviewSettingsMatchCurrentMainBaseline(t *testing.T) {
 	// renders through the OpenCode orchestrator asset. The hash is rederived.
 	// #3417 also classifies OpenCode background launch acknowledgements as
 	// nonterminal, preventing false task-result failures and session latches.
-	const want = "8b4e161971530355248addfc62fb101d1ea71a5ba4e293b427e85c87a2c535c7"
+	// harden-skill-registry-and-workload-guards mandates work-unit-commits & chained-pr
+	// task skills injection, bounded single work unit apply dispatch, and resolver cache invalidation.
+	const want = "13f832075f9eec5ebf6ce4e99f9cfac65354543d1f38c3fe2efdf054edc7235b"
 	if got != want {
 		t.Fatalf("Kilocode settings SHA-256 = %s, want current-main baseline %s", got, want)
 	}
 }
+
 
 func TestOpenCodeRenderedReviewProtocolCost(t *testing.T) {
 	home := t.TempDir()

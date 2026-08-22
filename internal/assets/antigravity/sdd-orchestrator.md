@@ -399,6 +399,8 @@ Cache the chain strategy for the session. Add it as `chain_strategy` to `sdd-tas
 
 When delivery planning yields chained PRs, treat `chained-pr` (registry skill `gentle-ai-chained-pr`) as a required skill match: resolve it by registry name through this template's existing skill-resolution mechanism (the same one it already uses to pass skills to phases) and ensure the `sdd-tasks` and `sdd-apply` phases load and follow it BEFORE planning or creating any PR. Do not hardcode the skill path; defer resolution to that mechanism.
 
+Whenever delegating `sdd-tasks`, the orchestrator MUST resolve and inject both `work-unit-commits` (registry skill `gentle-ai-work-unit-commits`) and `chained-pr` (registry skill `gentle-ai-chained-pr`) under `## Skills to load before work` before task breakdown begins.
+
 ### Dependency Graph
 
 ```text
@@ -416,18 +418,19 @@ Each phase subagent returns: `status`, `executive_summary`, `artifacts`, `next_r
 
 After `sdd-tasks` completes and before launching `sdd-apply`, inspect `Review Workload Forecast`.
 
-If it says `Chained PRs recommended: Yes`, `400-line budget risk: High`, estimated changed lines exceed 400, or `Decision needed before apply: Yes`, apply cached `delivery_strategy`:
+If it says `Chained PRs recommended: Yes`, `400-line budget risk: High`, estimated changed lines exceed 400, or `Decision needed before apply: Yes`, the orchestrator MUST block fail-closed before delegating `sdd-apply` unless an approved delivery strategy or maintainer `size:exception` has been explicitly resolved. Apply cached `delivery_strategy`:
 
 - **`ask-on-risk`**: STOP and ask chained/stacked PRs vs maintainer-approved `size:exception`. If the user chooses chained PRs and `chain_strategy` is not yet cached, also ask which chain strategy to use (`stacked-to-main` or `feature-branch-chain`).
-- **`auto-chain`**: Do not ask about splitting. If `chain_strategy` is not yet cached, ask which chain strategy to use. Then invoke `sdd-apply` for only the next autonomous chained/stacked PR slice using work-unit commits, clear start/finish boundaries, verification, and rollback.
-- **`single-pr`**: STOP and require/record `size:exception` before apply.
-- **`exception-ok`**: Continue, but tell `sdd-apply` this run uses `size:exception`.
+- **`auto-chain`**: Do not ask about splitting. If `chain_strategy` is not yet cached, ask which chain strategy to use. Then invoke `sdd-apply` for only the next autonomous chained/stacked PR slice (a single Work Unit bounded to <=400 lines) using work-unit commits, clear start/finish boundaries, verification, and rollback.
+- **`single-pr`**: STOP and require/record maintainer-approved `size:exception` before apply.
+- **`exception-ok`**: Continue, but tell `sdd-apply` this run uses maintainer-approved `size:exception`.
 
 Any other `delivery_strategy` value is invalid. Do NOT pick the nearest branch and do NOT proceed: STOP, report the unrecognised value, and re-collect the delivery strategy before `sdd-apply` runs.
 
-Automatic mode does not override this guard. Always include the resolved `delivery_strategy` and `chain_strategy` in `sdd-apply` dynamic subagent context.
+The orchestrator MUST delegate `sdd-apply` strictly in single Work Unit batches bounded to <=400 changed lines (`additions + deletions`). Monolithic task delegation across multiple work units exceeding 400 lines in a single dispatch is forbidden. Subsequent units are deferred to future apply dispatches.
 
-When invoking the `sdd-apply` phase subagent, always include the resolved `delivery_strategy`, `chain_strategy`, and any chosen PR boundary/exception in the phase context.
+Automatic mode does not override this guard. Always include the resolved `delivery_strategy`, `chain_strategy`, and any chosen single Work Unit boundary or maintainer `size:exception` in `sdd-apply` dynamic subagent context.
+
 
 <!-- gentle-ai:sdd-model-assignments -->
 ## Model Assignments
@@ -481,7 +484,8 @@ Before invoking each phase subagent:
 After completing each phase, check the `skill_resolution` field in the phase result:
 
 - `paths-injected` → all good, exact skill paths were loaded
-- `fallback-registry`, `fallback-path`, or `none` → skill cache was lost (likely compaction). Re-read the registry immediately and load skill paths for all subsequent phases.
+- `fallback-registry`, `fallback-path`, or `none` → skill cache was lost (likely compaction). Invalidate the cached skill registry immediately, re-read the registry from persistent store, and load skill paths for all subsequent phases.
+
 
 This is a self-correction mechanism. Do NOT ignore fallback reports — they indicate you dropped context between phases.
 

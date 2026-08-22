@@ -241,9 +241,11 @@ When `delivery_strategy` results in chained PRs (either by user choice via `ask-
 - **`stacked-to-main`**: Each PR merges to main in order. Fast iteration, fix on the go. Best for speed-first teams and independent slices.
 - **`feature-branch-chain`**: The feature/tracker branch accumulates final integration; PR #1 targets the tracker branch, later child PRs target the immediate previous PR branch so review diffs stay focused. Only the tracker merges to main. Best for rollback control and coordinated releases.
 
-Cache the chain strategy for the session. Add it as `chain_strategy` to `sdd-tasks` and `sdd-apply` inline phase context alongside `delivery_strategy`. Do not ask again unless the user changes scope.
+Cache the chain strategy for the session. Pass it as `chain_strategy` to `sdd-tasks` and `sdd-apply` inline phase context alongside `delivery_strategy`. Do not ask again unless the user changes scope.
 
 When delivery planning yields chained PRs, treat `chained-pr` (registry skill `gentle-ai-chained-pr`) as a required skill match: resolve it by registry name through this template's existing skill-resolution mechanism (the same one it already uses to pass skills to phases) and ensure the `sdd-tasks` and `sdd-apply` phases load and follow it BEFORE planning or creating any PR. Do not hardcode the skill path; defer resolution to that mechanism.
+
+Whenever delegating `sdd-tasks`, the orchestrator MUST resolve and inject both `work-unit-commits` (registry skill `gentle-ai-work-unit-commits`) and `chained-pr` (registry skill `gentle-ai-chained-pr`) under `## Skills to load before work` before task breakdown begins.
 
 ### Dependency Graph
 ```
@@ -260,18 +262,20 @@ Each phase returns: `status`, `executive_summary`, `artifacts`, `next_recommende
 
 After `sdd-tasks` completes and before launching `sdd-apply`, inspect `Review Workload Forecast`.
 
-If it says `Chained PRs recommended: Yes`, `400-line budget risk: High`, estimated changed lines exceed 400, or `Decision needed before apply: Yes`, apply cached `delivery_strategy`:
+If it says `Chained PRs recommended: Yes`, `400-line budget risk: High`, estimated changed lines exceed 400, or `Decision needed before apply: Yes`, the orchestrator MUST block fail-closed before delegating `sdd-apply` unless an approved delivery strategy or maintainer `size:exception` has been explicitly resolved. Apply cached `delivery_strategy`:
 
 - **`ask-on-risk`**: STOP and ask chained/stacked PRs vs maintainer-approved `size:exception`. If the user chooses chained PRs and `chain_strategy` is not yet cached, also ask which chain strategy to use (`stacked-to-main` or `feature-branch-chain`).
-- **`auto-chain`**: Do not ask about splitting. If `chain_strategy` is not yet cached, ask which chain strategy to use. Then run `sdd-apply` inline for only the next autonomous chained/stacked PR slice using work-unit commits, clear start/finish boundaries, verification, and rollback.
-- **`single-pr`**: STOP and require/record `size:exception` before apply.
-- **`exception-ok`**: Continue, but tell `sdd-apply` this run uses `size:exception`.
+- **`auto-chain`**: Do not ask about splitting. If `chain_strategy` is not yet cached, ask which chain strategy to use. Then run `sdd-apply` inline for only the next autonomous chained/stacked PR slice (a single Work Unit bounded to <=400 lines) using work-unit commits, clear start/finish boundaries, verification, and rollback.
+- **`single-pr`**: STOP and require/record maintainer-approved `size:exception` before apply.
+- **`exception-ok`**: Continue, but tell `sdd-apply` this run uses maintainer-approved `size:exception`.
 
 Any other `delivery_strategy` value is invalid. Do NOT pick the nearest branch and do NOT proceed: STOP, report the unrecognised value, and re-collect the delivery strategy before `sdd-apply` runs.
 
-Automatic mode does not override this guard. Always include the resolved `delivery_strategy` and `chain_strategy` in `sdd-apply` inline phase context.
+The orchestrator MUST delegate `sdd-apply` strictly in single Work Unit batches bounded to <=400 changed lines (`additions + deletions`). Monolithic task delegation across multiple work units exceeding 400 lines in a single dispatch is forbidden. Subsequent units are deferred to future apply dispatches.
 
-When executing the inline `sdd-apply` phase, always include the resolved `delivery_strategy`, `chain_strategy`, and any chosen PR boundary/exception in the phase context.
+Automatic mode does not override this guard. Always include the resolved `delivery_strategy`, `chain_strategy`, and any chosen single Work Unit boundary or maintainer `size:exception` in `sdd-apply` inline phase context.
+
+When executing the inline `sdd-apply` phase, always include the resolved `delivery_strategy`, `chain_strategy`, and any chosen single Work Unit boundary or maintainer `size:exception` in the phase context.
 
 <!-- gentle-ai:sdd-model-assignments -->
 ## Model Assignments
@@ -387,7 +391,7 @@ Since Cascade is a solo-agent, skill resolution runs inline before each phase. D
 
 Before each phase execution:
 1. Match relevant skills by **code context** (file extensions/paths you will touch) AND **task context** (what actions you will perform — review, PR creation, testing, etc.)
-2. Load matching exact `SKILL.md` paths from the registry
+2. Load matching exact `SKILL.md` paths from the registry and pass them as `## Skills to load before work`
 3. Read those skill files before phase work — they inform how you write code, structure artifacts, and validate output
 
 **Key rule**: use paths, not generated summaries. Read the full `SKILL.md` files so author intent is preserved. This is compaction-safe because you re-read the registry if the cache is lost.
@@ -396,7 +400,8 @@ Before each phase execution:
 
 After completing each phase, check the `skill_resolution` field in your own result:
 - `paths-injected` → all good, exact skill paths were loaded
-- `fallback-registry`, `fallback-path`, or `none` → skill cache was lost (likely compaction). Re-read the registry immediately and load skill paths for all subsequent phases.
+- `fallback-registry`, `fallback-path`, or `none` → skill cache was lost (likely compaction). Invalidate the cached skill registry immediately, re-read the registry from persistent store, and load skill paths for all subsequent phases.
+
 
 This is a self-correction mechanism. Do NOT ignore fallback reports — they indicate you dropped context between phases.
 

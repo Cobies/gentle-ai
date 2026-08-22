@@ -262,6 +262,8 @@ Cache the chain strategy for the session. Pass it as `chain_strategy` to `sdd-ta
 
 When delivery planning yields chained PRs, treat `chained-pr` (registry skill `gentle-ai-chained-pr`) as a required skill match: resolve it by registry name through this template's existing skill-resolution mechanism (the same one it already uses to pass skills to phases) and ensure the `sdd-tasks` and `sdd-apply` phases load and follow it BEFORE planning or creating any PR. Do not hardcode the skill path; defer resolution to that mechanism.
 
+Whenever delegating `sdd-tasks`, the orchestrator MUST resolve and inject both `work-unit-commits` (registry skill `gentle-ai-work-unit-commits`) and `chained-pr` (registry skill `gentle-ai-chained-pr`) under `## Skills to load before work` before task breakdown begins.
+
 ### Dependency Graph
 ```
 proposal -> specs --> tasks -> apply -> verify -> archive
@@ -277,16 +279,19 @@ Each phase returns: `status`, `executive_summary`, `artifacts`, `next_recommende
 
 After `sdd-tasks` completes and before launching `sdd-apply`, inspect `Review Workload Forecast`.
 
-If it says `Chained PRs recommended: Yes`, `400-line budget risk: High`, estimated changed lines exceed 400, or `Decision needed before apply: Yes`, apply cached `delivery_strategy`:
+If it says `Chained PRs recommended: Yes`, `400-line budget risk: High`, estimated changed lines exceed 400, or `Decision needed before apply: Yes`, the orchestrator MUST block fail-closed before delegating `sdd-apply` unless an approved delivery strategy or maintainer `size:exception` has been explicitly resolved. Apply cached `delivery_strategy`:
 
 - **`ask-on-risk`**: STOP and ask chained/stacked PRs vs maintainer-approved `size:exception`.
-- **`auto-chain`**: Do not ask. Tell `sdd-apply` to implement only the next autonomous chained/stacked PR slice using work-unit commits.
-- **`single-pr`**: STOP and require/record `size:exception` before apply.
-- **`exception-ok`**: Continue, but tell `sdd-apply` this run uses `size:exception`.
+- **`auto-chain`**: Do not ask. Tell `sdd-apply` to implement only the next autonomous chained/stacked PR slice (a single Work Unit bounded to <=400 lines) using work-unit commits.
+- **`single-pr`**: STOP and require/record maintainer-approved `size:exception` before apply.
+- **`exception-ok`**: Continue, but tell `sdd-apply` this run uses maintainer-approved `size:exception`.
 
 Any other `delivery_strategy` value is invalid. Do NOT pick the nearest branch and do NOT proceed: STOP, report the unrecognised value, and re-collect the delivery strategy before `sdd-apply` runs.
 
-Automatic mode does not override this guard. Always pass the resolved delivery strategy to `sdd-apply`.
+The orchestrator MUST delegate `sdd-apply` strictly in single Work Unit batches bounded to <=400 changed lines (`additions + deletions`). Monolithic task delegation across multiple work units exceeding 400 lines in a single dispatch is forbidden. Subsequent units are deferred to future apply dispatches.
+
+Automatic mode does not override this guard. Always pass the resolved delivery strategy, chain strategy, and chosen single Work Unit boundary or maintainer `size:exception` to `sdd-apply`.
+
 
 <!-- gentle-ai:sdd-model-assignments -->
 ## Model Assignments
@@ -341,9 +346,10 @@ For each subagent invocation:
 
 After every subagent invocation that returns a result, check the `skill_resolution` field:
 - `paths-injected` → all good, exact skill paths were passed and loaded
-- `fallback-registry`, `fallback-path`, or `none` → skill cache was lost (likely compaction). Re-read the registry immediately and pass skill paths in all subsequent delegations.
+- `fallback-registry`, `fallback-path`, or `none` → skill cache was lost (likely compaction). Invalidate the cached skill registry immediately, re-read the registry from persistent store, and pass skill paths in all subsequent delegations.
 
 This is a self-correction mechanism. Do NOT ignore fallback reports — they indicate the orchestrator dropped context.
+
 
 ### Sub-Agent Context Protocol
 

@@ -98,15 +98,18 @@ If the forecast says any of the following:
 
 Then you MUST confirm the orchestrator/user provided a resolved delivery path:
 
-1. **`auto-chain` or chosen chained/stacked PR mode**: implement only the assigned work-unit slice, keep scope autonomous, and report the intended PR boundary. Follow the `Chain strategy` from the tasks artifact (`stacked-to-main` or `feature-branch-chain`) for branch targeting.
+1. **`auto-chain` or chosen chained/stacked PR mode**: implement only the assigned work-unit slice, enforce single Work Unit execution boundaries bounded to <=400 lines, keep scope autonomous, and report the intended PR boundary. Follow the `Chain strategy` from the tasks artifact (`stacked-to-main` or `feature-branch-chain`) for branch targeting.
 2. **`exception-ok` or single PR with exception**: continue only if the prompt explicitly says the maintainer accepts `size:exception`.
 3. **`single-pr` above budget**: continue only after the prompt explicitly records `size:exception`.
+
+`sdd-apply` MUST enforce execution boundaries to a single assigned Work Unit <=400 lines unless maintainer `size:exception` is explicitly recorded. Monolithic task execution across multiple unapproved units is forbidden.
 
 Also check for `Chain strategy` in the tasks artifact. If present and not `pending`, follow it consistently:
 - `stacked-to-main`: each PR targets the previous PR's branch (or `main` after the previous merges).
 - `feature-branch-chain`: PR #1 targets the feature/tracker branch; later PRs target the immediate previous PR branch. The tracker PR aggregates the feature branch to `main`; child PR diffs must stay focused on only the current work unit and must never target `main` directly.
 
-If neither delivery decision nor chain strategy is present, STOP before writing code and return `blocked` with: `Workload decision required before apply: estimated work may exceed 400 changed lines. Ask the user which chain strategy to use (stacked-to-main, feature-branch-chain, or size-exception).`
+If neither delivery decision nor chain strategy is present, STOP before writing code and return `status: blocked` with: `Workload decision required before apply: estimated work may exceed 400 changed lines. Ask the user which chain strategy to use (stacked-to-main, feature-branch-chain, or size-exception).`
+
 
 ##### Step 2b: Read Previous Apply-Progress (if exists)
 

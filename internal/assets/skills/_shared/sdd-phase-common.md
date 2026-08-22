@@ -91,7 +91,7 @@ Every phase MUST return a structured envelope to the orchestrator:
 - `artifacts`: list of artifact keys/paths written
 - `next_recommended`: the next SDD phase to run, or "none"
 - `risks`: risks discovered, or "None"
-- `skill_resolution`: how skills were loaded — `paths-injected` (received exact skill paths from orchestrator), `fallback-registry` (self-loaded paths from registry), `fallback-path` (loaded via SKILL: Load path), or `none` (no skills loaded)
+- `skill_resolution`: how skills were loaded — `paths-injected` (received exact skill paths from orchestrator), `fallback-registry` (self-loaded paths from registry), `fallback-path` (loaded via SKILL: Load path), or `none` (no skills loaded). When `skill_resolution` is `fallback-registry`, `fallback-path`, or `none`, the delegator MUST invalidate its session cache and force a registry reload before subsequent delegations.
 
 If terminal task-result validation reports `sdd_task_result_empty` or `sdd_task_result_malformed`, do not assume this envelope was delivered. Do not retry automatically or initiate another phase. The terminal value starts with `GENTLE_AI_SDD_FAILURE ` followed by a `gentle-ai.sdd-task-result-failure/v1` JSON handoff; preserve it unchanged, run its `continuation` exactly once to inspect current state, report the typed failure to the user, and wait for an explicit decision. A later launch in the same session receives `sdd_task_dispatch_latched` instead: that launch never dispatched, so it names the phase it requested, the earlier phase and code that actually failed, and its `exit` -- start a new session to launch SDD phases again.
 
@@ -119,11 +119,12 @@ SDD must protect reviewer cognitive load, not only generate tasks.
 - Any other `delivery_strategy` value is invalid. A phase MUST NOT map it to the nearest branch, MUST NOT record it in an artifact, and MUST NOT forward it: report the unrecognised value and stop.
 - The orchestrator MUST pass `delivery_strategy` to `sdd-tasks` and the resolved decision to `sdd-apply`.
 - `sdd-tasks` MUST forecast whether the planned work may exceed that budget.
-- The forecast MUST include exact plain-text guard lines: `Decision needed before apply: Yes|No`, `Chained PRs recommended: Yes|No`, and `400-line budget risk: Low|Medium|High`.
+- The forecast MUST include exact plain-text guard lines: `Decision needed before apply: Yes|No`, `Chained PRs recommended: Yes|No`, `Chain strategy: stacked-to-main|feature-branch-chain|size-exception|pending`, and `400-line budget risk: Low|Medium|High`.
 - If the forecast is high, `sdd-tasks` MUST recommend chained or stacked PRs using deliverable work units.
-- `sdd-apply` MUST NOT start oversized work unless the delivery strategy resolves to chained/stacked PR slices or explicitly accepted `size:exception`.
+- `sdd-apply` MUST NOT start oversized work unless the delivery strategy resolves to chained/stacked PR slices or explicitly accepted `size:exception`. Single work-unit batches MUST stay bounded to <=400 changed lines (`additions + deletions`).
 - Each chained PR slice must have a clear start, clear finish, autonomous scope, verification, and reasonable rollback.
 - In a Feature Branch Chain, PR #1 targets the feature/tracker branch and later child PRs target the immediate previous PR branch; if GitHub shows previous slices in a child diff, retarget/rebase until the diff is clean.
+
 
 This guard exists to reduce reviewer burnout and keep implementation delivery safe. Do not treat it as optional process noise.
 
