@@ -84,7 +84,7 @@ The PR body must follow the template at `.github/PULL_REQUEST_TEMPLATE.md`. All 
 ```markdown
 ## 🔗 Linked Issue
 
-Closes #<N>
+Closes #<N> (or `Refs #<N>` for intermediate stacked/chained PRs)
 
 ## 🏷️ PR Type
 
@@ -148,7 +148,7 @@ These checks run on every PR and **all must pass** before merge:
 | Check | What It Verifies | How to Fix |
 |-------|-----------------|------------|
 | **Check PR Cognitive Load** | PR stays within 400 changed lines (`additions + deletions`) or has `size:exception` | Split the PR, or request/obtain maintainer-applied `size:exception` and document the rationale |
-| **Check Issue Reference** | PR body contains `Closes/Fixes/Resolves #N` | Add `Closes #<N>` to the PR body |
+| **Check Issue Reference** | PR body contains `Closes/Fixes/Resolves #N` or `Refs #N` | Add `Closes #<N>` (or `Refs #<N>` for intermediate stacked PRs) to the PR body |
 | **Check Issue Has `status:approved`** | Linked issue has been approved by a maintainer | Wait for maintainer to add `status:approved` to the issue |
 | **Check PR Has `type:*` Label** | Exactly one `type:*` label is applied to the PR | Ask a maintainer to add the correct label; remove extras |
 | **Unit Tests** | `go test ./...` passes | Fix failing tests before pushing |
