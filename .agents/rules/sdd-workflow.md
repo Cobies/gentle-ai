@@ -21,3 +21,9 @@ Every code change, refactoring, or new feature request must run through the foll
 ## 3. Test-Driven Development (TDD) Requirement
 - All new features and bug fixes must have corresponding tests.
 - Execution of tests is mandatory inside `sdd-verify` before completing a task.
+
+## 4. Default Interactive Execution
+- The SDD workflow is strictly **Interactive** by default across all phases.
+- The orchestrator MUST pause after every dynamic phase subagent completes (`sdd-explore`, `sdd-propose`, `sdd-spec`, `sdd-design`, `sdd-tasks`, `sdd-verify`), present a concise summary of the artifact produced in the conversation's active language, and STOP to wait for the user's explicit approval before proceeding to the next phase.
+- Automatic chaining of planning phases is disabled unless explicitly requested by the user for a specific session.
+
