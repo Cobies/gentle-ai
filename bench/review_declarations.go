@@ -56,7 +56,6 @@ var coreJourneyReviewModes = map[string]ReviewPrecondition{
 	"j34-abandon-then-start-again":                                              reviewOptedIn,
 	"j35-correction-budget-exactly-zero":                                        reviewOptedIn,
 	"j36-contract-right-name-wrong-version":                                     reviewOptedIn,
-	"j37-sdd-bound-passing-attempt-closes-over-a-corrected-candidate":           reviewOptedIn,
 	"j40-sdd-attempt-reset-after-drift":                                         reviewOptedIn,
 	"j41-kill-switch-versus-sdd-pre-verify":                                     reviewUntouched,
 	"j42-kill-switch-versus-sdd-archive":                                        reviewOptedIn,
@@ -112,6 +111,7 @@ var coreJourneyReviewModes = map[string]ReviewPrecondition{
 	"j97-pre-push-preserves-ls-remote-failure":                                  reviewOptedIn,
 	"j98-sdd-flat-root-spec-is-discovered":                                      reviewUntouched,
 	"j99-issue-2906-finalize-missing-contract":                                  reviewOptedIn,
+	"j115-recovery-selector-is-collected-before-authorization":                  reviewOptedIn,
 }
 
 func declareCoreJourneyReviewModes(journeys []Journey) []Journey {
