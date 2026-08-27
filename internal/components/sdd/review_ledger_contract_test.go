@@ -469,7 +469,12 @@ func TestKilocodeReviewSettingsMatchCurrentMainBaseline(t *testing.T) {
 	// settings hash is recomputed from the combined source.
 	// #3564 replaces the shared SDD status contract with v2, so the embedded
 	// pre-proposal contract now names the sole public status version.
-	const want = "79145c9ba57bc43603d7523be9242df4eaed211bb25a8e4f6ad694e898dd02b3"
+	// Managed tools are removed only from OpenCode. Kilocode restores its
+	// historical provider shape, including read-only judges and default-deny
+	// sdd-research collection permissions, so the baseline is rederived here.
+	// Merged with main's #3563 causal-failure precedence and #3168 empty
+	// CodeGraph tool-grant changes, so the combined baseline is rederived.
+	const want = "cea60b82bbffd6cca4df6aeb2ee330aede78d138c8af3ba526257e2e201ec0ee"
 	if got != want {
 		t.Fatalf("Kilocode settings SHA-256 = %s, want current-main baseline %s", got, want)
 	}
@@ -690,8 +695,11 @@ func TestOpenCodeRenderedReviewProtocolCost(t *testing.T) {
 		// #3417 replaces the terminal commit question with non-deciding delivery
 		// guidance and adds the one-status ambiguous-FINALIZE reconciliation rule.
 		// The rendered byte pins are regenerated from those shared source bytes.
-		{name: "standard", agents: []string{"review-reliability"}, beforeChars: 42_301, wantChars: 14_657, maxCharacters: 15_866},
-		{name: "full-4R", agents: []string{"review-risk", "review-resilience", "review-readability", "review-reliability"}, beforeChars: 106_998, wantChars: 27_002, maxCharacters: 30_063},
+		// #3748 adds the public status_continuation execution rule (+339 rendered
+		// characters in each row), so the pins move from 14,657/27,002 to
+		// 14,996/27,341 after deterministic fixture measurement.
+		{name: "standard", agents: []string{"review-reliability"}, beforeChars: 42_301, wantChars: 14_996, maxCharacters: 15_866},
+		{name: "full-4R", agents: []string{"review-risk", "review-resilience", "review-readability", "review-reliability"}, beforeChars: 106_998, wantChars: 27_341, maxCharacters: 30_063},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

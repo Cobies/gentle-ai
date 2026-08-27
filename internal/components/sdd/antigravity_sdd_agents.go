@@ -159,11 +159,28 @@ func installAntigravitySddAgentsPlugin(homeDir string) (bool, []string, error) {
 		if err != nil {
 			return false, nil, fmt.Errorf("write Antigravity SDD agents plugin hooks (%s): %w", cfgDir, err)
 		}
-		changed = changed || hooksWrite.writeResult.Changed
+		changed = changed || hooksWrite.Changed
 		files = append(files, hooksPath)
 	}
 
 	return changed, files, nil
+}
+
+func mergeJSONFile(path string, overlay []byte) (filemerge.WriteResult, error) {
+	var baseJSON []byte
+	raw, err := os.ReadFile(path)
+	if err == nil {
+		baseJSON = raw
+	} else if !os.IsNotExist(err) {
+		return filemerge.WriteResult{}, err
+	}
+
+	merged, err := filemerge.MergeJSONObjects(baseJSON, overlay)
+	if err != nil {
+		return filemerge.WriteResult{}, err
+	}
+
+	return filemerge.WriteFileAtomic(path, merged, 0o644)
 }
 
 // antigravitySddAgentsRoleScopes is the canonical role→tool-scope table used

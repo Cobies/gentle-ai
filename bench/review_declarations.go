@@ -50,6 +50,8 @@ var coreJourneyReviewModes = map[string]ReviewPrecondition{
 	"j29-cherry-pick-in-progress":                                               reviewOptedIn,
 	"j30-kill-switch-flipped-mid-review":                                        reviewOptedIn,
 	"j3043-opencode-managed-background-activation":                              reviewUntouched,
+	"j117-doctor-dangling-managed-config":                                       reviewUntouched,
+	"j118-doctor-dangling-config-ancestor":                                      reviewUntouched,
 	"j31-nonsense-mode-value":                                                   reviewUntouched,
 	"j32-recovery-of-a-recovery":                                                reviewOptedIn,
 	"j33-escalate-then-recover":                                                 reviewOptedIn,
@@ -112,6 +114,7 @@ var coreJourneyReviewModes = map[string]ReviewPrecondition{
 	"j98-sdd-flat-root-spec-is-discovered":                                      reviewUntouched,
 	"j99-issue-2906-finalize-missing-contract":                                  reviewOptedIn,
 	"j115-recovery-selector-is-collected-before-authorization":                  reviewOptedIn,
+	"j116-codex-committed-correction-runs-returned-status-continuation":         reviewOptedIn,
 }
 
 func declareCoreJourneyReviewModes(journeys []Journey) []Journey {
