@@ -96,11 +96,6 @@ func TestReviewerTransportAdaptersNeverInvokeLifecycleFinalize(t *testing.T) {
 
 func TestDedicatedReviewAndJudgmentAssetsRenderRoleContracts(t *testing.T) {
 	assetsByFamily := map[string][]string{
-		"antigravity": {
-			"antigravity/agents/review-risk.md", "antigravity/agents/review-readability.md",
-			"antigravity/agents/review-reliability.md", "antigravity/agents/review-resilience.md",
-			"antigravity/agents/jd-judge-a.md", "antigravity/agents/jd-judge-b.md",
-		},
 		"claude": {
 			"claude/agents/review-risk.md", "claude/agents/review-readability.md",
 			"claude/agents/review-reliability.md", "claude/agents/review-resilience.md",
@@ -462,8 +457,6 @@ func TestKilocodeReviewSettingsMatchCurrentMainBaseline(t *testing.T) {
 	// renders through the OpenCode orchestrator asset. The hash is rederived.
 	// #3417 also classifies OpenCode background launch acknowledgements as
 	// nonterminal, preventing false task-result failures and session latches.
-	// harden-skill-registry-and-workload-guards mandates work-unit-commits & chained-pr
-	// task skills injection, bounded single work unit apply dispatch, and resolver cache invalidation.
 	// sdd-research adds a default-deny collection executor and the confirmed
 	// pre-proposal handoff to the shared OpenCode/Kilocode overlay. The rendered
 	// settings hash is recomputed from the combined source.
@@ -474,12 +467,15 @@ func TestKilocodeReviewSettingsMatchCurrentMainBaseline(t *testing.T) {
 	// sdd-research collection permissions, so the baseline is rederived here.
 	// Merged with main's #3563 causal-failure precedence and #3168 empty
 	// CodeGraph tool-grant changes, so the combined baseline is rederived.
-	const want = "cea60b82bbffd6cca4df6aeb2ee330aede78d138c8af3ba526257e2e201ec0ee"
+	// #3814 replaces the dispatcher guard's store-branching prose across every
+	// runtime orchestrator: the native surface resolves the declared store, so
+	// the actor no longer determines or branches on it. Kilo renders through the
+	// OpenCode orchestrator asset, so the baseline is rederived.
+	const want = "45b63ab97aad4a5f31b20bf834a43d1df25a5521db2e8008473cb99ebaaa593f"
 	if got != want {
 		t.Fatalf("Kilocode settings SHA-256 = %s, want current-main baseline %s", got, want)
 	}
 }
-
 
 func TestOpenCodeRenderedReviewProtocolCost(t *testing.T) {
 	home := t.TempDir()

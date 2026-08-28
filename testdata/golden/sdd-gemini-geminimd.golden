@@ -141,7 +141,7 @@ Meta-commands (type directly — orchestrator handles them, won't appear in auto
 
 ### Native SDD Dispatcher Guard
 
-Before routing, continuing, applying, verifying, or archiving an SDD change, **first determine this session's artifact store** from the cached Session Preflight / Artifact Store Mode choice. If the store is not yet established, resolve it before continuing — check `sdd-init/{project}` in Engram and treat the change as `engram`-backed when no OpenSpec store was selected. **Then scope the native dispatcher by artifact store.** The native dispatcher (`gentle-ai sdd-continue [change] --cwd <repo>` or `gentle-ai sdd-status [change] --cwd <repo> --json --instructions`) reads ONLY OpenSpec file artifacts under `openspec/changes/` and always emits `artifactStore: openspec`; it cannot observe Engram-backed changes. **When the session artifact store is `engram`, do NOT invoke the dispatcher at all** — it is blind to the change and its `blocked`, `Active OpenSpec change not found`, or `nextRecommended: sdd-new` output is meaningless; resolve status entirely from Engram (`mem_search` + `mem_get_observation` on the change's topic keys such as `sdd/{change-name}/tasks`) using the manual status schema. Only when the session artifact store is `openspec` or `hybrid` should you run the dispatcher when `gentle-ai` is available and treat its native status JSON as authoritative over prompt inference. Route only by `nextRecommended` and dependency states; never infer from free text. If `blockedReasons` is non-empty, do not proceed to apply, archive, or terminal work. If `nextRecommended` is `verify`, verification/remediation may run only to refresh evidence; if `nextRecommended` is `resolve-blockers`, report `blockedReasons` and stop; if `nextRecommended` is a planning token (`propose`, `spec`, `design`, or `tasks`), launch the corresponding planning phase. If the binary is unavailable, fall back to the existing prompt contract and manual status schema.
+Before routing, continuing, applying, verifying, or archiving an SDD change, **invoke the native dispatcher** (`gentle-ai sdd-continue [change] --cwd <repo>` or `gentle-ai sdd-status [change] --cwd <repo> --json --instructions`). It resolves the artifact store the workspace DECLARES, reports it in `artifactStore`, and returns that store's locators in `artifactPaths`. **Do NOT determine the artifact store yourself, and do NOT branch on it** — an actor that re-derives the store disagrees with the authority that launched it, which is how a phase ends up reading a store the workspace never declared. Use the dispatcher for every store when `gentle-ai` is available and treat its native status JSON as authoritative over prompt inference. Route only by `nextRecommended` and dependency states; never infer from free text. If `blockedReasons` is non-empty, do not proceed to apply, archive, or terminal work. If `nextRecommended` is `verify`, verification/remediation may run only to refresh evidence; if `nextRecommended` is `resolve-blockers`, report `blockedReasons` and stop; if `nextRecommended` is a planning token (`propose`, `spec`, `design`, or `tasks`), launch the corresponding planning phase. If the binary is unavailable, fall back to the existing prompt contract and manual status schema.
 
 ### SDD Init Guard (MANDATORY)
 
@@ -244,8 +244,6 @@ Cache the chain strategy for the session. Pass it as `chain_strategy` to `sdd-ta
 
 When delivery planning yields chained PRs, treat `chained-pr` (registry skill `gentle-ai-chained-pr`) as a required skill match: resolve it by registry name through this template's existing skill-resolution mechanism (the same one it already uses to pass skills to phases) and ensure the `sdd-tasks` and `sdd-apply` phases load and follow it BEFORE planning or creating any PR. Do not hardcode the skill path; defer resolution to that mechanism.
 
-Whenever delegating `sdd-tasks`, the orchestrator MUST resolve and inject both `work-unit-commits` (registry skill `gentle-ai-work-unit-commits`) and `chained-pr` (registry skill `gentle-ai-chained-pr`) under `## Skills to load before work` before task breakdown begins.
-
 ### Dependency Graph
 
 ```
@@ -263,20 +261,18 @@ Each phase returns: `status`, `executive_summary`, `artifacts`, `next_recommende
 
 After `sdd-tasks` completes and before launching `sdd-apply`, inspect `Review Workload Forecast`.
 
-If it says `Chained PRs recommended: Yes`, `400-line budget risk: High`, estimated changed lines exceed 400, or `Decision needed before apply: Yes`, the orchestrator MUST block fail-closed before delegating `sdd-apply` unless an approved delivery strategy or maintainer `size:exception` has been explicitly resolved. Apply cached `delivery_strategy`:
+If it says `Chained PRs recommended: Yes`, `400-line budget risk: High`, estimated changed lines exceed 400, or `Decision needed before apply: Yes`, apply cached `delivery_strategy`:
 
 - **`ask-on-risk`**: STOP and ask chained/stacked PRs vs maintainer-approved `size:exception`. If the user chooses chained PRs and `chain_strategy` is not yet cached, also ask which chain strategy to use (`stacked-to-main` or `feature-branch-chain`).
-- **`auto-chain`**: Do not ask about splitting. If `chain_strategy` is not yet cached, ask which chain strategy to use. Then tell `sdd-apply` to implement only the next autonomous chained/stacked PR slice (a single Work Unit bounded to <=400 lines) using work-unit commits, clear start/finish boundaries, verification, and rollback.
-- **`single-pr`**: STOP and require/record maintainer-approved `size:exception` before apply.
-- **`exception-ok`**: Continue, but tell `sdd-apply` this run uses maintainer-approved `size:exception`.
+- **`auto-chain`**: Do not ask about splitting. If `chain_strategy` is not yet cached, ask which chain strategy to use. Then tell `sdd-apply` to implement only the next autonomous chained/stacked PR slice using work-unit commits, clear start/finish boundaries, verification, and rollback.
+- **`single-pr`**: STOP and require/record `size:exception` before apply.
+- **`exception-ok`**: Continue, but tell `sdd-apply` this run uses `size:exception`.
 
 Any other `delivery_strategy` value is invalid. Do NOT pick the nearest branch and do NOT proceed: STOP, report the unrecognised value, and re-collect the delivery strategy before `sdd-apply` runs.
 
-The orchestrator MUST delegate `sdd-apply` strictly in single Work Unit batches bounded to <=400 changed lines (`additions + deletions`). Monolithic task delegation across multiple work units exceeding 400 lines in a single dispatch is forbidden. Subsequent units are deferred to future apply dispatches.
+Automatic mode does not override this guard. Always pass the resolved `delivery_strategy` and `chain_strategy` to `sdd-apply`.
 
-Automatic mode does not override this guard. Always pass the resolved `delivery_strategy`, `chain_strategy`, and any chosen single Work Unit boundary or maintainer `size:exception` to `sdd-apply`.
-
-When launching `sdd-apply`, always include the resolved `delivery_strategy`, `chain_strategy`, and any chosen single Work Unit boundary or maintainer `size:exception` in the prompt.
+When launching `sdd-apply`, always include the resolved `delivery_strategy`, `chain_strategy`, and any chosen PR boundary/exception in the prompt.
 
 ### Sub-Agent Launch Deduplication (MANDATORY)
 
@@ -315,10 +311,9 @@ For each sub-agent launch:
 After every delegation that returns a result, check the `skill_resolution` field:
 
 - `paths-injected` → all good, exact skill paths were passed and loaded
-- `fallback-registry`, `fallback-path`, or `none` → skill cache was lost (likely compaction). Invalidate the cached skill registry immediately, re-read the registry from persistent store, and pass skill paths in all subsequent delegations.
+- `fallback-registry`, `fallback-path`, or `none` → skill cache was lost (likely compaction). Re-read the registry immediately and pass skill paths in all subsequent delegations.
 
 This is a self-correction mechanism. Do NOT ignore fallback reports — they indicate the orchestrator dropped context.
-
 
 ### Sub-Agent Context Protocol
 

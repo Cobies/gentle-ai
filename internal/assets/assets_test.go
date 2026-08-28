@@ -269,24 +269,6 @@ func TestAllEmbeddedAssetsAreReadable(t *testing.T) {
 
 		// Antigravity agent files
 		"antigravity/sdd-orchestrator.md",
-		"antigravity/agents/sdd-init.md",
-		"antigravity/agents/sdd-explore.md",
-		"antigravity/agents/sdd-propose.md",
-		"antigravity/agents/sdd-spec.md",
-		"antigravity/agents/sdd-design.md",
-		"antigravity/agents/sdd-tasks.md",
-		"antigravity/agents/sdd-apply.md",
-		"antigravity/agents/sdd-verify.md",
-		"antigravity/agents/sdd-archive.md",
-		"antigravity/agents/sdd-onboard.md",
-		"antigravity/agents/review-risk.md",
-		"antigravity/agents/review-readability.md",
-		"antigravity/agents/review-reliability.md",
-		"antigravity/agents/review-resilience.md",
-		"antigravity/agents/review-refuter.md",
-		"antigravity/agents/jd-judge-a.md",
-		"antigravity/agents/jd-judge-b.md",
-		"antigravity/agents/jd-fix-agent.md",
 
 		// Codex agent files
 		"codex/sdd-orchestrator.md",
@@ -1034,45 +1016,6 @@ func TestFourRReviewAgentAssets(t *testing.T) {
 					t.Fatalf("%s review agent %s missing concrete 4R rule %q", overlay, agent, want)
 				}
 			}
-		}
-	}
-}
-
-func TestAntigravitySDDOrchestratorRequiresInteractivePauseGate(t *testing.T) {
-	content := MustRead("antigravity/sdd-orchestrator.md")
-
-	for _, required := range []string{
-		"### SDD Session Preflight and Execution Mode (HARD GATE)",
-		"Before executing ANY `/sdd-*` command or natural-language SDD request",
-		"If the session preflight or execution mode is missing, ASK first, then STOP and wait for the user's answer before invoking any dynamic subagent.",
-		"Interactive mode is a hard pause gate, not summary-only wording.",
-		"In **Interactive** mode, after each phase subagent returns",
-		"STOP and wait for user input before invoking the next dynamic subagent",
-		"Interactive approval is phase-scoped",
-		"`continue`, `dale`, or `go on` approve only the immediate next phase",
-		"Do NOT run `/sdd-ff` or dynamic subagent chains back-to-back unless the cached execution mode is `auto` / `automatic`.",
-		"Technical artifacts and prompts remain English",
-	} {
-		if !strings.Contains(content, required) {
-			t.Fatalf("antigravity/sdd-orchestrator.md missing hard interactive pause gate wording %q", required)
-		}
-	}
-}
-
-func TestAntigravitySDDOrchestratorAnchorsPostApplyReview(t *testing.T) {
-	content := MustRead("antigravity/sdd-orchestrator.md")
-
-	for _, required := range []string{
-		"**Post-apply review rule**",
-		"after `sdd-apply` completes",
-		"if no valid content-bound receipt exists",
-		"explicitly start ordinary bounded review using the fresh review operation above",
-		"If a valid receipt exists, reuse it.",
-		"This is a phase-boundary trigger, not a lifecycle gate",
-		"commit, push, PR, and release still validate the receipt only and never launch review actors",
-	} {
-		if !strings.Contains(content, required) {
-			t.Fatalf("antigravity/sdd-orchestrator.md missing post-apply review anchor %q", required)
 		}
 	}
 }
@@ -1968,7 +1911,8 @@ func TestSDDStatusContractPreservesFrozenExternalV2Projection(t *testing.T) {
 		"schemaVersion: 2",
 		"gentle-ai.sdd-status/v2",
 		"changeName: <change-name-or-null>",
-		"artifactStore: openspec | engram | none",
+		// #3636: hybrid reaches the public v2 document; kept in lockstep with statusV2ArtifactStore.
+		"artifactStore: openspec | engram | hybrid | none",
 		"planningHome:",
 		"mode: repo-local",
 		"path: <absolute path to openspec>",
@@ -2311,7 +2255,7 @@ func TestSDDOrchestratorsUseNativeRuntimeAttemptAuthority(t *testing.T) {
 		causalFailureDisclosure,
 	}
 	for _, path := range paths {
-		content := MustRead(path)
+		content := resolveSharedOrchestratorSections(MustRead(path))
 		if path == "claude/sdd-orchestrator.md" {
 			content += "\n" + MustRead("claude/sdd-orchestrator-workflow.md")
 		}
@@ -2970,216 +2914,3 @@ func isolatedGitEnvironment() []string {
 	}
 	return append(env, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_SYSTEM="+os.DevNull, "GIT_CONFIG_COUNT=0")
 }
-
-func TestAntigravitySubagentsUseValidNativeTools(t *testing.T) {
-	validTools := map[string]bool{
-		"view_file":            true,
-		"write_to_file":        true,
-		"replace_file_content": true,
-		"run_command":          true,
-		"list_dir":             true,
-		"grep_search":          true,
-		"find_by_name":         true,
-		"schedule":             true,
-		"manage_task":          true,
-		"invoke_subagent":      true,
-		"define_subagent":      true,
-		"call_mcp_tool":        true,
-		"read_resource":        true,
-		"list_resources":       true,
-		"send_message":         true,
-		"manage_subagents":     true,
-		"ask_question":         true,
-		"generate_image":       true,
-		"codegraph_explore":    true,
-		"mem_search":           true,
-		"mem_get_observation":  true,
-		"mem_save":             true,
-		"mem_update":           true,
-	}
-
-	antigravityAgentFiles := []string{
-		"antigravity/agents/jd-fix-agent.md",
-		"antigravity/agents/jd-judge-a.md",
-		"antigravity/agents/jd-judge-b.md",
-		"antigravity/agents/review-readability.md",
-		"antigravity/agents/review-refuter.md",
-		"antigravity/agents/review-reliability.md",
-		"antigravity/agents/review-resilience.md",
-		"antigravity/agents/review-risk.md",
-		"antigravity/agents/sdd-apply.md",
-		"antigravity/agents/sdd-archive.md",
-		"antigravity/agents/sdd-design.md",
-		"antigravity/agents/sdd-explore.md",
-		"antigravity/agents/sdd-init.md",
-		"antigravity/agents/sdd-onboard.md",
-		"antigravity/agents/sdd-propose.md",
-		"antigravity/agents/sdd-spec.md",
-		"antigravity/agents/sdd-tasks.md",
-		"antigravity/agents/sdd-verify.md",
-	}
-
-	for _, agentPath := range antigravityAgentFiles {
-		t.Run(agentPath, func(t *testing.T) {
-			content := MustRead(agentPath)
-			if strings.Contains(content, "read_file") {
-				t.Fatalf("%s must not declare unsupported tool 'read_file' (use 'view_file')", agentPath)
-			}
-			if strings.Contains(content, "multi_replace_file_content") {
-				t.Fatalf("%s must not declare unsupported tool 'multi_replace_file_content' (use 'replace_file_content')", agentPath)
-			}
-
-			// Extract tools list from YAML frontmatter
-			for _, line := range strings.Split(content, "\n") {
-				if strings.HasPrefix(strings.TrimSpace(line), "tools:") {
-					// Parse tools: ["a", "b"]
-					raw := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "tools:"))
-					raw = strings.Trim(raw, "[]")
-					for _, item := range strings.Split(raw, ",") {
-						tool := strings.Trim(strings.TrimSpace(item), "\"")
-						if tool != "" && !validTools[tool] {
-							t.Fatalf("%s declares unknown/unsupported tool %q in Antigravity", agentPath, tool)
-						}
-					}
-				}
-			}
-		})
-	}
-}
-
-func TestOrchestratorsMandateTaskSkillsInjection(t *testing.T) {
-	paths := allSDDOrchestratorAssetPaths(t)
-	if len(paths) != 12 {
-		t.Fatalf("expected 12 orchestrators, got %d", len(paths))
-	}
-
-	for _, path := range paths {
-		t.Run(path, func(t *testing.T) {
-			content := MustRead(path)
-			if path == "claude/sdd-orchestrator.md" {
-				content += "\n" + MustRead("claude/sdd-orchestrator-workflow.md")
-			}
-
-			// When delegating sdd-tasks, both work-unit-commits and chained-pr must be injected
-			for _, required := range []string{
-				"work-unit-commits",
-				"chained-pr",
-				"sdd-tasks",
-				"Skills to load before work",
-			} {
-				if !strings.Contains(content, required) {
-					t.Fatalf("%s missing required task skill injection contract %q", path, required)
-				}
-			}
-		})
-	}
-}
-
-func TestOrchestratorsEnforceBoundedWorkUnitApplyAndFailClosedGuard(t *testing.T) {
-	paths := allSDDOrchestratorAssetPaths(t)
-	if len(paths) != 12 {
-		t.Fatalf("expected 12 orchestrators, got %d", len(paths))
-	}
-
-	for _, path := range paths {
-		t.Run(path, func(t *testing.T) {
-			content := MustRead(path)
-			if path == "claude/sdd-orchestrator.md" {
-				content += "\n" + MustRead("claude/sdd-orchestrator-workflow.md")
-			}
-
-			for _, required := range []string{
-				"sdd-apply",
-				"400",
-				"Work Unit",
-				"Review Workload Guard",
-				"Decision needed before apply",
-				"size:exception",
-			} {
-				if !strings.Contains(content, required) {
-					t.Fatalf("%s missing bounded apply or fail-closed workload guard contract %q", path, required)
-				}
-			}
-		})
-	}
-}
-
-func TestUniversalSkillCacheInvalidationOnFallbackResolution(t *testing.T) {
-	paths := allSDDOrchestratorAssetPaths(t)
-	if len(paths) != 12 {
-		t.Fatalf("expected 12 orchestrators, got %d", len(paths))
-	}
-
-	for _, path := range paths {
-		t.Run(path, func(t *testing.T) {
-			content := MustRead(path)
-			if path == "claude/sdd-orchestrator.md" {
-				content += "\n" + MustRead("claude/sdd-orchestrator-workflow.md")
-			}
-
-			for _, required := range []string{
-				"skill_resolution",
-				"paths-injected",
-				"fallback-registry",
-			} {
-				if !strings.Contains(content, required) {
-					t.Fatalf("%s missing skill resolution invalidation check %q", path, required)
-				}
-			}
-		})
-	}
-
-	// Also check shared files
-	for _, sharedPath := range []string{
-		"skills/_shared/skill-resolver.md",
-		"skills/_shared/sdd-phase-common.md",
-	} {
-		t.Run(sharedPath, func(t *testing.T) {
-			content := MustRead(sharedPath)
-			for _, required := range []string{
-				"skill_resolution",
-				"paths-injected",
-				"fallback-registry",
-			} {
-				if !strings.Contains(content, required) {
-					t.Fatalf("%s missing skill resolution invalidation check %q", sharedPath, required)
-				}
-			}
-		})
-	}
-}
-
-func TestSDDTaskAndApplySkills(t *testing.T) {
-	tasksContent := MustRead("skills/sdd-tasks/SKILL.md")
-	for _, required := range []string{
-		"Decision needed before apply:",
-		"Chained PRs recommended:",
-		"Chain strategy:",
-		"400-line budget risk:",
-		"Focused test command",
-		"Runtime harness",
-		"Rollback boundary",
-	} {
-		if !strings.Contains(tasksContent, required) {
-			t.Fatalf("skills/sdd-tasks/SKILL.md missing required workload forecast/work unit contract %q", required)
-		}
-	}
-
-	applyContent := MustRead("skills/sdd-apply/SKILL.md")
-	for _, required := range []string{
-		"Step 2a: Enforce Review Workload Decision",
-		"400-line budget risk: High",
-		"Chained PRs recommended: Yes",
-		"Decision needed before apply: Yes",
-		"blocked",
-		"Work Unit Evidence",
-		"Focused test command",
-		"Runtime harness",
-		"Rollback boundary",
-	} {
-		if !strings.Contains(applyContent, required) {
-			t.Fatalf("skills/sdd-apply/SKILL.md missing required apply workload guard/evidence contract %q", required)
-		}
-	}
-}
-
