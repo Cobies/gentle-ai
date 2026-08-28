@@ -13,7 +13,10 @@
 - **Subagent Delegation**: Pass only distilled, minimal requirements to subagents. Subagents must return concise summaries and artifact references, never dumping raw logs or entire files back into the parent thread.
 
 ## 3. SDD Workflow & Implementation Routing
-- **Organic Routing**: Match the route to the task scope. Small/mechanical fixes (1-3 files) stay Direct Inline; delegated exploration/writing is used for broader tasks; SDD is used for large architectural features or when explicitly requested.
+- **Organic Routing**: Match the route to the task scope. Small/mechanical fixes (1 single file, already understood, no design questions) stay Direct Inline; delegated exploration/writing is used for broader tasks; SDD is used for large architectural features or when explicitly requested.
+- **Multi-File & Non-Trivial Delegation Guard**: NEVER perform direct inline writes in the parent orchestrator thread for changes touching 2+ non-trivial files or exceeding 100 lines. Always delegate to a dedicated writer subagent or invoke SDD.
+- **SDD Task & Work-Unit Slicing (`sdd-apply`)**: In SDD execution, NEVER implement an entire multi-task feature in a single monolithic `sdd-apply` run. Decompose implementation into atomic work units (<400 changed lines per unit) and dispatch separate `sdd-apply` invocations per work unit or task batch, paired with focused tests.
+- **Scope Creep Circuit Breaker**: If an inline edit begins on a single file but expands to dependent files (services, models, templates, tests), STOP inline modifications immediately, report the expansion to the user, and switch to delegated subagents.
 - **Absolute Stop (No Auto-Apply)**: NEVER modify code or write files without explicit user confirmation first. Always present the proposed plan and pause for user confirmation before executing changes.
 - **Interactive Gates**: When running multi-phase SDD, pause after each major phase (`sdd-explore`, `sdd-propose`, `sdd-spec`, `sdd-tasks`, `sdd-verify`), present a concise summary, and wait for confirmation.
 - **TDD Requirement**: When writing new features or fixing bugs under SDD, ensure test coverage and verification in `sdd-verify`.
