@@ -19,6 +19,7 @@
 - **Scope Creep Circuit Breaker**: If an inline edit begins on a single file but expands to dependent files (services, models, templates, tests), STOP inline modifications immediately, report the expansion to the user, and switch to delegated subagents.
 - **Absolute Stop (No Auto-Apply)**: NEVER modify code or write files without explicit user confirmation first. Always present the proposed plan and pause for user confirmation before executing changes.
 - **Interactive Gates**: When running multi-phase SDD, pause after each major phase (`sdd-explore`, `sdd-propose`, `sdd-spec`, `sdd-tasks`, `sdd-verify`), present a concise summary, and wait for confirmation.
+- **Parallel Execution & Worktree Isolation**: When launching multiple concurrent subagents or parallel work units, always set `Workspace: "share"` in `invoke_subagent` to isolate execution in Git worktrees and prevent file lock contention.
 - **TDD Requirement**: When writing new features or fixing bugs under SDD, ensure test coverage and verification in `sdd-verify`.
 
 

@@ -85,6 +85,7 @@ var reviewIntegrationOperationRegistry = []reviewIntegrationOperationMetadata{
 	{Command: "capture-refuter", Operation: reviewCaptureRefuterCaptureOperation, Label: "Review CAPTURE-REFUTER", CollectCapture: true, ValueFlags: []string{"cwd", "repository-context", "lineage", "target", "expected-revision", "agent"}, BoolFlags: []string{"materialize", "execute"}, MutatesAuthority: true, ReadOnlyFlag: "materialize"},
 	{Command: "capture-result", Operation: reviewCaptureResultCaptureOperation, Label: "Review CAPTURE-RESULT", CollectCapture: true, ValueFlags: []string{"cwd", "repository-context", "lineage", "target", "lens", "expected-revision", "subject-hash", "agent", "input"}, BoolFlags: []string{"preflight", "materialize"}, IntFlags: []string{"order"}, MutatesAuthority: true, ReadOnlyFlag: "preflight"},
 	{Command: "capture-validation", Operation: reviewCaptureValidationCaptureOperation, Label: "Review CAPTURE-VALIDATION", CollectCapture: true, ValueFlags: []string{"cwd", "repository-context", "lineage", "target", "expected-revision", "request-hash", "agent"}, BoolFlags: []string{"materialize", "execute"}, MutatesAuthority: true, ReadOnlyFlag: "materialize"},
+	{Command: "acknowledge-approved", Operation: "review.acknowledge-approved", Label: "Review ACKNOWLEDGE-APPROVED"},
 	// review.recover owns a verb without joining the published negotiated
 	// surface (see Negotiated above). It is emitted as an execute transition by
 	// reviewRecoveryCollection, both shipped status schemas publish it in their
@@ -925,14 +926,13 @@ func newReviewIntegrationFailure(operation string, args []string, runErr error) 
 		failure.Code = "operation_failed"
 		failure.Message = "The negotiated read-only review operation failed safely."
 		failure.MutationOutcome = ReviewMutationNotStarted
-		failure.RetrySafe = true
 		failure.Replayability = reviewtransaction.ReplayabilityNotReplayable
+		// Issues #2981 and #3379: the catch-all used to clear the universal
+		// scrubbed cause, so an unclassified read-only failure was content-free.
+		// It keeps the cause now; retry stays honest because this branch is the
+		// residue of everything the typed classifier did not recognise.
+		failure.RetrySafe = true
 		failure.NextAction = "retry"
-		// The read-only catch-all is deliberately content-free: it is the one
-		// envelope whose whole contract is "retry safely", so it clears the
-		// universal cause default rather than leaking an arbitrary internal
-		// error to a caller who has nothing to repair.
-		failure.Cause = ""
 		return failure
 	}
 	// The true operation_outcome_unknown default: no typed branch above
