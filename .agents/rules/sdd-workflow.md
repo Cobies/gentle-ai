@@ -7,14 +7,15 @@
 - Any manual busy-waiting or status-polling is an anti-pattern that bloats context history and wastes hundreds of thousands of tokens.
 
 ## 2. Exploration & Context Slicing Hierarchy
-- **Architecture / Structural queries**: Prefer `codegraph_explore` MCP tool before touching the filesystem.
+- **Mandatory CodeGraph First**: For all architecture, dependency mapping, symbol references, callers/callees, and structural questions, `codegraph_explore` (via MCP) MUST be used BEFORE falling back to filesystem tools (`grep_search`, `find_by_name`, `list_dir`). Broad grepping or full sweeps in the parent thread are prohibited.
+- **Exploration Circuit Breaker**: The orchestrator in the parent chat is capped at a HARD LIMIT of at most 2 targeted file reads (`view_file`) or 1 search. If the answer is not found within 2 reads, the orchestrator is STRICTLY FORBIDDEN from continuing reading or grepping inline in the parent thread. It MUST either invoke `codegraph_explore` or delegate exploration to a dedicated subagent (`research` or `sdd-explore`).
 - **Symbol / Text search**: Use `grep_search` or `find_by_name`. **NEVER** cascade `list_dir` down multiple directory levels.
 - **File Reading**: Always specify `StartLine` and `EndLine` in `view_file` to read targeted slices. Never dump whole files into context unless the file is under 100 lines.
 - **Subagent Delegation**: Pass only distilled, minimal requirements to subagents. Subagents must return concise summaries and artifact references, never dumping raw logs or entire files back into the parent thread.
 
 ## 3. SDD Workflow & Implementation Routing
-- **Organic Routing**: Match the route to the task scope. Small/mechanical fixes (1 single file, already understood, no design questions) stay Direct Inline; delegated exploration/writing is used for broader tasks; SDD is used for large architectural features or when explicitly requested.
-- **Multi-File & Non-Trivial Delegation Guard**: NEVER perform direct inline writes in the parent orchestrator thread for changes touching 2+ non-trivial files or exceeding 100 lines. Always delegate to a dedicated writer subagent or invoke SDD.
+- **Organic Routing**: Match the route to the task scope: Direct Inline for 1 single mechanical file with no design questions; Delegated Direct (dedicated direct-writer subagent) for 2–3 bounded files with zero architectural ambiguity; Optional SDD for multi-module features, shared core/contracts changes, or architectural ambiguity.
+- **Multi-File & Non-Trivial Delegation Guard**: NEVER perform direct inline writes in the parent orchestrator thread for changes touching 2+ non-trivial files or exceeding 100 lines. Always delegate to the dedicated direct-writer subagent or invoke SDD.
 - **SDD Task & Work-Unit Slicing (`sdd-apply`)**: In SDD execution, NEVER implement an entire multi-task feature in a single monolithic `sdd-apply` run. Decompose implementation into atomic work units (<400 changed lines per unit) and dispatch separate `sdd-apply` invocations per work unit or task batch, paired with focused tests.
 - **Scope Creep Circuit Breaker**: If an inline edit begins on a single file but expands to dependent files (services, models, templates, tests), STOP inline modifications immediately, report the expansion to the user, and switch to delegated subagents.
 - **Absolute Stop (No Auto-Apply)**: NEVER modify code or write files without explicit user confirmation first. Always present the proposed plan and pause for user confirmation before executing changes.

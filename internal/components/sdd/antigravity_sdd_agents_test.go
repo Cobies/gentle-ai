@@ -198,6 +198,7 @@ func TestAntigravityOrchestratorAssetContainsEngramPersistenceContract(t *testin
 
 func TestAntigravitySddAgentsRoleAllowed(t *testing.T) {
 	allowed := []string{
+		"direct-writer",
 		"sdd-explore", "sdd-spec", "sdd-design", "sdd-tasks", "sdd-apply",
 		"sdd-verify", "sdd-archive", "sdd-onboard", "sdd-init", "sdd-propose",
 		"review-risk", "review-resilience", "review-readability", "review-reliability",
