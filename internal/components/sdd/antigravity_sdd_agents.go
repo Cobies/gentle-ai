@@ -14,11 +14,11 @@ import (
 	"github.com/gentleman-programming/gentle-ai/v2/internal/components/filemerge"
 )
 
-// Antigravity has no static sub-agent registry with `permission.task` blocks
-// like OpenCode. Sub-agents are defined dynamically at runtime via
-// `define_subagent` / `invoke_subagent`. That means we cannot install a static
-// "deny all sub-agents except sdd-*/review-*/jd-*" policy the way OpenCode's
-// `sdd-overlay-multi.json` does.
+// Antigravity delegates SDD phases static-primary via `invoke_subagent`
+// against the pre-registered static subagent set, with runtime
+// `define_subagent` creation only as resilient fallback. Unlike OpenCode's
+// static `permission.task` policy in `sdd-overlay-multi.json`, Antigravity
+// cannot enforce a static "deny all except sdd-*/review-*/jd-*" policy.
 //
 // The safest supported Antigravity equivalent is a thin plugin whose only
 // job is to inject a deterministic Tool Hardening contract into the

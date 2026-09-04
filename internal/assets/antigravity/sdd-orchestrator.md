@@ -55,7 +55,7 @@ When native SDD status reports `blocked(edit_authority_missing)`, its structured
 
 To run any SDD phase:
 
-1. **Verify runtime tools**: confirm the Antigravity runtime exposes `invoke_subagent`. If `invoke_subagent` is unavailable, **fail closed**: do not run exploration, apply, verify, 4-lens review (4R), or Judgment Day inline. Tell the user that Antigravity dynamic subagent tools are unavailable and that the session must update/enable Antigravity dynamic subagents before continuing. Only trivial routing, artifact lookup, and user clarification may continue in degraded mode.
+1. **Verify runtime tools**: confirm the Antigravity runtime exposes `invoke_subagent`. If `invoke_subagent` is unavailable, **fail closed**: do not run exploration, apply, verify, 4-lens review (4R), or Judgment Day inline. Tell the user that Antigravity subagent invocation tools (`invoke_subagent` primary, `define_subagent` fallback) are unavailable and that the session must update/enable Antigravity subagent support before continuing. Only trivial routing, artifact lookup, and user clarification may continue in degraded mode.
 2. **Locate the phase skill file**: read the required skill from the first existing path:
    - workspace: `.agents/skills/{phase}/SKILL.md`
    - legacy workspace fallback: `.agent/skills/{phase}/SKILL.md`
@@ -73,7 +73,7 @@ To run any SDD phase:
    - **Mandatory immediate Fallback Persistence**: Whenever a subagent finishes and returns its result envelope, the orchestrator MUST immediately execute fallback persistence via `call_mcp_tool` with `ServerName="engram"` and `ToolName="mem_save"` under the topic key `sdd/{change-name}/{artifact-type}` (type: `architecture`) before proceeding to any subsequent action or phase transition.
 6. **Nesting depth limit**: dynamic delegation MUST NOT exceed 10 levels deep.
 
-Do not execute SDD phase work in the orchestrator thread except for trivial routing, artifact lookup, user clarification, and synthesis. Phase subagents own phase-specific reading, writing, testing, and artifact production. The parent stays thin; phase work runs in dynamic subagent context.
+Do not execute SDD phase work in the orchestrator thread except for trivial routing, artifact lookup, user clarification, and synthesis. Phase subagents own phase-specific reading, writing, testing, and artifact production. The parent stays thin; phase work runs in invoked-subagent context.
 
 All phase-execution commands (specifically `/sdd-init`, `/sdd-explore`, `/sdd-apply`, `/sdd-verify`, `/sdd-archive`, `/sdd-onboard`, and planning phases triggered during `/sdd-new`, `/sdd-continue`, or `/sdd-ff`) MUST be executed by delegating to the corresponding subagent (`sdd-init`, `sdd-explore`, `sdd-apply`, `sdd-verify`, `sdd-archive`, `sdd-onboard`, `sdd-propose`, `sdd-spec`, `sdd-design`, `sdd-tasks`) directly via `invoke_subagent` (falling back to `define_subagent` if uninitialized). The orchestrator itself MUST NOT perform the execution, code writing, or analysis for these commands/phases inline in the parent thread.
 
@@ -95,7 +95,7 @@ Regardless of the language (English, Spanish, etc.) or phrasing used by the user
 2. **Semantic Intent and Non-Keyword Handoffs**:
    - The user will not always use explicit keywords or command names. The orchestrator MUST actively parse the semantic intent of the user's instructions.
    - If the user describes a problem, requests a change (e.g., "arreglá esta parte", "hace este refactor", "fijate por qué falla X"), or asks for code analysis (e.g., "revisá cómo se conecta Y con Z"), the orchestrator MUST map this intent to the corresponding execution phase (`sdd-explore`, `sdd-apply`, `sdd-verify`, etc.).
-   - The orchestrator itself MUST NOT perform file reading sweeps, codebase analysis, file writing, or test running directly in the main thread (parent chat). It must delegate all such operations to a dynamic subagent.
+   - The orchestrator itself MUST NOT perform file reading sweeps, codebase analysis, file writing, or test running directly in the main thread (parent chat). It must delegate all such operations to an invoked subagent.
 
 3. **Orchestrator vs. Subagent Responsibility Split**:
    - **Main Chat (Orchestrator)**: Dedicated to human-in-the-loop interaction, presenting plans, clarifying requirements, making decisions with the user, and synthesizing results.
@@ -167,7 +167,7 @@ The canonical native bounded-review contract is injected from the shared provide
 
 #### Cost and Context Balance
 
-- Keep exploration, apply, and verify concerns separated through dynamic subagent context even though Antigravity does not install static subagent files.
+- Keep exploration, apply, and verify concerns separated through invoked-subagent context with the installed static set invoked via `invoke_subagent` as primary.
 - Preserve one writer thread; do not interleave broad exploration with edits unless it is the explicit `sdd-apply` phase subagent.
 - Let the native review and delivery providers select checking and delivery actions; repeated gates reuse exact authority and never reopen review for unchanged content.
 - Avoid extra phase ceremony for quick state checks and status queries only. All code changes and codebase explorations MUST delegate to dynamic subagents.

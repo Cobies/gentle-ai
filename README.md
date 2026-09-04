@@ -108,7 +108,7 @@ Gentle-AI configures each agent using that agent's own native features, so capab
 | **Pi**              | Full (package-managed subagents) | First-class `gentle-pi` harness with Pi-native persona/models, SDD, and Engram memory |
 | **Codex**           |            Solo-agent            | CLI-native, TOML config                                         |
 | **Windsurf**        |            Solo-agent            | Plan Mode, Code Mode, native workflows                          |
-| **Antigravity**     | Full (dynamic subagents) + Mission Control | Dynamic runtime subagents via define_subagent/invoke_subagent   |
+| **Antigravity**     | Full (static subagents + dynamic fallback) | Pre-registered agents via invoke_subagent, define_subagent fallback |
 | **OpenClaw**        |            Solo-agent            | Workspace-first `AGENTS.md` / `SOUL.md` with global MCP config  |
 | **Trae**            |            Solo-agent            | Desktop app by ByteDance; `~/.trae/skills/` + OS-specific rules |
 | **Hermes**          |           Detect-only            | YAML MCP config, SOUL.md persona; install manually first        |
