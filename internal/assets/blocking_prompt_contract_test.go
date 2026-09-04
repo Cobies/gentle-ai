@@ -46,7 +46,7 @@ func providerDefectRouteForPublishedFix(installedBuild, fixChannel string, publi
 const providerDefectHandoffCanonicalPath = "generic/sdd-orchestrator.md"
 
 var blockingPromptRoutes = map[string]blockingPromptRoute{
-	"antigravity/sdd-orchestrator.md": {},
+	"antigravity/sdd-orchestrator.md": {nativeTool: "`ask_question`"},
 	"claude/sdd-orchestrator.md":      {nativeTool: "`AskUserQuestion`"},
 	"codex/sdd-orchestrator.md":       {},
 	"cursor/sdd-orchestrator.md":      {},

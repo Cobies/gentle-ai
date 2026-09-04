@@ -35,7 +35,7 @@ var orchestratorSectionDriftRatchet = []struct {
 	{"Agent Teams Orchestrator", 6},
 	{"Chain Strategy", 6},
 	{"Delivery Strategy", 4},
-	{"Lossless Blocking Prompts (MANDATORY)", 4},
+	{"Lossless Blocking Prompts (MANDATORY)", 5},
 	{"Artifact Store Policy", 3},
 	{"Result Contract", 3},
 	{"Dependency Graph", 2},
