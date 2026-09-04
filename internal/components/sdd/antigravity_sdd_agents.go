@@ -58,7 +58,6 @@ const antigravitySddAgentsPluginJSON = `{
 const antigravitySddAgentsHardeningMessage = "Gentle AI SDD/Review/JD hardening contract for Antigravity sub-agents. " +
 	"This contract mirrors the OpenCode permission.task overlay. Antigravity supports static subagent invocation as primary with dynamic subagent creation (define_subagent) as resilient fallback. " +
 	"Allowed roles and their tool scopes: For any phase requiring direct MCP access (such as sdd-explore using CodeGraph or sdd-init), the orchestrator MUST register dynamic subagents via define_subagent with enable_mcp_tools: true and enable_write_tools correctly scoped (false for explore/read-only lenses, true for apply/verify/init/archive); " +
-	"direct-writer = surgical source edits and targeted test verification commands only, strict TDD (test update first), no commit/push/PR/publish/destructive git; " +
 	"sdd-explore = read/search/CodeGraph/Engram only, no source writes (enable_write_tools: false); " +
 	"sdd-propose, sdd-spec, sdd-design, sdd-tasks = artifact reads/writes only, no source edits; " +
 	"sdd-apply = source edits and targeted verification commands only, no commit/push/PR/publish/destructive git; " +
@@ -193,7 +192,6 @@ var antigravitySddAgentsRoleScopes = []struct {
 	Role  string
 	Scope string
 }{
-	{"direct-writer", "surgical source edits and targeted verification commands only; no commit/push/PR/publish/destructive git"},
 	{"sdd-explore", "read/search/CodeGraph/Engram only; no source writes"},
 	{"sdd-spec", "artifact reads/writes only; no source edits"},
 	{"sdd-design", "artifact reads/writes only; no source edits"},
@@ -245,7 +243,6 @@ func sortedAntigravitySddAgentsRoleScopes() []struct {
 // hardening message MUST contain. Used by tests to lock the message text
 // against accidental edits that would weaken the contract.
 var antigravitySddAgentsHardeningContractPhrases = []string{
-	"direct-writer",
 	"sdd-explore",
 	"sdd-propose",
 	"sdd-apply",
