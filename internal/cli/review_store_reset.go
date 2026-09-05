@@ -17,6 +17,7 @@ const ReviewStoreResetSchema = "gentle-ai.review-store-reset-result/v1"
 
 // ErrReviewStoreResetRequiresGitRepository reports that review store-reset
 // was attempted outside a Git repository.
+// refusal:by-design operator-knowledge: review store-reset requires a Git repository; only the operator knows where the Git repository checkout is located
 var ErrReviewStoreResetRequiresGitRepository = errors.New("review store-reset requires a Git repository")
 
 // ReviewStoreResetRepositoryRequiredError represents a typed failure when
@@ -28,6 +29,7 @@ type ReviewStoreResetRepositoryRequiredError struct {
 func (err *ReviewStoreResetRepositoryRequiredError) Unwrap() error { return err.Cause }
 
 func (err *ReviewStoreResetRepositoryRequiredError) Error() string {
+	// refusal:by-design operator-knowledge: running store-reset requires an existing Git repository; only the operator knows where the repository checkout is located
 	return "review store-reset requires a Git repository; rerun the command from inside a Git repository, or rerun with --cwd pointing at one"
 }
 

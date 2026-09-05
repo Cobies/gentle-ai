@@ -322,6 +322,7 @@ func (err *StoreResetIncompleteError) Error() string {
 }
 
 // ErrStoreResetRequiresGitRepository reports that review store reset was attempted outside a Git repository.
+// refusal:by-design operator-knowledge: review store-reset requires a Git repository; only the operator knows where the Git repository checkout is located
 var ErrStoreResetRequiresGitRepository = errors.New("review store-reset requires a Git repository")
 
 // StoreResetRepositoryRequiredError represents a failure when store reset is executed outside a Git repository.
@@ -332,6 +333,7 @@ type StoreResetRepositoryRequiredError struct {
 func (err *StoreResetRepositoryRequiredError) Unwrap() error { return err.Cause }
 
 func (err *StoreResetRepositoryRequiredError) Error() string {
+	// refusal:by-design operator-knowledge: running store-reset requires an existing Git repository; only the operator knows where the repository checkout is located
 	return "review store-reset requires a Git repository; rerun the command from inside a Git repository, or rerun with --cwd pointing at one"
 }
 
