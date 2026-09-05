@@ -111,41 +111,42 @@ Regardless of the language (English, Spanish, etc.) or phrasing used by the user
 
 ### Delegation Rules
 
-These rules select execution topology, not the implementation method. Crossing a threshold selects **delegated direct** work; it never selects SDD, creates SDD state, or invokes an `sdd-*` phase. Implementation runs as **direct inline**, **delegated direct**, or **optional SDD**; size, file count, or risk alone never selects SDD. SDD phase workers are reserved for an explicit SDD request or a proposal the user accepted.
+These rules select execution topology to enforce token preservation and keep the parent orchestrator context thin (<20k tokens). Crossing a threshold mandates delegating to subagents (via Lean SDD, Full SDD, or dynamic workers registered via `define_subagent`). The parent orchestrator acts as a **Pure Thinker and Coordinator**, delegating all heavy reads, writes, builds, and tests.
 
-| Action | Direct inline | Delegated direct worker |
+| Action | Direct inline | Delegated subagent worker |
 | -------- | --------------- | ------------------------- |
-| Read to decide/verify (1–3 files) | ✅ | — |
-| Read to explore/understand (4+ files) | — | ✅ one narrow mapper |
-| Read as preparation for writing | — | ✅ together with the write |
+| Read to decide/verify (1–2 files) | ✅ | — |
+| Read to explore/understand (3+ files) | — | ✅ `sdd-explore` or `research` |
+| Read as preparation for writing | — | ✅ together with the write inside subagent |
 | Write one mechanical, already-understood file | ✅ | — |
-| Write 2+ non-trivial files | — | ✅ one writer |
-| Bash for state (`git`, `gh`) | ✅ | — |
-| Tests, builds, installs, or native review actions | allowed as a bounded action | ✅ fresh per-action worker without changing route |
+| Write 2+ files or non-trivial logic | — | ✅ `sdd-apply` (Lean/Full SDD) or dynamic worker |
+| Bash for state (`git`, `gh`) | ✅ bounded query | — |
+| Tests, builds, installs, or long scripts | bounded trivial check | ✅ fresh worker (`sdd-verify` or dynamic worker) |
 
 Anti-patterns — these ALWAYS inflate context without need:
 
-- Reading 4+ files to understand the codebase in the orchestrator thread → delegate one narrow mapper.
-- Writing a feature across multiple files in the orchestrator thread → delegate one writer.
-- Running long tests or broad builds in the orchestrator thread → delegate a test/build worker.
-- Reading files as preparation for edits, then editing in the orchestrator thread → put both inside the same worker task.
+- Reading 3+ files to understand the codebase in the orchestrator thread → delegate to `sdd-explore` or `research`.
+- Writing a feature or fix across multiple files in the orchestrator thread → delegate to `sdd-apply` or dynamic worker.
+- Running long test suites or broad builds in the orchestrator thread → delegate to `sdd-verify` or dynamic test runner.
+- Reading files as preparation for edits, then editing in the orchestrator thread → put both inside the same subagent task.
 
-Keep one writer and a short synthesized handoff. Delegation is mandatory at the mapping, write, preparation, and broad-research boundaries, but it remains a direct implementation route and must not synthesize SDD artifacts.
+Keep one writer and a short synthesized handoff. Delegation is mandatory at the mapping, write, preparation, and broad-research boundaries.
 
 #### Mandatory Delegation Triggers
 
 These are parent-orchestrator routing boundaries. Use the smallest useful topology and keep the safety machinery behind the outcome-first interaction. Do not pass these rules to child agents as permission to orchestrate.
 
-1. **Bounded read rule**: read 1–3 files inline to decide or verify.
-2. **4-file rule**: when understanding requires 4+ files or architectural flow analysis across components/domains, delegate to the `sdd-explore` subagent (or `research` for purely non-code conceptual lookups). Inline exploration beyond 2 reads is prohibited.
-3. **Write rule**: keep one mechanical, already-understood file inline only when it needs no research or unresolved design work; delegate one writer for 2+ non-trivial files, or route via **SDD**:
-   - **Lean SDD (Fast-Path)**: for 2–3 bounded files within a single domain with zero architectural ambiguity. Runs `sdd-explore` (targeted mapping with mandatory Engram persistence) → `sdd-apply` (strict TDD) → `sdd-verify`, skipping proposal, spec, and design ceremonies.
+1. **Bounded read rule**: read at most 1–2 files inline to decide or verify.
+2. **Exploration rule**: when understanding requires 3+ files or architectural flow analysis across components/domains, delegate to `sdd-explore` (or `research` for purely non-code conceptual lookups). Inline exploration beyond 2 reads is strictly prohibited.
+3. **Write rule**: keep one mechanical, already-understood file inline only when it needs no research or unresolved design work. For 2+ non-trivial files, route automatically via:
+   - **Lean SDD (Fast-Path)**: the default route for 2–3 bounded files within a single domain with zero architectural ambiguity. Runs `sdd-explore` (targeted mapping with mandatory Engram persistence) → `sdd-apply` (strict TDD) → `sdd-verify`, skipping proposal, spec, and design ceremonies.
    - **Full SDD**: when a change spans multiple domains/layers (cross-stack), touches core contracts/architecture, or introduces architectural ambiguity. Runs the full phased lifecycle (`sdd-explore` → `sdd-propose` → `sdd-spec` → `sdd-design` → `sdd-tasks` → `sdd-apply` → `sdd-verify` → `sdd-archive`).
+   - **Dynamic Subagents (`define_subagent`)**: if a task falls outside formal SDD (e.g. general multi-file refactoring, isolated script execution, or custom test runs), or requires specific MCP tools (Engram, CodeGraph), dynamically define a specialized subagent and invoke it via `invoke_subagent`.
 4. **Mandatory Engram Exploration Persistence**: In both Lean and Full SDD, `sdd-explore` MUST be executed first and MUST persist its findings, symbol mappings, and architectural insights into Engram (`mem_save` under topic key `sdd/{change-name}/explore`) before proceeding to code modification (`sdd-apply`).
 5. **Context rule**: delegate reading that prepares a write and broad research/context compression.
 6. **Per-action rule**: tests, builds, installs, and native review actors may use fresh workers without changing the implementation route or creating SDD state.
-7. **Optional SDD rule**: propose SDD only when durable proposal/spec/design/tasks materially reduce substantial ambiguity. Select SDD only after an explicit request or accepted proposal; risk alone never forces SDD.
-8. **Large-Context Window Rule (Gemini/Antigravity)**: Large context window capacity (e.g. 1M+ tokens) NEVER overrides delegation rules. Even if the active model can hold many files in memory, processing 4+ read files or 2+ write files in the parent thread is strictly forbidden and MUST be delegated to subagents.
+7. **Full SDD Proposal rule**: propose Full SDD only when durable proposal/spec/design/tasks materially reduce substantial ambiguity across layers. Lean SDD and dynamic delegation require no heavy proposal and activate automatically for multi-file work.
+8. **Large-Context Window Rule (Gemini/Antigravity)**: Large context window capacity (e.g. 1M+ tokens) NEVER overrides delegation rules. Even if the active model can hold many files in memory, processing 3+ read files or 2+ write files in the parent thread is strictly forbidden and MUST be delegated to subagents.
 9. **Post-apply review rule**: after `sdd-apply` completes, if no valid content-bound receipt exists, explicitly start ordinary bounded review using the fresh review operation above before reporting the change ready for lifecycle gates. If a valid receipt exists, reuse it. This is a phase-boundary trigger, not a lifecycle gate; commit, push, PR, and release still validate the receipt only and never launch review actors.
 10. **Post-verify review rule**: after `sdd-verify` completes successfully, if the changes are not trivial and no valid content-bound receipt exists, the orchestrator MUST define and invoke the selected 4R lenses or Judgment Day reviewer dynamic subagents (`review-*` or `jd-judge-*`) to run a complete review before proceeding to `sdd-archive` or completing the cycle. Do not skip or bypass this review phase.
 11. **Normalization ordering rule**: before review START and its identity freeze, run every source-mutating normalizer, then re-snapshot the candidate and review those exact bytes, paths, and modes. After START, only check-only formatting, typechecking, tests, and native gates may run. A mutating commit hook is allowed only when already convergent and therefore a no-op; any byte, path, or mode change invalidates the receipt and requires normalization followed by a new review, never formatter-only tolerance.
