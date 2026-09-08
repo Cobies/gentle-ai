@@ -36,8 +36,118 @@ func openclawAdapter() agents.Adapter { return openclaw.NewAdapter() }
 func opencodeAdapter() agents.Adapter { return opencode.NewAdapter() }
 func windsurfAdapter() agents.Adapter { return windsurfagent.NewAdapter() }
 
+// Exercise the production optional workflow adapter boundary, not a renderer bypass.
+type invalidSessionPreflightWorkflowAdapter struct{ agents.Adapter }
+
+func (a invalidSessionPreflightWorkflowAdapter) SupportsWorkflows() bool { return true }
+func (a invalidSessionPreflightWorkflowAdapter) WorkflowsDir(root string) string {
+	return filepath.Join(root, ".windsurf", "workflows")
+}
+func (a invalidSessionPreflightWorkflowAdapter) EmbeddedWorkflowsDir() string {
+	if a.Agent() == model.AgentWindsurf {
+		return "opencode/commands" // Real assets, but not a native authority consumer.
+	}
+	return "missing-session-preflight-workflows"
+}
+
+type invalidRenderedSessionPreflightAdapter struct {
+	invalidSessionPreflightWorkflowAdapter
+}
+
+func (a invalidRenderedSessionPreflightAdapter) RenderCodexPhaseEfforts(map[string]model.CodexEffort, map[string]string) string {
+	return sddSessionPreflightBlockWithTool("") // A second block introduced during rendering.
+}
+
+func TestInjectSessionPreflightFailurePrecedesAllSDDWrites(t *testing.T) {
+	for _, agent := range []model.AgentID{model.AgentWindsurf, model.AgentClaudeCode, model.AgentKimi, model.AgentOpenCode, model.AgentKilocode, model.AgentCodex} {
+		for _, existing := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/existing=%t", agent, existing), func(t *testing.T) {
+				home := t.TempDir()
+				t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+				workspace := t.TempDir()
+				if err := os.WriteFile(filepath.Join(workspace, "go.mod"), []byte("module example\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				var adapter agents.Adapter = invalidSessionPreflightWorkflowAdapter{mustAdapter(t, agent)}
+				if agent == model.AgentCodex {
+					adapter = invalidRenderedSessionPreflightAdapter{adapter.(invalidSessionPreflightWorkflowAdapter)}
+				}
+				if existing {
+					path := adapter.SystemPromptFile(home)
+					if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(path, []byte("pre-existing sentinel\n"), 0o640); err != nil {
+						t.Fatal(err)
+					}
+				}
+				snapshot := func(root string) map[string]string {
+					files := map[string]string{}
+					err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+						if err != nil {
+							return err
+						}
+						files[path] = info.Mode().String()
+						if !info.IsDir() {
+							data, err := os.ReadFile(path)
+							if err != nil {
+								return err
+							}
+							files[path] += string(data)
+						}
+						return nil
+					})
+					if err != nil {
+						t.Fatal(err)
+					}
+					return files
+				}
+				beforeHome, beforeWorkspace := snapshot(home), snapshot(workspace)
+				_, err := Inject(home, adapter, model.SDDModeMulti, InjectOptions{WorkspaceDir: workspace, StrictTDD: true, Profiles: []model.Profile{{Name: "focused"}}})
+				if err == nil {
+					t.Fatal("invalid selected workflow source accepted")
+				}
+				if !reflect.DeepEqual(beforeHome, snapshot(home)) || !reflect.DeepEqual(beforeWorkspace, snapshot(workspace)) {
+					t.Fatal("invalid session preflight input mutated SDD files or directories")
+				}
+			})
+		}
+	}
+}
+
 func mockNoPackageManager(t *testing.T) {
 	t.Helper()
+}
+
+func TestInjectFallbackSessionPreflight(t *testing.T) {
+	for _, agent := range []model.AgentID{model.AgentVSCodeCopilot, model.AgentCursor, model.AgentGeminiCLI, model.AgentAntigravity, model.AgentQwenCode, model.AgentHermes, model.AgentKimi, model.AgentKiroIDE, model.AgentCodex, model.AgentWindsurf} {
+		t.Run(string(agent), func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+			t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
+			adapter := mustAdapter(t, agent)
+			if _, err := Inject(home, adapter, ""); err != nil {
+				t.Fatal(err)
+			}
+			path := adapter.SystemPromptFile(home)
+			if agent == model.AgentKimi {
+				path = filepath.Join(home, ".kimi", "sdd-orchestrator.md")
+			}
+			before, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertFallbackSessionPreflight(t, string(before))
+			if result, err := Inject(home, adapter, ""); err != nil || result.Changed {
+				t.Fatalf("repeat install = %+v, %v; want unchanged", result, err)
+			}
+			after, err := os.ReadFile(path)
+			if err != nil || !bytes.Equal(before, after) {
+				t.Fatalf("repeat install changed prompt bytes: %v", err)
+			}
+			assertFallbackSessionPreflight(t, string(after))
+		})
+	}
 }
 
 func TestSDDOrchestratorAssetSelectionCoversSupportedAgents(t *testing.T) {
@@ -172,6 +282,84 @@ func TestInjectHermesSDDIdempotent(t *testing.T) {
 	}
 	if second.Changed {
 		t.Fatal("Inject(hermes) second changed = true (not idempotent)")
+	}
+}
+
+func TestRemoteAuthorizationInstalledExecutors(t *testing.T) {
+	for _, tc := range []struct {
+		id    model.AgentID
+		count int
+	}{
+		{"claude-code", 19}, {"cursor", 16}, {model.AgentKiroIDE, 19}, {"kimi", 16},
+	} {
+		t.Run(string(tc.id), func(t *testing.T) {
+			adapter, err := agents.NewAdapter(tc.id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			home := t.TempDir()
+			mockNoPackageManager(t)
+			if _, err := Inject(home, adapter, model.SDDModeMulti); err != nil {
+				t.Fatal(err)
+			}
+			entries, err := os.ReadDir(adapter.SubAgentsDir(home))
+			if err != nil {
+				t.Fatal(err)
+			}
+			count := 0
+			for _, entry := range entries {
+				if !isMarkdownSubAgentPromptFile(entry.Name()) {
+					continue
+				}
+				count++
+				content, err := os.ReadFile(filepath.Join(adapter.SubAgentsDir(home), entry.Name()))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if strings.Count(string(content), strings.TrimSpace(agentguidance.InjectRemoteAuthorization(""))) != 1 {
+					t.Errorf("%s: missing unique canonical contract", entry.Name())
+				}
+			}
+			if count != tc.count {
+				t.Errorf("markdown count = %d, want %d", count, tc.count)
+			}
+			if result, err := Inject(home, adapter, model.SDDModeMulti); err != nil || result.Changed {
+				t.Errorf("second injection changed=%v err=%v", result.Changed, err)
+			}
+		})
+	}
+}
+
+func TestRemoteAuthorizationEmbeddedExecutors(t *testing.T) {
+	for _, adapter := range []agents.Adapter{opencodeAdapter(), kilocodeAdapter()} {
+		t.Run(string(adapter.Agent()), func(t *testing.T) {
+			home := t.TempDir()
+			mockNoPackageManager(t)
+			if _, err := Inject(home, adapter, model.SDDModeMulti); err != nil {
+				t.Fatal(err)
+			}
+			content, err := os.ReadFile(adapter.SettingsPath(home))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var settings map[string]any
+			if err := json.Unmarshal(content, &settings); err != nil {
+				t.Fatal(err)
+			}
+			for name, raw := range settings["agent"].(map[string]any) {
+				agent := raw.(map[string]any)
+				if agent["mode"] == "primary" {
+					continue
+				}
+				prompt, ok := agent["prompt"].(string)
+				if !ok || strings.HasPrefix(prompt, "{file:") {
+					continue
+				}
+				if strings.Count(prompt, strings.TrimSpace(agentguidance.InjectRemoteAuthorization(""))) != 1 {
+					t.Errorf("%s: missing unique canonical contract", name)
+				}
+			}
+		})
 	}
 }
 
@@ -2173,6 +2361,21 @@ func TestInjectKimiKiroWindsurfAntigravityPreserveNativeChainStrategyWording(t *
 				t.Fatalf("ReadFile(%s prompt) error = %v", tt.name, readErr)
 			}
 			text := string(content)
+
+			// Chain topology is a later, independent choice, not an initial
+			// delivery-strategy producer.
+			assertFallbackSessionPreflight(t, text)
+			chainStart := strings.Index(text, "### Chain Strategy\n")
+			chainEnd := strings.Index(text, "### Review Workload Guard (MANDATORY)")
+			if chainStart < 0 || chainEnd <= chainStart {
+				t.Fatal("missing bounded chain strategy section")
+			}
+			chain := text[chainStart:chainEnd]
+			for _, want := range []string{"When `delivery_strategy` results in chained PRs", "ask the user which chain strategy to use", "Cache the chain strategy for the session", "`chain_strategy`", "`delivery_strategy`"} {
+				if !strings.Contains(chain, want) {
+					t.Errorf("native chain strategy missing independent semantics %q", want)
+				}
+			}
 
 			for _, required := range tt.required {
 				if !strings.Contains(text, required) {
@@ -5330,7 +5533,15 @@ func TestInjectWindsurf_WorkflowContentMatchesAsset(t *testing.T) {
 		t.Fatalf("ReadFile() error = %v", err)
 	}
 
-	want := assets.MustRead("windsurf/workflows/sdd-new.md")
+	want, err := renderWindsurfSessionPreflightEntry(assets.MustRead("windsurf/workflows/sdd-new.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{"~/.codeium/windsurf/memories/global_rules.md", "SDD Session Preflight", "before any SDD-owned mutation", "STOP"} {
+		if !strings.Contains(string(got), required) {
+			t.Errorf("installed authority consumer missing %q", required)
+		}
+	}
 	if string(got) != want {
 		t.Fatalf("workflow file content mismatch:\ngot len=%d, want len=%d", len(got), len(want))
 	}
@@ -7617,6 +7828,38 @@ func containsPath(paths []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func TestInjectCodexFallbackProfilesRemainIdempotent(t *testing.T) {
+	for name, opts := range map[string]InjectOptions{
+		"recommended": {CodexModelAssignments: model.CodexModelPresetRecommended()},
+		"low-cost":    {CodexModelAssignments: model.CodexModelPresetLowCost()},
+		"powerful":    {CodexModelAssignments: model.CodexModelPresetPowerful()},
+		"custom":      {CodexModelAssignments: model.CodexModelPresetRecommended(), CodexPhaseModelAssignments: map[string]string{"sdd-propose": "gpt-5.4"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			home := t.TempDir()
+			adapter := codexInjectAdapter()
+			if _, err := Inject(home, adapter, "", opts); err != nil {
+				t.Fatal(err)
+			}
+			before, err := os.ReadFile(adapter.SystemPromptFile(home))
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertFallbackSessionPreflight(t, string(before))
+			if strings.Contains(string(before), "{{CODEX_PHASE_EFFORTS}}") || !strings.Contains(string(before), "reasoning_effort") {
+				t.Fatal("preflight projection lost phase-effort substitution")
+			}
+			if result, err := Inject(home, adapter, "", opts); err != nil || result.Changed {
+				t.Fatalf("repeat profile install = %+v, %v", result, err)
+			}
+			after, err := os.ReadFile(adapter.SystemPromptFile(home))
+			if err != nil || !bytes.Equal(before, after) {
+				t.Fatalf("repeat profile install changed bytes: %v", err)
+			}
+		})
+	}
 }
 
 func TestInject_CodexSubstitutesPhaseEfforts(t *testing.T) {

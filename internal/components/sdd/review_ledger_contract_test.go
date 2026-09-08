@@ -493,7 +493,19 @@ func TestKilocodeReviewSettingsMatchCurrentMainBaseline(t *testing.T) {
 	// verified by the writer itself, by an on-demand separate verifier, or by
 	// a mandatory independent verifier. Kilo renders that section through the
 	// OpenCode orchestrator asset, so the baseline is rederived.
-	const want = "bd285e2e96a0ddd582f74b20633dbe50088e23e72e1acf16c28f2abf95baa489"
+	// #4304 adds the declined-review fallback to that same shared section: the
+	// RDD-on shortcut holds only while the native review reaches a terminal
+	// outcome for this candidate, and a declined consent envelope, clone-local
+	// RDD disable, or a START/STATUS refusal fall back to the risk-gated tier
+	// table exactly like RDD off. Kilo renders that section through the
+	// OpenCode orchestrator asset, so the baseline is rederived.
+	// #2855 replaces identity-free task-failure commands with coordinator
+	// guidance. Kilocode embeds the changed OpenCode consumer wording.
+	// #4315 adds __managed_by metadata through the shared OpenCode overlay.
+	// Kilocode inherits that metadata, not additional native RDD support.
+	// #4324 appends canonical remote authorization to managed executor prompts;
+	// native permissions and the primary orchestrator remain unchanged.
+	const want = "d2f4aad13b3930df018219bd91ea56ef8ddac3bc3978cd0374b1857e2a1c5944"
 	if got != want {
 		t.Fatalf("Kilocode settings SHA-256 = %s, want current-main baseline %s", got, want)
 	}
@@ -781,8 +793,10 @@ func TestOpenCodeRenderedReviewProtocolCost(t *testing.T) {
 		// one. Deliberate, not drift; the ceilings move with it
 		// (ceilings move again by the same amount) to restore the same small
 		// headroom each row already had.
-		{name: "standard", agents: []string{"review-reliability"}, beforeChars: 42_301, wantChars: 17_364, maxCharacters: 17_367},
-		{name: "full-4R", agents: []string{"review-risk", "review-resilience", "review-readability", "review-reliability"}, beforeChars: 106_998, wantChars: 29_709, maxCharacters: 31_242},
+		// #4324 adds 1,354 canonical remote-authorization characters per reviewer.
+		// Preserve the existing absolute ceiling margins (3 and 1,533 characters).
+		{name: "standard", agents: []string{"review-reliability"}, beforeChars: 42_301, wantChars: 18_718, maxCharacters: 18_721},
+		{name: "full-4R", agents: []string{"review-risk", "review-resilience", "review-readability", "review-reliability"}, beforeChars: 106_998, wantChars: 35_125, maxCharacters: 36_658},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
