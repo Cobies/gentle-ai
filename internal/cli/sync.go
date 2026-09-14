@@ -30,6 +30,7 @@ import (
 	"github.com/gentleman-programming/gentle-ai/v2/internal/components/persona"
 	"github.com/gentleman-programming/gentle-ai/v2/internal/components/sdd"
 	"github.com/gentleman-programming/gentle-ai/v2/internal/components/skills"
+	"github.com/gentleman-programming/gentle-ai/v2/internal/components/telemetryruntime"
 	"github.com/gentleman-programming/gentle-ai/v2/internal/components/theme"
 	"github.com/gentleman-programming/gentle-ai/v2/internal/model"
 	opencodeactivation "github.com/gentleman-programming/gentle-ai/v2/internal/opencode"
@@ -544,8 +545,15 @@ func (r *syncRuntime) stagePlan() pipeline.StagePlan {
 		},
 	}
 
+	telemetryDir := openCodeTelemetryConfigDir(r.homeDir, r.workspaceDir, ScopeGlobal, r.agentIDs)
+	if telemetryDir != "" {
+		prepare = append([]pipeline.Step{openCodeTelemetryStep{id: "prepare:opencode-telemetry", configDir: telemetryDir, checkOnly: true}}, prepare...)
+	}
 	apply := []pipeline.Step{
-		rollbackRestoreStep{id: "apply:rollback-restore", state: r.state, homeDir: r.homeDir, workspaceDir: r.workspaceDir},
+		rollbackRestoreStep{id: "apply:rollback-restore", state: r.state, homeDir: r.homeDir, workspaceDir: r.workspaceDir, telemetryConfigDir: telemetryDir},
+	}
+	if telemetryDir != "" {
+		apply = append(apply, openCodeTelemetryStep{id: "sync:opencode:telemetry-runtime", configDir: telemetryDir, changedFiles: &r.changedFiles, state: r.state})
 	}
 	if r.backgroundActivation != nil {
 		apply = append(apply, openCodeBackgroundActivationStep{id: "sync:opencode:background-activation", plan: r.backgroundActivation, state: r.state, ready: &r.runtimeReady})
@@ -619,6 +627,9 @@ func (r *syncRuntime) stagePlan() pipeline.StagePlan {
 		})
 		apply = append(apply, piCodeGraphSyncStep{id: "sync:community-tool:pi-codegraph", homeDir: r.homeDir, workspaceDir: r.workspaceDir, changedFiles: &r.changedFiles})
 	}
+	if r.selection.HasCommunityTool(model.CommunityToolRTK) {
+		apply = append(apply, rtkSyncStep{id: "sync:community-tool:rtk", homeDir: r.homeDir, workspaceDir: r.workspaceDir, agents: r.agentIDs, changedFiles: &r.changedFiles})
+	}
 
 	return pipeline.StagePlan{Prepare: prepare, Apply: apply}
 }
@@ -678,6 +689,16 @@ func syncBackupTargets(homeDir, workspaceDir string, selection model.Selection, 
 	for _, path := range routingGuidancePaths(homeDir, workspaceDir, ScopeGlobal, adapters) {
 		paths[path] = struct{}{}
 	}
+	for _, adapter := range adapters {
+		if adapter.Agent() == model.AgentPi {
+			paths[adapter.SystemPromptFile(homeDir)] = struct{}{}
+		}
+	}
+	if configDir := openCodeTelemetryConfigDir(homeDir, workspaceDir, ScopeGlobal, selection.Agents); configDir != "" {
+		for _, path := range telemetryruntime.ManagedPaths(configDir) {
+			paths[path] = struct{}{}
+		}
+	}
 	// Managed OpenCode-compatible plugin paths are part of sync's
 	// backup/snapshot contract whenever a plugin-receiving agent (OpenCode,
 	// Kilocode) is synced, independent of the SDD component: the
@@ -715,6 +736,11 @@ func syncBackupTargets(homeDir, workspaceDir string, selection model.Selection, 
 	}
 	if selection.HasCommunityTool(model.CommunityToolCodeGraph) {
 		for _, path := range communitytool.CodeGraphManagedPaths(homeDir) {
+			paths[path] = struct{}{}
+		}
+	}
+	if selection.HasCommunityTool(model.CommunityToolRTK) {
+		for _, path := range communitytool.RTKManagedPathsForAgents(homeDir, selection.Agents) {
 			paths[path] = struct{}{}
 		}
 	}
@@ -864,6 +890,34 @@ type codeGraphGuidanceSyncStep struct {
 type piCodeGraphSyncStep struct {
 	id, homeDir, workspaceDir string
 	changedFiles              *[]string
+}
+
+type rtkSyncStep struct {
+	id, homeDir, workspaceDir string
+	agents                    []model.AgentID
+	changedFiles              *[]string
+}
+
+func (s rtkSyncStep) ID() string { return s.id }
+
+func (s rtkSyncStep) Run() error {
+	paths := communitytool.RTKManagedPathsForAgents(s.homeDir, s.agents)
+	before, err := snapshotSyncFiles(paths)
+	if err != nil {
+		return fmt.Errorf("snapshot RTK files: %w", err)
+	}
+	_, err = installCommunityToolWithHomeAndAgents(model.CommunityToolRTK, s.workspaceDir, s.homeDir, s.agents, rtkHomeRunner{homeDir: s.homeDir}, communitytool.DetectorFunc(cmdLookPath))
+	if err != nil {
+		return errors.Join(fmt.Errorf("sync RTK: %w", err), restoreSyncFiles(before))
+	}
+	changed, err := changedSyncFiles(paths, before)
+	if err != nil {
+		return fmt.Errorf("compare RTK sync files: %w", err)
+	}
+	if s.changedFiles != nil {
+		*s.changedFiles = append(*s.changedFiles, changed...)
+	}
+	return nil
 }
 
 // openCodePluginRefreshSyncStep refreshes already-installed managed
@@ -1199,11 +1253,6 @@ func (s componentSyncStep) Run() error {
 					return fmt.Errorf("sync persona for %q: %w", adapter.Agent(), err)
 				}
 				s.countChanged(boolToInt(res.Changed), res.Files...)
-				retireRes, err := sdd.RetirePiSystemPromptBlocks(s.homeDir, adapter)
-				if err != nil {
-					return fmt.Errorf("retire stale Pi system prompt blocks: %w", err)
-				}
-				s.countChanged(boolToInt(retireRes.Changed), retireRes.Files...)
 				continue
 			}
 			targetDir := componentInjectionDir(s.homeDir, s.workspaceDir, adapter)
@@ -1964,8 +2013,11 @@ func restorePersistedCommunityTools(homeDir string, selection *model.Selection, 
 	if persisted.CommunityToolsConfigured {
 		selection.CommunityTools = make([]model.CommunityToolID, 0, len(persisted.CommunityTools))
 		for _, tool := range persisted.CommunityTools {
-			if model.CommunityToolID(tool) == model.CommunityToolCodeGraph {
+			switch model.CommunityToolID(tool) {
+			case model.CommunityToolCodeGraph:
 				selection.CommunityTools = append(selection.CommunityTools, model.CommunityToolCodeGraph)
+			case model.CommunityToolRTK:
+				selection.CommunityTools = append(selection.CommunityTools, model.CommunityToolRTK)
 			}
 		}
 		return
