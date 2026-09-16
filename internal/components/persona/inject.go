@@ -108,7 +108,7 @@ func injectInternal(homeDir, workspaceDir string, adapter agents.Adapter, person
 	if !adapter.SupportsSystemPrompt() {
 		return InjectionResult{}, nil
 	}
-	if err := validateOpenClawWorkspacePath(workspaceDir, adapter); err != nil {
+	if err := validateOpenClawWorkspacePath(homeDir, adapter); err != nil {
 		return InjectionResult{}, err
 	}
 
@@ -127,7 +127,7 @@ func injectInternal(homeDir, workspaceDir string, adapter agents.Adapter, person
 
 	// 1. Inject persona content based on system prompt strategy.
 	if adapter.Agent() == model.AgentOpenClaw {
-		return injectOpenClawSoulPersona(workspaceDir, content)
+		return injectOpenClawSoulPersona(homeDir, content)
 	}
 
 	switch adapter.SystemPromptStrategy() {
