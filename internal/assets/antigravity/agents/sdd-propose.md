@@ -18,6 +18,7 @@ Read the skill file at `~/.gemini/antigravity-cli/skills/sdd-propose/SKILL.md` a
 Also read shared conventions at `~/.gemini/antigravity-cli/skills/_shared/sdd-phase-common.md`.
 
 Execute all steps from the skill directly in this context window:
+
 1. Formulate change proposal addressing user goal and exploration findings
 2. Define scope boundaries, non-goals, and architectural implications
 3. Draft proposal artifact in active backend (Engram/OpenSpec)
@@ -25,6 +26,7 @@ Execute all steps from the skill directly in this context window:
 ## Engram Save (mandatory)
 
 After completing work, call `mem_save` with:
+
 - title: `"sdd/{change-name}/proposal"`
 - topic_key: `"sdd/{change-name}/proposal"`
 - type: `"architecture"`
@@ -32,6 +34,7 @@ After completing work, call `mem_save` with:
 ## Result Contract
 
 Return a structured result with these fields:
+
 - `status`: `done` | `blocked`
 - `executive_summary`: one-sentence summary of proposed change
 - `artifacts`: list of proposal topic_keys or files
