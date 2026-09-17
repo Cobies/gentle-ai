@@ -115,7 +115,7 @@ Regardless of the language (English, Spanish, etc.) or phrasing used by the user
 
 ### Delegation Rules
 
-These rules select execution topology, not the implementation method. Crossing a threshold selects **delegated direct** work; it never selects SDD, creates SDD state, or invokes an `sdd-*` phase. Implementation runs as **direct inline**, **delegated direct**, or **optional SDD**; size, file count, or risk alone never selects SDD. SDD phase workers are reserved for an explicit SDD request or a proposal the user accepted. Crossing a threshold mandates delegating to subagents (via Lean SDD, Full SDD, or dynamic workers registered via `define_subagent`). The parent orchestrator acts as a **Pure Thinker and Coordinator**, delegating all heavy reads, writes, builds, and tests to keep context thin (<20k tokens).
+These rules select execution topology, not the implementation method. Crossing a threshold selects **delegated direct** work; it never selects SDD, creates SDD state, or invokes an `sdd-*` phase. Implementation runs as **direct inline**, **delegated direct (Lean ODD/Fast-Path)**, or **optional SDD**; size, file count, or risk alone never selects SDD. SDD phase workers are reserved for an explicit SDD request or a proposal the user accepted. Crossing a threshold mandates delegating to subagents (via Lean Fast-Path ODD, Full SDD, or dynamic workers registered via `define_subagent`). The parent orchestrator acts as a **Pure Thinker and Coordinator**, delegating all heavy reads, writes, builds, and tests to keep context thin (<20k tokens).
 
 | Action | Direct inline | Delegated direct worker |
 | -------- | --------------- | ------------------------- |
@@ -123,7 +123,7 @@ These rules select execution topology, not the implementation method. Crossing a
 | Read to explore/understand (4+ files) | — | ✅ one narrow mapper (`sdd-explore` or `research`) |
 | Read as preparation for writing | — | ✅ together with the write inside subagent |
 | Write one mechanical, already-understood file | ✅ | — |
-| Write 2+ non-trivial files | — | ✅ one writer (`sdd-apply` via Lean/Full SDD or dynamic worker) |
+| Write 2+ non-trivial files | — | ✅ one writer (`sdd-apply` via Lean Fast-Path/Full SDD or dynamic worker) |
 | Bash for state (`git`, `gh`) | ✅ bounded query | — |
 | Tests, builds, installs, or long scripts | allowed as a bounded action | ✅ fresh worker (`sdd-verify` or dynamic worker) |
 
@@ -142,14 +142,14 @@ These are parent-orchestrator routing boundaries. Use the smallest useful topolo
 
 1. **Bounded read rule**: read 1–3 files inline to decide or verify.
 2. **4-file rule**: when understanding requires 4+ files or architectural flow analysis across components/domains, delegate one narrow exploration/mapping task to `sdd-explore` (or `research` for purely non-code conceptual lookups). Inline exploration beyond 2 reads is strictly prohibited.
-3. **Write rule**: keep one mechanical, already-understood file inline only when it needs no research or unresolved design work; delegate one writer for 2+ non-trivial files, or route via **SDD**:
-   - **Lean SDD (Fast-Path)**: the default route for 2–3 bounded files within a single domain with zero architectural ambiguity. Runs `sdd-explore` (targeted mapping with mandatory Engram persistence) → `sdd-apply` (strict TDD) → `sdd-verify`, skipping proposal, spec, and design ceremonies.
+3. **Write rule**: keep one mechanical, already-understood file inline only when it needs no research or unresolved design work; delegate one writer for 2+ non-trivial files, or route via **Lean ODD Fast-Path / SDD**:
+   - **Lean Fast-Path (ODD / Lean SDD)**: the default route for 2–3 bounded files within a single domain with zero architectural ambiguity. Runs `sdd-explore` (targeted mapping with mandatory Engram persistence) → `sdd-apply` (strict TDD) → `sdd-verify`, skipping proposal, spec, and design ceremonies.
    - **Full SDD**: when a change spans multiple domains/layers (cross-stack), touches core contracts/architecture, or introduces architectural ambiguity. Runs the full phased lifecycle (`sdd-explore` → `sdd-propose` → `sdd-spec` → `sdd-design` → `sdd-tasks` → `sdd-apply` → `sdd-verify` → `sdd-archive`).
    - **Dynamic Subagents (`define_subagent`)**: if a task falls outside formal SDD (e.g. general multi-file refactoring, isolated script execution, or custom test runs), or requires specific MCP tools (Engram, CodeGraph), dynamically define a specialized subagent and invoke it via `invoke_subagent`.
-4. **Mandatory Engram Exploration Persistence**: In both Lean and Full SDD, `sdd-explore` MUST be executed first and MUST persist its findings, symbol mappings, and architectural insights into Engram (`mem_save` under topic key `sdd/{change-name}/explore`) before proceeding to code modification (`sdd-apply`).
+4. **Mandatory Engram Exploration Persistence**: In both Lean Fast-Path and Full SDD, `sdd-explore` MUST be executed first and MUST persist its findings, symbol mappings, and architectural insights into Engram (`mem_save` under topic key `sdd/{change-name}/explore` or `odd/{feature}/explore`) before proceeding to code modification (`sdd-apply`).
 5. **Context rule**: delegate reading that prepares a write and broad research/context compression.
 6. **Per-action rule**: tests, builds, installs, and native review actors may use fresh workers without changing the implementation route or creating SDD state.
-7. **Optional SDD rule**: propose SDD only when durable proposal/spec/design/tasks materially reduce substantial ambiguity. Select SDD only after an explicit request or accepted proposal; risk alone never forces SDD. Full SDD activates when crossing multiple architectural layers; Lean SDD and dynamic delegation require no heavy proposal and activate automatically for bounded multi-file work.
+7. **Optional SDD rule**: propose SDD only when durable proposal/spec/design/tasks materially reduce substantial ambiguity. Select SDD only after an explicit request or accepted proposal; risk alone never forces SDD. Full SDD activates when crossing multiple architectural layers; Lean Fast-Path and dynamic delegation require no heavy proposal and activate automatically for bounded multi-file work.
 8. **Large-Context Window Rule (Gemini/Antigravity)**: Large context window capacity (e.g. 1M+ tokens) NEVER overrides delegation rules. Even if the active model can hold many files in memory, processing 4+ read files or 2+ write files in the parent thread is strictly forbidden and MUST be delegated to subagents.
 
 #### Delegated Verification Gate (MANDATORY)
