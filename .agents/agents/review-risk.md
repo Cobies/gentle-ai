@@ -1,5 +1,6 @@
 ---
 name: review-risk
+model: cliproxy/gemini-3.8-flash-high
 description: >
   Adversarial review lens evaluating security risks, data exposure, and permission flaws.
 subagent: true

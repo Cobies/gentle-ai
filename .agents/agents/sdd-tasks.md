@@ -1,5 +1,6 @@
 ---
 name: sdd-tasks
+model: cliproxy/gemini-3.8-flash-high
 description: >
   Generate structured task DAGs and implementation work units.
 subagent: true

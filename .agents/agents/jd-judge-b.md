@@ -1,5 +1,6 @@
 ---
 name: jd-judge-b
+model: cliproxy/gemini-3.8-flash-high
 description: >
   Adversarial code reviewer — blind judge B for judgment-day parallel review protocol.
 subagent: true

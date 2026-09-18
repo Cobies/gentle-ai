@@ -1,5 +1,6 @@
 ---
 name: sdd-onboard
+model: cliproxy/gemini-3.8-flash-high
 description: >
   Guide new projects through initial SDD setup and workflow orientation.
 subagent: true

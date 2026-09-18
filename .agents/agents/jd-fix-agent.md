@@ -1,5 +1,6 @@
 ---
 name: jd-fix-agent
+model: cliproxy/gemini-3.8-flash-high
 description: >
   Surgical fix agent for judgment-day protocol. Applies only confirmed fixes
   from the verdict synthesis. Triggered by the orchestrator after judges agree on issues.

@@ -1,5 +1,6 @@
 ---
 name: sdd-verify
+model: cliproxy/gemini-3.8-flash-high
 description: >
   Validate implementation against specs using tests and verification builds.
 subagent: true

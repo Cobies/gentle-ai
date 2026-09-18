@@ -1,5 +1,6 @@
 ---
 name: sdd-explore
+model: cliproxy/gemini-3.8-flash-high
 description: >
   Explore codebase and investigate architecture ideas. Read-only codebase mapping; does not write proposals or specs.
 subagent: true

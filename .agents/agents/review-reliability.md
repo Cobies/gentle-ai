@@ -1,5 +1,6 @@
 ---
 name: review-reliability
+model: cliproxy/gemini-3.8-flash-high
 description: >
   Adversarial review lens evaluating correctness, edge cases, error handling, and test coverage.
 subagent: true

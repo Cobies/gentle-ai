@@ -1,5 +1,6 @@
 ---
 name: sdd-archive
+model: cliproxy/gemini-3.8-flash-high
 description: >
   Close out an SDD change, finalize documentation, and archive state.
 subagent: true

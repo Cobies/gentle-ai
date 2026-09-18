@@ -1,5 +1,6 @@
 ---
 name: review-refuter
+model: cliproxy/gemini-3.8-flash-high
 description: >
   Adversarial refuter evaluating findings from 4R review lenses before ledger entry.
 subagent: true
