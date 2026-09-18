@@ -194,11 +194,31 @@ type ReviewTransitionArtifact struct {
 }
 
 func newReviewNextTransition(status ReviewTargetStatusResult, selectedLenses []string, artifacts []ReviewTransitionArtifact, artifactErr error, input reviewNextTransitionInput) ReviewNextTransition {
+	transition := resolveReviewNextTransition(status, selectedLenses, artifacts, artifactErr, input)
+	// Gate only active capture offers; recovery, acknowledgement, and existing
+	// stops retain their routing. Freshness never changes the bound authority.
+	if status.Applicability == reviewtransaction.TargetApplicabilityCurrent && status.Authority != nil && transition.Collect != nil {
+		for _, capture := range transition.Collect.Inputs {
+			if _, native := reviewNativeCaptureVerb(capture.CaptureOperation); native || capture.ProviderTask != nil {
+				if provenance := checkManagedReviewerAssets(); provenance.stale() {
+					return reviewManagedAssetsStopTransition(input.RuntimeAgent, provenance.staleAssetIdentities())
+				}
+				break
+			}
+		}
+	}
+	return transition
+}
+
+func resolveReviewNextTransition(status ReviewTargetStatusResult, selectedLenses []string, artifacts []ReviewTransitionArtifact, artifactErr error, input reviewNextTransitionInput) ReviewNextTransition {
 	if status.Applicability != reviewtransaction.TargetApplicabilityCurrent {
 		switch status.Applicability {
 		case reviewtransaction.TargetApplicabilityUnrelated:
 			if input.RDDModeResolved && !input.RDDMode.Enabled() {
 				return reviewStopTransition("rdd_disabled")
+			}
+			if status.Action == reviewtransaction.TargetStatusActionStop && status.Replayability == reviewtransaction.ReplayabilityNotReplayable {
+				return reviewStopTransition("target_already_acknowledged")
 			}
 			if input.Selector != nil && input.Selector.Kind == reviewtransaction.TargetBaseWorkspaceOverlay &&
 				input.Selector.Projection == reviewtransaction.ProjectionStaged {
@@ -221,21 +241,8 @@ func newReviewNextTransition(status ReviewTargetStatusResult, selectedLenses []s
 			// instead, and — exactly like the refusal it replaces — name it
 			// without deriving it, so the caller keeps choosing the scope.
 			if status.Projection.Kind == reviewtransaction.TargetCurrentChanges && len(status.Projection.Paths) == 0 {
-				// Issue #4412: when STATUS could resolve the remote default
-				// branch's unique merge-base, the reviewed work is already
-				// committed and the truthful answer is the executable
-				// committed-range START the working `--base-ref --committed-only`
-				// STATUS path already publishes, not the unroutable
-				// external.select_base_ref collect (transition_input.submission
-				// is a closed oneOf, so no submission was ever schema-legal).
-				// The collect below stays the fallback for every repository
-				// shape the derivation cannot resolve.
-				if derived := status.derivedCommittedRange; derived != nil {
-					return reviewExecuteTransition("fresh_target_ready", "review.start",
-						reviewStartArguments(*derived, input.StartLineage, input.RuntimeAgent, derived.intendedUntracked),
-						[]ReviewTransitionArgument{{Name: "target_identity", Value: derived.TargetIdentity}},
-						ReviewTransitionBinding{LineageID: input.StartLineage, TargetIdentity: derived.TargetIdentity}, nil)
-				}
+				// Unambiguous committed ranges were already resolved before
+				// classification. Only the genuinely unresolved case remains.
 				return reviewCollectTransition("empty_candidate_base_ref_required", ReviewTransitionInput{
 					Name: "base_ref", Schema: "gentle-ai.review-base-ref-selection/v1", CaptureOperation: "external.select_base_ref",
 					Arguments: reviewTargetArguments(status),
