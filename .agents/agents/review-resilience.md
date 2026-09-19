@@ -1,7 +1,7 @@
 ---
 name: review-resilience
-model: cliproxy/gemini-3.8-flash-high
 description: >
+model: cliproxy/gemini-3.8-flash-high
   Adversarial review lens evaluating performance, resource leaks, and fault tolerance.
 subagent: true
 mainAgent: false

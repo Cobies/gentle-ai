@@ -1,7 +1,7 @@
 ---
 name: review-readability
-model: cliproxy/gemini-3.8-flash-high
 description: >
+model: cliproxy/gemini-3.8-flash-high
   Adversarial review lens evaluating code readability, maintainability, and naming.
 subagent: true
 mainAgent: false

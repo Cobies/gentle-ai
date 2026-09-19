@@ -1,7 +1,7 @@
 ---
 name: sdd-design
-model: cliproxy/gemini-3.8-flash-high
 description: >
+model: cliproxy/gemini-3.8-flash-high
   Create detailed system architecture and component design artifacts.
 subagent: true
 mainAgent: false

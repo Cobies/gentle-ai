@@ -1,7 +1,7 @@
 ---
 name: sdd-propose
-model: cliproxy/gemini-3.8-flash-high
 description: >
+model: cliproxy/gemini-3.8-flash-high
   Draft or update change proposals and initial design rationale artifacts.
 subagent: true
 mainAgent: false

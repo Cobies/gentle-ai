@@ -1,7 +1,7 @@
 ---
 name: sdd-apply
-model: cliproxy/gemini-3.8-flash-high
 description: >
+model: cliproxy/gemini-3.8-flash-high
   Implement code changes from task definitions following spec and design.
 subagent: true
 mainAgent: false

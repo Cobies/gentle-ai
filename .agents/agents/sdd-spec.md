@@ -1,7 +1,7 @@
 ---
 name: sdd-spec
-model: cliproxy/gemini-3.8-flash-high
 description: >
+model: cliproxy/gemini-3.8-flash-high
   Write or update technical specifications and contract requirements.
 subagent: true
 mainAgent: false

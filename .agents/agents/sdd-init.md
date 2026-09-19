@@ -1,7 +1,7 @@
 ---
 name: sdd-init
-model: cliproxy/gemini-3.8-flash-high
 description: >
+model: cliproxy/gemini-3.8-flash-high
   Initialize SDD context, detect project stack, testing capabilities, and bootstrap persistence backend.
 subagent: true
 mainAgent: false
