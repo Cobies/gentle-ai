@@ -189,8 +189,8 @@ func TestNegotiatedStatusReportsManagedAssetsOutdatedBeforeOfferingStart(t *test
 		continuation.Agent != "opencode" || len(continuation.StaleAssets) != 1 || continuation.StaleAssets[0] != "sha256:stale" {
 		t.Fatalf("stale managed assets STATUS continuation = %#v", continuation)
 	}
-	statusV7Schema := compileWholeNativeStatusSchema(t, "status-v7.schema.json")
-	validatePublishedReviewSchema(t, statusV7Schema, output.Bytes())
+	statusV9Schema := compileWholeNativeStatusSchema(t, "status-v9.schema.json")
+	validatePublishedReviewSchema(t, statusV9Schema, output.Bytes())
 
 	// Once the recorded digest converges with this binary's, the very same
 	// candidate must be offered again: the skew was the only thing blocking
@@ -238,7 +238,7 @@ func TestNegotiatedBoundStatusResumesSameCaptureAfterManagedAssetsConverge(t *te
 				var result ReviewTargetStatusResult
 				decodeStrictReviewJSON(t, output.Bytes(), &result)
 				requireManagedAssetProvenanceNoError(t, result.Validate())
-				validatePublishedReviewSchema(t, compileWholeNativeStatusSchema(t, "status-v7.schema.json"), output.Bytes())
+				validatePublishedReviewSchema(t, compileWholeNativeStatusSchema(t, "status-v9.schema.json"), output.Bytes())
 				return result
 			}
 			initial := status()
@@ -354,7 +354,7 @@ func TestManagedAssetsStopTransitionCarriesExactlyOneSignal(t *testing.T) {
 	// caller reading both would not know which one to trust.
 	executeWithContinuation := converged
 	bogusTransition := *converged.NextTransition
-	bogusTransition.Continuation = &ReviewManagedAssetsContinuation{Operation: "sync", Command: "gentle-ai sync --agent opencode", Agent: "opencode"}
+	bogusTransition.Continuation = &ReviewStopContinuation{Operation: "sync", Command: "gentle-ai sync --agent opencode", Agent: "opencode"}
 	executeWithContinuation.NextTransition = &bogusTransition
 	if err := executeWithContinuation.Validate(); err == nil {
 		t.Fatal("STATUS accepted a sync continuation attached to an executable START transition")
@@ -522,7 +522,7 @@ func TestManagedAssetsContinuationUsesInvokingExecutable(t *testing.T) {
 	}
 	// The executable-anchored command must still satisfy the published
 	// continuation contract, not just this test's expectation.
-	validatePublishedReviewSchema(t, compileWholeNativeStatusSchema(t, "status-v7.schema.json"), output.Bytes())
+	validatePublishedReviewSchema(t, compileWholeNativeStatusSchema(t, "status-v9.schema.json"), output.Bytes())
 
 	// Convergence (#4434's invariant, not just the rendered shape): execute the
 	// emitted continuation command exactly as printed -- through executable
