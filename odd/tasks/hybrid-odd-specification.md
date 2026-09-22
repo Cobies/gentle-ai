@@ -39,15 +39,15 @@
   - `/mnt/c/Users/Cobies/Desktop/Proyectos/COLAB/gentle-pi/tests/odd-routing-canonical-ratchet.test.ts`
 
 ## 3. Tasks & Evidence
-- [ ] 1. Create feature branch `feat/hybrid-odd-specification` in `gentle-ai` and `gentle-pi`.
-- [ ] 2. `gentle-ai`: Update `routing_test.go` with failing tests for the 4-section hybrid pattern (TDD RED).
-- [ ] 3. `gentle-ai`: Update `routing.go` to satisfy tests and format the 4-section pattern (TDD GREEN).
-- [ ] 4. `gentle-ai`: Run tests, create work-unit commit on `feat/hybrid-odd-specification`.
-- [ ] 5. `gentle-pi`: Re-mirror canonical guidance to `fixtures/odd-routing-canonical.md` and update orchestrator guidance assets/extension.
-- [ ] 6. `gentle-pi`: Update contract tests, run `pnpm test`, and create work-unit commit on `feat/hybrid-odd-specification`.
-- [ ] 7. Push feature branches to GitHub for both repositories.
+- [x] 1. Create feature branch `feat/hybrid-odd-specification` in `gentle-ai` and `gentle-pi`.
+- [x] 2. `gentle-ai`: Update `routing_test.go` with failing tests for the 4-section hybrid pattern (TDD RED).
+- [x] 3. `gentle-ai`: Update `routing.go` to satisfy tests and format the 4-section pattern (TDD GREEN).
+- [x] 4. `gentle-ai`: Run tests, create work-unit commit on `feat/hybrid-odd-specification` (`72025280`).
+- [x] 5. `gentle-pi`: Re-mirror canonical guidance to `fixtures/odd-routing-canonical.md` and update orchestrator guidance assets/extension.
+- [x] 6. `gentle-pi`: Update contract tests, run `tests/odd-routing-contract.test.ts` & `tests/odd-routing-canonical-ratchet.test.ts`, and create work-unit commit on `feat/hybrid-odd-specification` (`1e647dce`).
+- [x] 7. Push feature branches to GitHub for both repositories.
 
 ## 4. Acceptance Criteria & Verification
-- `go test ./internal/components/agentguidance/...` passes in `gentle-ai`.
-- `pnpm test` (specifically `odd-routing-contract` and `odd-routing-canonical-ratchet`) passes in `gentle-pi`.
-- Both repositories have clean git statuses with work-unit commits pushed to `origin/feat/hybrid-odd-specification`.
+- `go test ./internal/components/agentguidance/...` passes in `gentle-ai` (all 16 supported agents pass).
+- `node --test tests/odd-routing-contract.test.ts` (12/12 pass) and `node --test tests/odd-routing-canonical-ratchet.test.ts` (7/7 pass) pass in `gentle-pi`.
+- Both repositories have work-unit commits pushed to GitHub (`origin/feat/hybrid-odd-specification`).
