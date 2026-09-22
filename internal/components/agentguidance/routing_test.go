@@ -186,6 +186,13 @@ func TestRenderRoutingOrganicTaskContinuity(t *testing.T) {
 			"Before implementation or resume, the parent reads both the actual file and full observation",
 			"passes the locator and relevant context; workers read the document before edits",
 		}},
+		{"hybrid odd unified specification pattern", []string{
+			"Diagnosis & Technical Proposal (problem, chosen approach, trade-offs)",
+			"Technical Specification & Contracts (interfaces, constraints, edge cases, authorized edit surfaces)",
+			"Tasks & Evidence (actionable checklist with stable task IDs, task route declaration, commit SHAs)",
+			"Acceptance Criteria & Verification (verification commands, checks, and observed outcome)",
+			"offloads context weight from the live chat session into the physical file, keeping orchestrator context thin while providing workers explicit contracts",
+		}},
 		{"default applicable test-first policy", []string{
 			"relevant runnable deterministic test and clear expected outcome",
 			"observe RED before implementation, implement GREEN, then refactor",
