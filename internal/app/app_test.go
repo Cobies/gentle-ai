@@ -32,6 +32,25 @@ import (
 	"github.com/gentleman-programming/gentle-ai/v3/internal/update/upgrade"
 )
 
+func TestClaudeNativeReviewAssignmentsPersistThroughAppStateConversion(t *testing.T) {
+	roles := []string{"risk", "readability", "reliability", "resilience", "refuter", "validator"}
+	assignments := make(map[string]model.ClaudePhaseAssignment)
+	for _, role := range roles {
+		assignments[role] = model.ClaudePhaseAssignment{Model: model.ClaudeModelHaiku}
+	}
+	home := t.TempDir()
+	if err := state.Write(home, state.InstallState{ClaudePhaseAssignments: claudePhaseAssignmentsToState(assignments)}); err != nil {
+		t.Fatal(err)
+	}
+	reopened := model.Selection{}
+	loadPersistedAssignments(home, &reopened)
+	for _, role := range roles {
+		if got := reopened.ClaudePhaseAssignments[role].Model; got != model.ClaudeModelHaiku {
+			t.Errorf("reopened %s model = %q, want haiku", role, got)
+		}
+	}
+}
+
 // TestListBackupsNewestFirst verifies that ListBackups returns manifests sorted
 // newest-first by CreatedAt timestamp, matching the spec "newest first" ordering.
 func TestListBackupsNewestFirst(t *testing.T) {
@@ -273,6 +292,71 @@ func TestRunArgsInstallHelpPrintsInstallSpecificHelp(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("install help missing %q; output:\n%s", want, out)
 		}
+	}
+}
+
+// TestRunArgsRestoreHelpBypassesSystemDetection verifies that an explicit
+// restore help request is answered before system detection, like the install
+// and sync help pre-dispatch: a host with no resolvable home directory must
+// still be able to read the restore usage. The complement case proves a
+// non-help restore invocation still goes through system detection.
+func TestRunArgsRestoreHelpBypassesSystemDetection(t *testing.T) {
+	origDetect := detectSystem
+	origEnsure := ensureCurrentOSSupported
+	t.Cleanup(func() {
+		detectSystem = origDetect
+		ensureCurrentOSSupported = origEnsure
+	})
+	ensureCurrentOSSupported = func() error { return nil }
+	detectSystem = func(context.Context) (system.DetectionResult, error) {
+		return system.DetectionResult{}, fmt.Errorf("$HOME is not defined")
+	}
+
+	for _, helpFlag := range []string{"--help", "-help", "-h", "--h"} {
+		t.Run(helpFlag, func(t *testing.T) {
+			var buf bytes.Buffer
+			if err := RunArgs([]string{"restore", helpFlag}, &buf); err != nil {
+				t.Fatalf("RunArgs(restore %s) error = %v", helpFlag, err)
+			}
+			out := buf.String()
+			for _, want := range []string{
+				"gentle-ai restore [--list | latest | <id>] [--yes]",
+				"list available backups without restoring",
+				"skip confirmation prompt",
+			} {
+				if !strings.Contains(out, want) {
+					t.Fatalf("restore help missing %q; output:\n%s", want, out)
+				}
+			}
+		})
+	}
+
+	// Complement: restore without a help flag must still be dispatched after
+	// system detection, so the failing stub must surface as an error.
+	var buf bytes.Buffer
+	err := RunArgs([]string{"restore", "--list"}, &buf)
+	if err == nil || !strings.Contains(err.Error(), "$HOME is not defined") {
+		t.Fatalf("RunArgs(restore --list) error = %v, want detection failure", err)
+	}
+}
+
+// TestHelpFlagSpellings pins the helper's contract: the flag package treats
+// one and two leading dashes as equivalent and both "help" and "h" trigger
+// flag.ErrHelp, so hasHelpFlag must recognise all four spellings and nothing
+// else.
+func TestHelpFlagSpellings(t *testing.T) {
+	for _, arg := range []string{"--help", "-help", "-h", "--h"} {
+		if !hasHelpFlag([]string{arg}) {
+			t.Errorf("hasHelpFlag(%q) = false, want true", arg)
+		}
+	}
+	for _, arg := range []string{"--list", "latest", "--helpx"} {
+		if hasHelpFlag([]string{arg}) {
+			t.Errorf("hasHelpFlag(%q) = true, want false", arg)
+		}
+	}
+	if hasHelpFlag(nil) {
+		t.Error("hasHelpFlag(empty) = true, want false")
 	}
 }
 
@@ -1965,11 +2049,11 @@ func TestApplyOverrides_CodexCarrilModelAssignments(t *testing.T) {
 	if len(sel.CodexCarrilModelAssignments) != len(carrilModels) {
 		t.Fatalf("CodexCarrilModelAssignments len = %d, want %d", len(sel.CodexCarrilModelAssignments), len(carrilModels))
 	}
-	if sel.CodexCarrilModelAssignments["sdd-cheap"] != "gpt-5.6-luna" {
-		t.Errorf("CodexCarrilModelAssignments[sdd-cheap] = %q, want gpt-5.6-luna", sel.CodexCarrilModelAssignments["sdd-cheap"])
+	if sel.CodexCarrilModelAssignments["sdd-cheap"] != "gpt-6-luna" {
+		t.Errorf("CodexCarrilModelAssignments[sdd-cheap] = %q, want gpt-6-luna", sel.CodexCarrilModelAssignments["sdd-cheap"])
 	}
-	if sel.CodexCarrilModelAssignments["sdd-strong"] != "gpt-5.6-sol" {
-		t.Errorf("CodexCarrilModelAssignments[sdd-strong] = %q, want gpt-5.6-sol", sel.CodexCarrilModelAssignments["sdd-strong"])
+	if sel.CodexCarrilModelAssignments["sdd-strong"] != "gpt-6-sol" {
+		t.Errorf("CodexCarrilModelAssignments[sdd-strong] = %q, want gpt-6-sol", sel.CodexCarrilModelAssignments["sdd-strong"])
 	}
 }
 
@@ -2020,9 +2104,9 @@ func TestTuiSyncMigratesLegacyCodexCarrilDefaults(t *testing.T) {
 	}
 
 	wantProfiles := map[string][]string{
-		"sdd-strong.config.toml": {`model = "gpt-5.6-sol"`, `model_reasoning_effort = "medium"`},
-		"sdd-mid.config.toml":    {`model = "gpt-5.6-terra"`, `model_reasoning_effort = "medium"`},
-		"sdd-cheap.config.toml":  {`model = "gpt-5.6-luna"`, `model_reasoning_effort = "high"`},
+		"sdd-strong.config.toml": {`model = "gpt-6-sol"`, `model_reasoning_effort = "medium"`},
+		"sdd-mid.config.toml":    {`model = "gpt-6-luna"`, `model_reasoning_effort = "medium"`},
+		"sdd-cheap.config.toml":  {`model = "gpt-6-luna"`, `model_reasoning_effort = "high"`},
 	}
 	for name, wantContent := range wantProfiles {
 		path := filepath.Join(home, ".codex", name)

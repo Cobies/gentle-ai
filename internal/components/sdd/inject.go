@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 
 	"github.com/gentleman-programming/gentle-ai/v3/internal/agents"
@@ -845,6 +846,12 @@ func Inject(homeDir string, adapter agents.Adapter, sddMode model.SDDModeID, opt
 			// Non-Claude adapters don't implement claudeModelResolver and are unaffected.
 			if cmr, ok := adapter.(claudeModelResolver); ok {
 				phase := strings.TrimSuffix(entry.Name(), ".md")
+				// Native review roles are stored without the installed agent's
+				// review- prefix. Leave SDD and JD phase keys unchanged.
+				switch phase {
+				case "review-risk", "review-readability", "review-reliability", "review-resilience", "review-refuter":
+					phase = strings.TrimPrefix(phase, "review-")
+				}
 				assignment := resolveClaudePhaseAssignment(opts.ClaudeModelAssignments, opts.ClaudePhaseAssignments, phase)
 				contentStr = strings.ReplaceAll(contentStr, "{{CLAUDE_MODEL}}", cmr.ClaudeModelID(assignment.Model))
 				contentStr = injectClaudeEffortFrontmatter(contentStr, assignment)
@@ -1979,6 +1986,25 @@ func hookCommandExists(hooksMap map[string]any, event, command string) bool {
 }
 
 func ensureClaudeSkillRegistryHook(settingsPath string) (bool, error) {
+	// command is platform-aware so the legacy POSIX `|| true` form does not
+	// reach Windows PowerShell 5.1, which fails to parse it.
+	if runtime.GOOS == "windows" {
+		return ensureClaudeSkillRegistryHookWithLegacy(settingsPath,
+			`gentle-ai skill-registry refresh --quiet --no-gitignore --cwd "${CLAUDE_PROJECT_DIR:-$PWD}" || true`,
+			`powershell -NoProfile -Command 'if (Test-Path env:CLAUDE_PROJECT_DIR) { $dir = $env:CLAUDE_PROJECT_DIR } else { $dir = $PWD }; gentle-ai skill-registry refresh --quiet --no-gitignore --cwd "$dir"; exit 0'`)
+	}
+	return ensureClaudeSkillRegistryHookWithLegacy(settingsPath, "",
+		`gentle-ai skill-registry refresh --quiet --no-gitignore --cwd "${CLAUDE_PROJECT_DIR:-$PWD}" || true`)
+}
+
+// ensureClaudeSkillRegistryHookWithLegacy is the platform-independent core of
+// ensureClaudeSkillRegistryHook: it prunes the pre-fix `legacy` hook literal
+// (an empty legacy disables pruning) and then ensures the canonical `command`
+// is present exactly once. Canonical existence is computed AFTER the prune so
+// a settings file that already carries both the legacy and the canonical
+// literals is migrated (prune persisted to disk, changed reported truthfully)
+// instead of gaining a second canonical entry.
+func ensureClaudeSkillRegistryHookWithLegacy(settingsPath, legacy, command string) (bool, error) {
 	root := map[string]any{}
 	if data, err := os.ReadFile(settingsPath); err == nil && len(strings.TrimSpace(string(data))) > 0 {
 		if err := json.Unmarshal(data, &root); err != nil {
@@ -1988,35 +2014,45 @@ func ensureClaudeSkillRegistryHook(settingsPath string) (bool, error) {
 		return false, err
 	}
 
-	const command = `gentle-ai skill-registry refresh --quiet --no-gitignore --cwd "${CLAUDE_PROJECT_DIR:-$PWD}" || true`
-	if claudeHookExists(root, command) {
+	pruned := false
+	if legacy != "" {
+		pruned = pruneLegacyClaudeHook(root, legacy)
+	}
+
+	// Canonical existence is scoped to UserPromptSubmit so a canonical command
+	// registered under a different event (SessionStart, Stop, SubagentStop)
+	// never suppresses the required UserPromptSubmit entry.
+	hooksMap, _ := root["hooks"].(map[string]any)
+	exists := hookCommandExists(hooksMap, "UserPromptSubmit", command)
+	if !pruned && exists {
 		return false, nil
 	}
 
-	hooksRaw, hasHooks := root["hooks"]
-	hooksMap, _ := hooksRaw.(map[string]any)
-	if hasHooks && hooksMap == nil {
-		return false, fmt.Errorf("Claude settings %q has unsupported hooks shape: want object", settingsPath)
-	}
-	if hooksMap == nil {
-		hooksMap = map[string]any{}
-	}
-	promptRaw, hasUserPromptSubmit := hooksMap["UserPromptSubmit"]
-	userPromptSubmit, _ := promptRaw.([]any)
-	if hasUserPromptSubmit && userPromptSubmit == nil {
-		return false, fmt.Errorf("Claude settings %q has unsupported hooks.UserPromptSubmit shape: want array", settingsPath)
-	}
-	userPromptSubmit = append(userPromptSubmit, map[string]any{
-		"matcher": "",
-		"hooks": []any{
-			map[string]any{
-				"type":    "command",
-				"command": command,
+	if !exists {
+		if _, hasHooks := root["hooks"]; hasHooks && hooksMap == nil {
+			return false, fmt.Errorf("Claude settings %q has unsupported hooks shape: want object", settingsPath)
+		}
+		if hooksMap == nil {
+			hooksMap = map[string]any{}
+		}
+
+		promptRaw, hasUserPromptSubmit := hooksMap["UserPromptSubmit"]
+		userPromptSubmit, _ := promptRaw.([]any)
+		if hasUserPromptSubmit && userPromptSubmit == nil {
+			return false, fmt.Errorf("Claude settings %q has unsupported hooks.UserPromptSubmit shape: want array", settingsPath)
+		}
+		userPromptSubmit = append(userPromptSubmit, map[string]any{
+			"matcher": "",
+			"hooks": []any{
+				map[string]any{
+					"type":    "command",
+					"command": command,
+				},
 			},
-		},
-	})
-	hooksMap["UserPromptSubmit"] = userPromptSubmit
-	root["hooks"] = hooksMap
+		})
+		hooksMap["UserPromptSubmit"] = userPromptSubmit
+		root["hooks"] = hooksMap
+	}
 
 	out, err := json.MarshalIndent(root, "", "  ")
 	if err != nil {
@@ -2234,21 +2270,68 @@ func ensureClaudeTelemetryHooks(settingsPath string) (bool, error) {
 	return wr.Changed, nil
 }
 
-func claudeHookExists(root map[string]any, command string) bool {
-	hooksMap, ok := root["hooks"].(map[string]any)
+// pruneLegacyClaudeHook removes any inner-hook entry whose `command` matches
+// `legacy` from the UserPromptSubmit hook in root, mutating the structure
+// in place. Returns true when at least one entry was dropped so the caller
+// can decide whether to persist the change.
+func pruneLegacyClaudeHook(root map[string]any, legacy string) (changed bool) {
+	hooksRaw, ok := root["hooks"].(map[string]any)
 	if !ok {
 		return false
 	}
-	for _, key := range []string{"UserPromptSubmit", "SessionStart", "Stop", "SubagentStop"} {
-		hookEntries, ok := hooksMap[key].([]any)
+	const userPromptSubmit = "UserPromptSubmit"
+	upsRaw, ok := hooksRaw[userPromptSubmit]
+	if !ok {
+		return false
+	}
+	ups, ok := upsRaw.([]any)
+	if !ok {
+		return false
+	}
+	var pruned []any
+	for _, item := range ups {
+		itemMap, ok := item.(map[string]any)
 		if !ok {
+			pruned = append(pruned, item)
 			continue
 		}
-		if claudeHookListContains(hookEntries, command) {
-			return true
+		innerHooks, ok := itemMap["hooks"].([]any)
+		if !ok {
+			pruned = append(pruned, item)
+			continue
 		}
+		var kept []any
+		for _, h := range innerHooks {
+			hMap, ok := h.(map[string]any)
+			if ok && hMap["command"] == legacy {
+				continue
+			}
+			kept = append(kept, h)
+		}
+		if len(kept) == len(innerHooks) {
+			pruned = append(pruned, item)
+			continue
+		}
+		changed = true
+		if len(kept) == 0 {
+			// Drop the whole item. Falling through (not `return`) is what
+			// lets the post-loop `len(pruned) == 0` check delete the
+			// UserPromptSubmit key entirely when no outer entries survive.
+			continue
+		}
+		copyMap := make(map[string]any, len(itemMap))
+		for k, v := range itemMap {
+			copyMap[k] = v
+		}
+		copyMap["hooks"] = kept
+		pruned = append(pruned, copyMap)
 	}
-	return false
+	if len(pruned) == 0 {
+		delete(hooksRaw, userPromptSubmit)
+	} else {
+		hooksRaw[userPromptSubmit] = pruned
+	}
+	return changed
 }
 
 func claudeHookListContains(hookEntries []any, command string) bool {
@@ -2959,6 +3042,7 @@ func renderSessionPreflightPrompt(adapter agents.Adapter, opts InjectOptions) (s
 			rendered = cmr.RenderCodexPhaseEfforts(opts.CodexModelAssignments, opts.CodexCarrilModelAssignments)
 		}
 		content = strings.ReplaceAll(content, "{{CODEX_PHASE_EFFORTS}}", rendered)
+		content = strings.ReplaceAll(content, "{{CODEX_ODD_ASSIGNMENTS}}", model.RenderCodexODDAssignments(opts.CodexPhaseModelAssignments, opts.CodexModelAssignments, opts.CodexCarrilModelAssignments))
 		// Post-check: fail loudly if any placeholder token remains unresolved.
 		if strings.Contains(content, "{{") {
 			return "", fmt.Errorf("inject(codex): unresolved placeholder token '{{' remains in AGENTS.md content after substitution")
@@ -3499,15 +3583,13 @@ func injectModelAssignments(overlayBytes []byte, assignments map[string]model.Mo
 		}
 	}
 
-	// Explicit assignments for existing custom agents are not present in the
-	// managed overlay. Add a minimal overlay definition so the deep merge updates
-	// only the model fields while preserving the user's custom agent settings.
-	// For an empty Effort, omit "variant" so the deep merge preserves the user's
-	// existing variant on the custom agent — owned by the user, not by gentle-ai.
-	// Managed definitions keep clearing the variant on empty effort (see the
-	// case-1 / case-3 contract above and the pinned regression in profiles_test.go).
+	// Explicit assignments for native general/explore need a minimal overlay
+	// entry even when absent from settings. Other non-managed agents are eligible
+	// only when already present in user settings. Deep merge updates their model
+	// while preserving other settings; omitting variant for empty Effort preserves
+	// the user's variant. Managed definitions instead clear it (case 1 above).
 	for agent, assignment := range assignments {
-		if !existingAgentKeys[agent] || assignment.ProviderID == "" || assignment.ModelID == "" {
+		if (!existingAgentKeys[agent] && agent != "general" && agent != "explore") || assignment.ProviderID == "" || assignment.ModelID == "" {
 			continue
 		}
 		if _, managed := agents[agent]; managed {
