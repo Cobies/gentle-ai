@@ -740,6 +740,9 @@ func (s openCodeModelAssignmentSyncStep) Run() error {
 		return fmt.Errorf("discover OpenCode custom agents: %w", err)
 	}
 	allowed := map[string]bool{"gentle-orchestrator": true, "general": true, "explore": true}
+	for _, name := range opencodeactivation.GentleAIODDPhases() {
+		allowed[name] = true
+	}
 	for _, name := range opencodeactivation.JDPhases() {
 		allowed[name] = true
 	}

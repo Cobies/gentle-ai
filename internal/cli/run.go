@@ -1060,6 +1060,13 @@ func (s agentRoutingGuidanceStep) Run() error {
 		if changed && s.changedFiles != nil {
 			*s.changedFiles = append(*s.changedFiles, options.SettingsPath)
 		}
+		parityChanged, err := installOpenCodeODDParityAgents(options.SettingsPath)
+		if err != nil {
+			return fmt.Errorf("install OpenCode ODD parity agents: %w", err)
+		}
+		if parityChanged && s.changedFiles != nil {
+			*s.changedFiles = append(*s.changedFiles, options.SettingsPath)
+		}
 	}
 	return nil
 }
@@ -1074,6 +1081,9 @@ func installOpenCodeReviewProviderRoles(settingsPath string) (bool, error) {
 	overlay, err := json.Marshal(map[string]any{"agent": map[string]any{
 		"gentle-orchestrator": map[string]any{"permission": map[string]any{"task": map[string]any{
 			"review-refuter": "allow", "review-validator": "allow",
+			"gentle-ai-explore": "allow", "gentle-ai-verify": "allow", "gentle-ai-worker": "allow",
+			"jd-judge-a": "allow", "jd-judge-b": "allow", "jd-fix-agent": "allow",
+			"review-risk": "allow", "review-readability": "allow", "review-reliability": "allow", "review-resilience": "allow",
 		}}},
 		"review-refuter": map[string]any{
 			"mode": "subagent", "hidden": true,
@@ -1090,6 +1100,111 @@ func installOpenCodeReviewProviderRoles(settingsPath string) (bool, error) {
 			}},
 		},
 	}})
+	if err != nil {
+		return false, err
+	}
+	merged, err := filemerge.MergeJSONObjects(raw, overlay)
+	if err != nil {
+		return false, err
+	}
+	result, err := filemerge.WriteFileAtomic(settingsPath, merged, 0o644)
+	return result.Changed, err
+}
+
+// openCodeParityAgentSpec is one entry of the parity set from #4471: the
+// Gentle Shell global agents (gentle-ai-explore/verify/worker, the three JD
+// roles, and the four review lenses) ported to OpenCode subagents at
+// functional parity.
+type openCodeParityAgentSpec struct {
+	name        string
+	description string
+	// permission holds only the OpenCode permission keys that diverge from
+	// the platform default ("allow"); omitted keys stay at their default.
+	permission map[string]any
+}
+
+// openCodeParityAgents is the canonical parity source (gentle-pi
+// assets/agents/*.md at 89b8de3b5). Prompt bodies are embedded verbatim (with
+// documented OpenCode-specific adaptations) under internal/assets/opencode/agents.
+// Model and variant are deliberately omitted from every entry so a deep merge
+// never overwrites a user's own model assignment for these agents.
+var openCodeParityAgents = []openCodeParityAgentSpec{
+	{
+		name:        "gentle-ai-explore",
+		description: "Read-only exploration and mapping for generic ODD work.",
+		permission:  map[string]any{"write": "deny", "edit": "deny", "bash": "deny", "task": "deny"},
+	},
+	{
+		name:        "gentle-ai-verify",
+		description: "Read-only technical verification for generic ODD work.",
+		permission:  map[string]any{"write": "deny", "edit": "deny", "task": "deny"},
+	},
+	{
+		name:        "gentle-ai-worker",
+		description: "Scoped package-owned implementation writer for bounded ODD work. Edits code, runs focused tests, and returns review-ready evidence without committing.",
+		permission:  map[string]any{"task": "deny"},
+	},
+	{
+		name:        "jd-judge-a",
+		description: "Judgment Day blind adversarial reviewer A. Read-only; reports findings and does not fix code.",
+		permission:  map[string]any{"write": "deny", "edit": "deny", "task": "deny"},
+	},
+	{
+		name:        "jd-judge-b",
+		description: "Judgment Day blind adversarial reviewer B. Read-only; independently reports findings and does not fix code.",
+		permission:  map[string]any{"write": "deny", "edit": "deny", "task": "deny"},
+	},
+	{
+		name:        "jd-fix-agent",
+		description: "Judgment Day surgical fix agent for confirmed findings. Can edit code and run focused tests.",
+		permission:  map[string]any{"task": "deny"},
+	},
+	{
+		name:        "review-risk",
+		description: "R1 Risk reviewer — security, privilege boundaries, data exposure, dependency risks, and merge-blocking vulnerabilities.",
+		permission:  map[string]any{"write": "deny", "edit": "deny", "bash": "deny", "task": "deny"},
+	},
+	{
+		name:        "review-readability",
+		description: "R2 Readability reviewer — naming, complexity, intention, maintainability, review size, and context clarity.",
+		permission:  map[string]any{"write": "deny", "edit": "deny", "bash": "deny", "task": "deny"},
+	},
+	{
+		name:        "review-reliability",
+		description: "R3 Reliability reviewer — behavior-first tests, coverage value, edge cases, determinism, contracts, and regressions.",
+		permission:  map[string]any{"write": "deny", "edit": "deny", "bash": "deny", "task": "deny"},
+	},
+	{
+		name:        "review-resilience",
+		description: "R4 Resilience reviewer — fallbacks, retry/backoff, graceful degradation, observability, load, rollback, and SLO risks.",
+		permission:  map[string]any{"write": "deny", "edit": "deny", "bash": "deny", "task": "deny"},
+	},
+}
+
+// installOpenCodeODDParityAgents installs the ODD/JD/review-lens subagents at
+// functional parity with Gentle Shell's global agents (#4471). Prior to this,
+// only gentle-orchestrator, gentleman, review-refuter, and review-validator
+// survived the SDD overlay's retirement; JD and the four review lenses were
+// dropped as collateral.
+func installOpenCodeODDParityAgents(settingsPath string) (bool, error) {
+	raw, err := os.ReadFile(settingsPath)
+	if err != nil {
+		return false, err
+	}
+	agentsOverlay := make(map[string]any, len(openCodeParityAgents))
+	for _, spec := range openCodeParityAgents {
+		prompt, err := assets.Read("opencode/agents/" + spec.name + ".md")
+		if err != nil {
+			return false, fmt.Errorf("read embedded prompt for %q: %w", spec.name, err)
+		}
+		agentsOverlay[spec.name] = map[string]any{
+			"mode": "subagent", "hidden": true,
+			"description": spec.description,
+			"prompt":      prompt,
+			"permission":  spec.permission,
+		}
+	}
+	overlay, err := json.Marshal(map[string]any{"agent": agentsOverlay})
 	if err != nil {
 		return false, err
 	}
