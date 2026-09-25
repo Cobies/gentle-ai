@@ -1019,6 +1019,17 @@ func (s agentRoutingGuidanceStep) Run() error {
 
 	targetDir := routingGuidanceDir(s.homeDir, s.workspaceDir, s.scope, adapter)
 
+	if s.agent == model.AgentOpenCode {
+		settingsPath := routingGuidanceOptions(s.homeDir, s.workspaceDir, adapter).SettingsPath
+		changed, err := migrateLegacyOpenCodeAgents(settingsPath)
+		if err != nil {
+			return fmt.Errorf("migrate legacy OpenCode agents: %w", err)
+		}
+		if changed && s.changedFiles != nil {
+			*s.changedFiles = append(*s.changedFiles, settingsPath)
+		}
+	}
+
 	// Strip first: an installation upgraded from an older release still carries
 	// the retired block, and leaving it beside fresh guidance would hand the
 	// agent two conflicting sets of instructions.
@@ -1069,6 +1080,67 @@ func (s agentRoutingGuidanceStep) Run() error {
 		}
 	}
 	return nil
+}
+
+// migrateLegacyOpenCodeAgents runs inside the routing apply step, after the
+// transaction snapshot and before guidance and parity overlays. The v3.7.0
+// marker is ownership proof: retired SDD roles and built-in overrides are
+// removed entirely (their model/variant no longer have a meaningful target).
+// Current roles are reset to model/variant only, so subsequent writers install
+// their current prompt and permissions without retaining obsolete keys.
+func migrateLegacyOpenCodeAgents(settingsPath string) (bool, error) {
+	raw, err := os.ReadFile(settingsPath)
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	root, err := filemerge.UnmarshalJSONObject(raw)
+	if err != nil {
+		return false, err
+	}
+	agents, _ := root["agent"].(map[string]any)
+	current := map[string]bool{
+		"gentle-orchestrator": true, "review-refuter": true, "review-validator": true,
+	}
+	for _, spec := range openCodeParityAgents {
+		current[spec.name] = true
+	}
+	changed := false
+	for name, value := range agents {
+		entry, ok := value.(map[string]any)
+		if !ok || entry["__managed_by"] != "gentle-ai/sdd" {
+			continue
+		}
+		changed = true
+		switch {
+		case name == "general", name == "explore", strings.HasPrefix(name, "sdd-"):
+			delete(agents, name)
+		case current[name]:
+			fresh := map[string]any{}
+			for _, field := range []string{"model", "variant"} {
+				if value, ok := entry[field]; ok {
+					fresh[field] = value
+				}
+			}
+			agents[name] = fresh
+		default:
+			delete(entry, "__managed_by")
+		}
+	}
+	if !changed {
+		return false, nil
+	}
+	// Match the existing OpenCode writers: JSONC input is accepted and the
+	// settings document is normalized to JSON on write, retaining permission
+	// rule order and all unrelated top-level values.
+	encoded, err := filemerge.MarshalJSONPreservingPermissions(raw, root)
+	if err != nil {
+		return false, err
+	}
+	result, err := filemerge.WriteFileAtomic(settingsPath, append(encoded, '\n'), 0o644)
+	return result.Changed, err
 }
 
 // Provider STATUS can issue these roles without SDD. Keep their task permissions
