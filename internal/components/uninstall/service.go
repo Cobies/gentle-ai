@@ -25,6 +25,7 @@ import (
 	"github.com/gentleman-programming/gentle-ai/v3/internal/components/gga"
 	"github.com/gentleman-programming/gentle-ai/v3/internal/components/opencodedefault"
 	"github.com/gentleman-programming/gentle-ai/v3/internal/components/opencoderuntimeplugins"
+	"github.com/gentleman-programming/gentle-ai/v3/internal/components/skills"
 	"github.com/gentleman-programming/gentle-ai/v3/internal/components/telemetryruntime"
 	"github.com/gentleman-programming/gentle-ai/v3/internal/components/theme"
 	"github.com/gentleman-programming/gentle-ai/v3/internal/model"
@@ -932,6 +933,25 @@ func (s *Service) componentOperations(adapter agents.Adapter, componentID model.
 			targets = append(targets, dirPath)
 			ops = append(ops, removeTree(dirPath), removeDirIfEmpty(skillDir))
 		}
+		// _shared may hold user-authored notes, so only the embedded references
+		// the skills component writes are removed, never the whole directory.
+		shared, err := skills.SharedReferencePaths(skillDir)
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, path := range shared {
+			targets = append(targets, path)
+			ops = append(ops, removeFile(path))
+		}
+		ops = append(ops, removeDirIfEmpty(filepath.Join(skillDir, "_shared")))
+		commands, err := skills.AllSkillCommandPaths(homeDir, adapter)
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, path := range commands {
+			targets = append(targets, path)
+			ops = append(ops, removeFile(path), removeDirIfEmpty(filepath.Dir(path)))
+		}
 	case model.ComponentGGA:
 		for _, path := range globalBackupTargets(homeDir) {
 			targets = append(targets, path)
@@ -1611,6 +1631,12 @@ func mergeRewriteOps(a, b operation) operation {
 func compareOperations(a, b operation) int {
 	if a.typeID != b.typeID {
 		return int(a.typeID) - int(b.typeID)
+	}
+	if a.typeID == opRemoveIfEmpty {
+		// Deepest path first: a child directory such as skills/_shared must be
+		// evaluated before its parent, or the parent is still non-empty when
+		// checked and survives an uninstall that emptied it.
+		return strings.Compare(b.path, a.path)
 	}
 	return strings.Compare(a.path, b.path)
 }

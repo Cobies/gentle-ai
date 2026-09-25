@@ -638,6 +638,11 @@ func syncAdapterSkillBackupTargets(homeDir, workspaceDir string, selection model
 				return nil, fmt.Errorf("enumerate %s skill backup targets: %w", adapter.Agent(), err)
 			}
 			paths = append(paths, ordinary...)
+			support, err := skillSupportBackupTargets(componentInjectionDir(homeDir, workspaceDir, adapter), adapter, selection)
+			if err != nil {
+				return nil, err
+			}
+			paths = append(paths, support...)
 		}
 	}
 	return paths, nil

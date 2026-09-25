@@ -37,7 +37,7 @@ Parity set (canonical source: gentle-pi `assets/agents/*.md` at 89b8de3b5): `gen
 ## Tasks
 
 - [x] T1 — Install parity agents for OpenCode (embedded prompts, permissions from Gentle Shell tool sets), orchestrator routing, model assignment/picker allowlist, parity inventory test. Route: delegated (writer trigger: 2+ non-trivial files).
-- [ ] T2 — Upgrade migration: strip `__managed_by`, remove owned retired entries, replace owned current-role entries; regression tests from a v3.7.0 config fixture. Route: delegated (same writer, sequential).
+- [x] T2 — Upgrade migration: strip `__managed_by`, remove owned retired entries, replace owned current-role entries; regression tests from a v3.7.0 config fixture. Route: delegated (same writer, sequential).
 - [ ] T4 — Restore non-SDD assets dropped by the SDD retirement (authorized by user 2026-09-25): install `skills/_shared/*` still referenced by orchestrators/skills (skill-resolver, engram-convention, persistence-contract, research-lifecycle, review-ledger-contract(-pi), README) for every runtime that installed them in v3.7.0, under a non-SDD owner; restore `skill-creator`/`skill-registry` commands for OpenCode, Kilo, Qwen; restore OpenCode `default_agent: gentle-orchestrator` (with existing opencodedefault ownership file) and `share: disabled`. Tests: per-runtime install inventory asserts every `_shared/*.md` referenced by installed orchestrator/skills exists (no dangling refs); OpenCode default_agent/share asserted. Route: delegated (writer trigger).
 - [ ] T3 — Sandbox e2e: fresh install + upgrade from v3.7.0 config in isolated HOME (no Homebrew on PATH), idempotent re-run. Route: inline (bounded action).
 
@@ -71,6 +71,10 @@ Forecast: ~700 authored lines + ~600 copied prompt lines. Strategy: ask-on-risk 
 - 2026-09-25: T1 review granted by user → lineage review-482425bf66d8e129 (1 lens: review-reliability) APPROVED and acknowledged (authority burned). Advisory non-blocking finding R3-001 (WARNING, internal/cli/run.go:1150). Reviewed boundary → 72519acad.
 - 2026-09-25: user authorized finishing everything through PR + merge while away, testing that everything works first; user pre-authorized granting review consent for remaining candidates. T2 delegated (gentle-ai-worker muhfqpvl-4-q4gc).
 
+- 2026-09-25: T2 done (writer muhfqpvl-4-q4gc reported partial only because full `internal/cli` failed under the real HOME). Parent ran `go test ./internal/cli/ -count=1` in an isolated `env -i` HOME on base 6c7f162f4 and on the branch in parallel: identical 3 failures on both (TestReviewLifecycleBootstrapsGenuinelyUnversionedWorkspace, TestReviewStartOutsideAnyRepositoryBootstrapsLocalGitAndContinuesToEmptyCandidateRefusal, TestReviewStatusSelectorFreeResolvesRepositoryRoot — no git identity in env -i); no branch-only failures. Commit b674adf58. Review assess (base 72519acad): medium, review_due=false, under_budget → pending in slice. T4 delegated (gentle-ai-worker muhh98a9-5-oocb).
+
+- 2026-09-26: T4 first pass (writer muhh98a9-5-oocb, partial): `_shared` owned by skills component, skill commands by skills component, OpenCode default_agent/share by OpenCode routing step + opencodedefault. Parent decisions (user asleep; rule = no regression vs last release v3.7.0, main's post-retirement semantics never shipped): keep v3.7.0 default_agent overwrite+previous_default; restore Kilo share=disabled; restore `_shared` in `~/.agents/skills` compat root; exclude odd-orchestrator-sections.md; fix uninstall removeIfEmpty ordering. internal/app TempDir cleanup failure reproduced on base under env -i (environmental). Follow-up delegated (muhje48q-6-6jvn).
+
 ## Next step
 
-T2 verify/commit/review → T4 → T3 e2e → PR → merge.
+T4 verify/commit/review → T3 e2e → PR → merge.

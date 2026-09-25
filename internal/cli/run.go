@@ -1019,8 +1019,15 @@ func (s agentRoutingGuidanceStep) Run() error {
 
 	targetDir := routingGuidanceDir(s.homeDir, s.workspaceDir, s.scope, adapter)
 
+	var defaultAgentPlan *opencodedefault.InstallPlan
 	if s.agent == model.AgentOpenCode {
 		settingsPath := routingGuidanceOptions(s.homeDir, s.workspaceDir, adapter).SettingsPath
+		// The default-agent plan must observe settings before the managed
+		// orchestrator is merged below; see opencodedefault.PrepareInstall.
+		defaultAgentPlan, err = opencodedefault.PrepareInstall(settingsPath)
+		if err != nil {
+			return fmt.Errorf("prepare OpenCode default agent: %w", err)
+		}
 		changed, err := migrateLegacyOpenCodeAgents(settingsPath)
 		if err != nil {
 			return fmt.Errorf("migrate legacy OpenCode agents: %w", err)
@@ -1063,6 +1070,18 @@ func (s agentRoutingGuidanceStep) Run() error {
 		}
 		s.recordChanged(policy)
 	}
+	if s.agent == model.AgentKilocode {
+		// Kilo reads an OpenCode-compatible config; v3.7.0 disabled sharing
+		// there too, only when the user had not chosen a mode (#4471).
+		settingsPath := adapter.SettingsPath(targetDir)
+		shareChanged, err := opencodedefault.ApplyShareDefault(settingsPath)
+		if err != nil {
+			return fmt.Errorf("default Kilo share mode: %w", err)
+		}
+		if shareChanged && s.changedFiles != nil {
+			*s.changedFiles = append(*s.changedFiles, settingsPath)
+		}
+	}
 	if s.agent == model.AgentOpenCode {
 		changed, err := installOpenCodeReviewProviderRoles(options.SettingsPath)
 		if err != nil {
@@ -1076,6 +1095,22 @@ func (s agentRoutingGuidanceStep) Run() error {
 			return fmt.Errorf("install OpenCode ODD parity agents: %w", err)
 		}
 		if parityChanged && s.changedFiles != nil {
+			*s.changedFiles = append(*s.changedFiles, options.SettingsPath)
+		}
+		// default_agent and share were owned by the retired SDD overlay; the
+		// OpenCode routing owner restores them with v3.7.0 semantics (#4471).
+		defaultChanged, err := defaultAgentPlan.Apply()
+		if err != nil {
+			return fmt.Errorf("set OpenCode default agent: %w", err)
+		}
+		if defaultChanged && s.changedFiles != nil {
+			*s.changedFiles = append(*s.changedFiles, options.SettingsPath, opencodedefault.OwnershipPath(options.SettingsPath))
+		}
+		shareChanged, err := opencodedefault.ApplyShareDefault(options.SettingsPath)
+		if err != nil {
+			return fmt.Errorf("default OpenCode share mode: %w", err)
+		}
+		if shareChanged && s.changedFiles != nil {
 			*s.changedFiles = append(*s.changedFiles, options.SettingsPath)
 		}
 	}
@@ -2650,9 +2685,27 @@ func adapterSkillBackupTargets(homeDir, workspaceDir string, scope InstallScope,
 				return nil, fmt.Errorf("enumerate %s skill backup targets: %w", adapter.Agent(), err)
 			}
 			paths = append(paths, ordinary...)
+			support, err := skillSupportBackupTargets(componentInjectionDirScoped(homeDir, workspaceDir, scope, adapter), adapter, selection)
+			if err != nil {
+				return nil, err
+			}
+			paths = append(paths, support...)
 		}
 	}
 	return paths, nil
+}
+
+// skillSupportBackupTargets declares the shared references, skill commands,
+// and obsolete shared marker the skills component writes or removes.
+func skillSupportBackupTargets(targetDir string, adapter agents.Adapter, selection model.Selection) ([]string, error) {
+	support, err := skills.SupportFilePaths(targetDir, adapter, selectedSkillIDs(selection))
+	if err != nil {
+		return nil, fmt.Errorf("enumerate %s skill support backup targets: %w", adapter.Agent(), err)
+	}
+	if skillDir := adapter.SkillsDir(targetDir); skillDir != "" {
+		support = append(support, skills.LegacySharedMarkerPath(skillDir))
+	}
+	return support, nil
 }
 
 // claudeMCPSettingsCleanupPaths returns legacy Claude settings files that MCP
@@ -2704,6 +2757,9 @@ func routingGuidancePaths(homeDir, workspaceDir string, scope InstallScope, adap
 			continue
 		}
 		paths = append(paths, routing...)
+		if adapter.Agent() == model.AgentOpenCode && options.SettingsPath != "" {
+			paths = append(paths, opencodedefault.OwnershipPath(options.SettingsPath))
+		}
 	}
 	return paths
 }
@@ -2806,6 +2862,13 @@ func componentPathsWithWorkspaceScoped(homeDir, workspaceDir string, scope Insta
 				path := skills.SkillPathForAgent(targetDir, adapter, skillID)
 				if path != "" {
 					paths = append(paths, path)
+				}
+			}
+			if len(selectedSkillIDs(selection)) > 0 {
+				// Enumeration only fails on a corrupt build; the skills step then
+				// fails loudly while writing, so no path is declared here.
+				if support, err := skills.SupportFilePaths(targetDir, adapter, selectedSkillIDs(selection)); err == nil {
+					paths = append(paths, support...)
 				}
 			}
 		case model.ComponentContext7:

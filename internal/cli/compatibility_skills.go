@@ -106,6 +106,15 @@ func compatibilitySkillPaths(skillDir string, components []model.ComponentID, se
 		for _, path := range prospective {
 			paths[path] = struct{}{}
 		}
+		// The compatibility refresh also owns the shared references and the
+		// obsolete marker it removes, as it did in v3.7.0 (#4471).
+		shared, err := skills.SharedReferencePaths(skillDir)
+		if err != nil {
+			return nil, fmt.Errorf("enumerate compatibility shared references: %w", err)
+		}
+		for _, path := range append(shared, skills.LegacySharedMarkerPath(skillDir)) {
+			paths[path] = struct{}{}
+		}
 	}
 	files := make([]string, 0, len(paths))
 	for path := range paths {
@@ -189,6 +198,14 @@ func (s compatibilitySkillsRefreshStep) Run() error {
 			}
 			if result.Changed {
 				changed = append(changed, result.Files...)
+			}
+			marker := skills.LegacySharedMarkerPath(skillDir)
+			removed, removeErr := writer.Remove(marker)
+			if removeErr != nil {
+				return fmt.Errorf("remove legacy compatibility shared marker: %w", removeErr)
+			}
+			if removed {
+				changed = append(changed, marker)
 			}
 		}
 	}
