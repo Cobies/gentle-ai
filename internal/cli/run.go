@@ -1028,9 +1028,21 @@ func (s agentRoutingGuidanceStep) Run() error {
 		if err != nil {
 			return fmt.Errorf("prepare OpenCode default agent: %w", err)
 		}
-		changed, err := migrateLegacyOpenCodeAgents(settingsPath)
+		changed, err := migrateLegacyOpenCodeAgents(settingsPath, model.AgentOpenCode)
 		if err != nil {
 			return fmt.Errorf("migrate legacy OpenCode agents: %w", err)
+		}
+		if changed && s.changedFiles != nil {
+			*s.changedFiles = append(*s.changedFiles, settingsPath)
+		}
+	}
+	if s.agent == model.AgentKilocode {
+		// Kilo received the same marked v3.7.0 overlay (#4471). Migrate before
+		// routing injection so a marked orchestrator prompt is not preserved.
+		settingsPath := adapter.SettingsPath(targetDir)
+		changed, err := migrateLegacyOpenCodeAgents(settingsPath, model.AgentKilocode)
+		if err != nil {
+			return fmt.Errorf("migrate legacy Kilo agents: %w", err)
 		}
 		if changed && s.changedFiles != nil {
 			*s.changedFiles = append(*s.changedFiles, settingsPath)
@@ -1081,9 +1093,20 @@ func (s agentRoutingGuidanceStep) Run() error {
 		if shareChanged && s.changedFiles != nil {
 			*s.changedFiles = append(*s.changedFiles, settingsPath)
 		}
+		rolesChanged, err := installOpenCodeReviewProviderRoles(settingsPath, model.AgentKilocode)
+		if err != nil {
+			return fmt.Errorf("install Kilo review provider roles: %w", err)
+		}
+		parityChanged, err := installOpenCodeFamilyParityAgents(settingsPath, model.AgentKilocode)
+		if err != nil {
+			return fmt.Errorf("install Kilo parity agents: %w", err)
+		}
+		if (rolesChanged || parityChanged) && s.changedFiles != nil {
+			*s.changedFiles = append(*s.changedFiles, settingsPath)
+		}
 	}
 	if s.agent == model.AgentOpenCode {
-		changed, err := installOpenCodeReviewProviderRoles(options.SettingsPath)
+		changed, err := installOpenCodeReviewProviderRoles(options.SettingsPath, model.AgentOpenCode)
 		if err != nil {
 			return fmt.Errorf("install OpenCode review provider roles: %w", err)
 		}
@@ -1122,8 +1145,10 @@ func (s agentRoutingGuidanceStep) Run() error {
 // marker is ownership proof: retired SDD roles and built-in overrides are
 // removed entirely (their model/variant no longer have a meaningful target).
 // Current roles are reset to model/variant only, so subsequent writers install
-// their current prompt and permissions without retaining obsolete keys.
-func migrateLegacyOpenCodeAgents(settingsPath string) (bool, error) {
+// their current prompt and permissions without retaining obsolete keys. The
+// current role set is per runtime: Kilo shares the OpenCode config format but
+// not the full role set (see openCodeFamilyManagedRoles).
+func migrateLegacyOpenCodeAgents(settingsPath string, agent model.AgentID) (bool, error) {
 	raw, err := os.ReadFile(settingsPath)
 	if os.IsNotExist(err) {
 		return false, nil
@@ -1136,11 +1161,9 @@ func migrateLegacyOpenCodeAgents(settingsPath string) (bool, error) {
 		return false, err
 	}
 	agents, _ := root["agent"].(map[string]any)
-	current := map[string]bool{
-		"gentle-orchestrator": true, "review-refuter": true, "review-validator": true,
-	}
-	for _, spec := range openCodeParityAgents {
-		current[spec.name] = true
+	current := map[string]bool{"gentle-orchestrator": true}
+	for _, name := range openCodeFamilyManagedRoles(agent) {
+		current[name] = true
 	}
 	changed := false
 	for name, value := range agents {
@@ -1178,35 +1201,53 @@ func migrateLegacyOpenCodeAgents(settingsPath string) (bool, error) {
 	return result.Changed, err
 }
 
+// openCodeFamilyManagedRoles lists the subagents the routing owner installs for
+// an OpenCode-compatible runtime, in the v3.7.0 shape for that runtime. Kilo
+// never received review-validator (it hosts no provider relay to issue it) nor
+// the gentle-ai-* ODD trio (its rendered orchestrator routing names no
+// subagents, so it delegates to Kilo's native agents).
+func openCodeFamilyManagedRoles(agent model.AgentID) []string {
+	names := []string{"review-refuter"}
+	if agent == model.AgentOpenCode {
+		names = append(names, "review-validator")
+	}
+	for _, spec := range openCodeFamilyParityAgents(agent) {
+		names = append(names, spec.name)
+	}
+	return names
+}
+
 // Provider STATUS can issue these roles without SDD. Keep their task permissions
 // with the OpenCode routing owner, not with the retired SDD overlay.
-func installOpenCodeReviewProviderRoles(settingsPath string) (bool, error) {
+func installOpenCodeReviewProviderRoles(settingsPath string, agent model.AgentID) (bool, error) {
 	raw, err := os.ReadFile(settingsPath)
 	if err != nil {
 		return false, err
 	}
-	overlay, err := json.Marshal(map[string]any{"agent": map[string]any{
-		"gentle-orchestrator": map[string]any{"permission": map[string]any{"task": map[string]any{
-			"review-refuter": "allow", "review-validator": "allow",
-			"gentle-ai-explore": "allow", "gentle-ai-verify": "allow", "gentle-ai-worker": "allow",
-			"jd-judge-a": "allow", "jd-judge-b": "allow", "jd-fix-agent": "allow",
-			"review-risk": "allow", "review-readability": "allow", "review-reliability": "allow", "review-resilience": "allow",
-		}}},
+	task := map[string]any{}
+	for _, name := range openCodeFamilyManagedRoles(agent) {
+		task[name] = "allow"
+	}
+	roles := map[string]any{
+		"gentle-orchestrator": map[string]any{"permission": map[string]any{"task": task}},
 		"review-refuter": map[string]any{
 			"mode": "subagent", "hidden": true,
 			"description": "Read-only refuter for provider-issued review findings",
 			"prompt":      "Evaluate only the Go-issued review refuter task. Inspect only the frozen candidate through the provided commands. Do not edit files or delegate. Return only the requested result.",
 			"permission":  map[string]any{"write": "deny", "edit": "deny", "task": "deny"},
 		},
-		"review-validator": map[string]any{
+	}
+	if agent == model.AgentOpenCode {
+		roles["review-validator"] = map[string]any{
 			"mode": "subagent", "hidden": true,
 			"description": "Targeted read-only validator for provider-issued review checks",
 			"prompt":      "Execute only the Go-issued targeted validation. Do not edit files or delegate. Inspect only the frozen candidate using the provided gentle-ai review inspect-candidate command, not the live worktree. Return exactly the requested JSON.",
 			"permission": map[string]any{"write": "deny", "edit": "deny", "task": "deny", "bash": map[string]any{
 				"gentle-ai review inspect-candidate --purpose targeted-validation *": "allow", "*": "deny",
 			}},
-		},
-	}})
+		}
+	}
+	overlay, err := json.Marshal(map[string]any{"agent": roles})
 	if err != nil {
 		return false, err
 	}
@@ -1294,12 +1335,33 @@ var openCodeParityAgents = []openCodeParityAgentSpec{
 // survived the SDD overlay's retirement; JD and the four review lenses were
 // dropped as collateral.
 func installOpenCodeODDParityAgents(settingsPath string) (bool, error) {
+	return installOpenCodeFamilyParityAgents(settingsPath, model.AgentOpenCode)
+}
+
+// openCodeFamilyParityAgents returns the parity specs installed for an
+// OpenCode-compatible runtime. Kilo keeps the v3.7.0 JD and review-lens set
+// with the same prompts and permissions, without the gentle-ai-* ODD trio.
+func openCodeFamilyParityAgents(agent model.AgentID) []openCodeParityAgentSpec {
+	if agent == model.AgentOpenCode {
+		return openCodeParityAgents
+	}
+	specs := make([]openCodeParityAgentSpec, 0, len(openCodeParityAgents))
+	for _, spec := range openCodeParityAgents {
+		if !strings.HasPrefix(spec.name, "gentle-ai-") {
+			specs = append(specs, spec)
+		}
+	}
+	return specs
+}
+
+func installOpenCodeFamilyParityAgents(settingsPath string, agent model.AgentID) (bool, error) {
 	raw, err := os.ReadFile(settingsPath)
 	if err != nil {
 		return false, err
 	}
-	agentsOverlay := make(map[string]any, len(openCodeParityAgents))
-	for _, spec := range openCodeParityAgents {
+	specs := openCodeFamilyParityAgents(agent)
+	agentsOverlay := make(map[string]any, len(specs))
+	for _, spec := range specs {
 		prompt, err := assets.Read("opencode/agents/" + spec.name + ".md")
 		if err != nil {
 			return false, fmt.Errorf("read embedded prompt for %q: %w", spec.name, err)
