@@ -25,6 +25,108 @@ import (
 	"github.com/gentleman-programming/gentle-ai/v3/internal/model"
 )
 
+func TestEngramSelectedSettingsRefuseNestedCommentsAndLockedMode(t *testing.T) {
+	for _, tc := range []struct {
+		name, content string
+		mode          os.FileMode
+	}{
+		{"nested comments", "{\"mcp\":{\"other\":{/* keep */\"type\":\"remote\"}}}\n", 0o600},
+		{"locked mode", "{\"mcp\":{}}\n", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if runtime.GOOS == "windows" && tc.mode != 0o600 {
+				t.Skip("file permission bits are not supported on Windows")
+			}
+			path := filepath.Join(t.TempDir(), "opencode.jsonc")
+			if err := os.WriteFile(path, []byte(tc.content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(path, tc.mode); err != nil {
+				t.Fatal(err)
+			}
+			_, err := InjectWithOptions(t.TempDir(), opencodeAdapter(), InjectOptions{OpenCodeSettingsPath: path})
+			if err == nil || !strings.Contains(err.Error(), "refuse") {
+				t.Fatalf("want actionable refusal, got %v", err)
+			}
+			info, statErr := os.Stat(path)
+			if statErr != nil {
+				t.Fatal(statErr)
+			}
+			if runtime.GOOS != "windows" && info.Mode().Perm() != tc.mode {
+				t.Fatalf("settings mode changed: %04o", info.Mode().Perm())
+			}
+			if err := os.Chmod(path, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			got, readErr := os.ReadFile(path)
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if string(got) != tc.content {
+				t.Fatalf("settings bytes changed: %q", got)
+			}
+		})
+	}
+}
+
+func TestEngramSelectedSettingsPreservePrivateMode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "opencode.jsonc")
+	if err := os.WriteFile(path, []byte("{\"mcp\":{}}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mergeJSONFile(path, []byte(`{"mcp":{"engram":{"type":"local"}}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS == "windows" {
+		return // POSIX permission bits are not preserved on Windows.
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("settings mode = %v, error = %v; want 0600", info, err)
+	}
+}
+
+// The selected-settings refusal is OpenCode-only; the shared merge helper keeps
+// the base writer behavior for other agents' dotfiles-managed (symlinked) files.
+func TestSharedMergeKeepsBaseWriterBehaviorForSymlinkedSettings(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "dotfiles.json")
+	settings := filepath.Join(dir, "settings.json")
+	original := []byte("{\"mcpServers\":{}}\n")
+	if err := os.WriteFile(target, original, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, settings); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	_, err := mergeJSONFile(settings, []byte(`{"mcpServers":{"engram":{"command":"engram"}}}`))
+	if err == nil || !strings.Contains(err.Error(), "refusing to read symlink") || strings.Contains(err.Error(), "select a regular settings file") {
+		t.Fatalf("mergeJSONFile() error = %v; want base writer symlink error, not the OpenCode refusal", err)
+	}
+	if link, err := os.Readlink(settings); err != nil || link != target {
+		t.Fatalf("settings symlink changed: %q, %v", link, err)
+	}
+	if got, err := os.ReadFile(target); err != nil || !bytes.Equal(got, original) {
+		t.Fatalf("settings target changed: %q, %v", got, err)
+	}
+}
+
+func TestEngramSelectedSettingsRefuseSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "user.jsonc")
+	selected := filepath.Join(dir, "opencode.jsonc")
+	if err := os.WriteFile(target, []byte("{\"mcp\":{}}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, selected); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	_, err := InjectWithOptions(t.TempDir(), opencodeAdapter(), InjectOptions{OpenCodeSettingsPath: selected})
+	if err == nil || !strings.Contains(err.Error(), "select a regular settings file") {
+		t.Fatalf("InjectWithOptions() error = %v; want OpenCode symlink refusal", err)
+	}
+}
+
 func claudeAdapter() agents.Adapter   { return claude.NewAdapter() }
 func opencodeAdapter() agents.Adapter { return opencode.NewAdapter() }
 func codexAdapter() agents.Adapter    { return codex.NewAdapter() }
@@ -1195,6 +1297,51 @@ func TestInjectCodexIsIdempotent(t *testing.T) {
 	count := strings.Count(string(content), "[mcp_servers.engram]")
 	if count != 1 {
 		t.Fatalf("config.toml has %d [mcp_servers.engram] blocks, want exactly 1; got:\n%s", count, string(content))
+	}
+}
+
+func TestInjectCodexPreservesEngramHeaderInsideMultilineString(t *testing.T) {
+	validCodexRuntime(t)
+	home := t.TempDir()
+	configPath := filepath.Join(home, ".codex", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll error = %v", err)
+	}
+	instructions := `developer_instructions = """
+Example config:
+[mcp_servers.engram]
+command = "fake"
+Keep this text.
+"""`
+	if err := os.WriteFile(configPath, []byte(instructions+"\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(config.toml) error = %v", err)
+	}
+
+	if _, err := Inject(home, codexAdapter()); err != nil {
+		t.Fatalf("Inject(codex) first error = %v", err)
+	}
+	second, err := Inject(home, codexAdapter())
+	if err != nil {
+		t.Fatalf("Inject(codex) second error = %v", err)
+	}
+	if second.Changed {
+		t.Fatalf("Inject(codex) second changed = true (should be idempotent)")
+	}
+
+	content, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("ReadFile(config.toml) error = %v", err)
+	}
+	text := string(content)
+	if !strings.Contains(text, instructions) {
+		t.Fatalf("developer_instructions was not preserved byte-for-byte; got:\n%s", text)
+	}
+	// One header lives in the preserved string, the other is the managed block.
+	if count := strings.Count(text, "[mcp_servers.engram]"); count != 2 {
+		t.Fatalf("config.toml has %d [mcp_servers.engram] lines, want 2; got:\n%s", count, text)
+	}
+	if !strings.Contains(text, `"--tools=agent"`) {
+		t.Fatalf("config.toml missing managed engram block; got:\n%s", text)
 	}
 }
 
@@ -2685,5 +2832,95 @@ func TestInjectCodexNilOrchestratorAssignmentPreservesTopLevelModel(t *testing.T
 	}
 	if !strings.Contains(string(content), `model = "user-model"`) || !strings.Contains(string(content), `model_reasoning_effort = "high"`) {
 		t.Fatalf("nil assignment clobbered top-level model:\n%s", content)
+	}
+}
+
+func TestUpsertCodexTableKeyBeforeMCPServersKeepsMCPBlocksAtEOF(t *testing.T) {
+	tests := []struct {
+		name, content, want string
+	}{
+		{
+			name:    "missing table goes before existing MCP block",
+			content: "[mcp_servers.context7]\nurl = \"https://mcp.context7.com/mcp\"\n",
+			want:    "[features]\nmulti_agent = true\n\n[mcp_servers.context7]\nurl = \"https://mcp.context7.com/mcp\"\n",
+		},
+		{
+			name:    "missing table without MCP blocks is appended",
+			content: "model = \"gpt\"\n",
+			want:    "model = \"gpt\"\n\n[features]\nmulti_agent = true\n",
+		},
+		{
+			name:    "existing table is updated in place",
+			content: "[mcp_servers.context7]\nurl = \"u\"\n\n[features]\nmulti_agent = false\n",
+			want:    "[mcp_servers.context7]\nurl = \"u\"\n\n[features]\nmulti_agent = true\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := upsertCodexTableKeyBeforeMCPServers(tt.content, "features", "multi_agent", "true"); got != tt.want {
+				t.Fatalf("upsert =\n%q\nwant\n%q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestUpsertCodexTableKeyBeforeMCPServersIgnoresMultilineStrings pins that an
+// MCP table header written inside a TOML multiline string is text, not the
+// first MCP block: the new table must land after the string and before the
+// real MCP block instead of splitting the string.
+func TestUpsertCodexTableKeyBeforeMCPServersIgnoresMultilineStrings(t *testing.T) {
+	for _, delimiter := range []string{`"""`, "'''"} {
+		content := "developer_instructions = " + delimiter + "\nExample:\n[mcp_servers.docs]\n" + delimiter + "\n\n[mcp_servers.context7]\ncommand = \"npx\"\n"
+		got := upsertCodexTableKeyBeforeMCPServers(content, "features", "multi_agent", "true")
+		stringEnd := strings.LastIndex(got, delimiter)
+		table := strings.Index(got, "[features]\n")
+		mcp := strings.Index(got, "[mcp_servers.context7]")
+		if table < 0 || table < stringEnd || table > mcp {
+			t.Fatalf("delimiter %s: [features] must be inserted after the multiline string and before the real MCP block:\n%s", delimiter, got)
+		}
+		if !strings.Contains(got, "Example:\n[mcp_servers.docs]\n"+delimiter) {
+			t.Fatalf("delimiter %s: multiline string text was altered:\n%s", delimiter, got)
+		}
+	}
+}
+
+// TestUpsertCodexTableKeyBeforeMCPServersIgnoresTargetHeaderInMultilineStrings
+// pins #5022: a [features] line inside developer_instructions is text, so the
+// key must go to a real [features] table created outside the string, with or
+// without an MCP block after it.
+func TestUpsertCodexTableKeyBeforeMCPServersIgnoresTargetHeaderInMultilineStrings(t *testing.T) {
+	for _, delimiter := range []string{`"""`, "'''"} {
+		instructions := "developer_instructions = " + delimiter + "\n[features]\nmulti_agent = false\n" + delimiter + "\n"
+		for _, tail := range []string{"", "\n[mcp_servers.context7]\ncommand = \"npx\"\n"} {
+			got := upsertCodexTableKeyBeforeMCPServers(instructions+tail, "features", "multi_agent", "true")
+			if !strings.HasPrefix(got, instructions) {
+				t.Fatalf("delimiter %s tail %q: multiline string text was altered:\n%s", delimiter, tail, got)
+			}
+			table := strings.Index(got, delimiter+"\n\n[features]\nmulti_agent = true\n")
+			if table < 0 {
+				t.Fatalf("delimiter %s tail %q: [features] must be created after the multiline string:\n%s", delimiter, tail, got)
+			}
+			if mcp := strings.Index(got, "[mcp_servers.context7]"); tail != "" && (mcp < 0 || mcp < table) {
+				t.Fatalf("delimiter %s: [features] must stay before the MCP block:\n%s", delimiter, got)
+			}
+		}
+	}
+}
+
+// TestUpsertCodexTableKeyBeforeMCPServersIgnoresDelimitersInStringsAndComments
+// pins that a triple-quote sequence inside an ordinary string or a comment
+// does not open a multiline string, so the real MCP block is still found.
+func TestUpsertCodexTableKeyBeforeMCPServersIgnoresDelimitersInStringsAndComments(t *testing.T) {
+	for _, prefix := range []string{
+		"note = '\"\"\"'\n",
+		"# a comment with \"\"\" in it\n",
+	} {
+		content := prefix + "\n[mcp_servers.context7]\ncommand = \"npx\"\n"
+		got := upsertCodexTableKeyBeforeMCPServers(content, "features", "multi_agent", "true")
+		table := strings.Index(got, "[features]\n")
+		mcp := strings.Index(got, "[mcp_servers.context7]")
+		if table < 0 || table > mcp {
+			t.Fatalf("prefix %q: [features] must be inserted before the MCP block:\n%s", prefix, got)
+		}
 	}
 }

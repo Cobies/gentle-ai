@@ -170,6 +170,9 @@ func vsCodeEngramOverlayJSON(cmd string) []byte {
 // InjectOptions carries optional configuration for an Inject call.
 // Zero value is always safe — all fields have documented defaults.
 type InjectOptions struct {
+	// OpenCodeSettingsPath overrides only the OpenCode MCP settings merge target.
+	// Empty preserves adapter resolution for other callers and agents.
+	OpenCodeSettingsPath string
 	// CodexMultiAgent controls whether features.multi_agent is written as true
 	// in ~/.codex/config.toml. Default (false) writes multi_agent = false, which
 	// is the safe no-op value for the experimental Codex multi-agent tool set.
@@ -347,8 +350,16 @@ func injectWithOptions(configHomeDir, promptDir string, adapter agents.Adapter, 
 
 	case model.StrategyMergeIntoSettings:
 		settingsPath := adapter.SettingsPath(configHomeDir)
+		if adapter.Agent() == model.AgentOpenCode && opts.OpenCodeSettingsPath != "" {
+			settingsPath = opts.OpenCodeSettingsPath
+		}
 		if settingsPath == "" {
 			break
+		}
+		if adapter.Agent() == model.AgentOpenCode {
+			if err := filemerge.RefuseLockedSettingsFile(settingsPath); err != nil {
+				return InjectionResult{}, err
+			}
 		}
 		overlay := engramOverlayJSON(adapter.Agent(), stableEngramCommandForMergedConfig(settingsPath, adapter.Agent()))
 		if adapter.Agent() == model.AgentOpenCode {
@@ -472,9 +483,9 @@ func injectWithOptions(configHomeDir, promptDir string, adapter agents.Adapter, 
 		// orchestrator asset gracefully falls back to solo execution if the multi-agent
 		// tools are unavailable in the session. agents.max_threads/max_depth carry
 		// conservative defaults.
-		withFeatures := filemerge.UpsertTOMLTableKey(existing, "features", "multi_agent", "true")
-		withMaxThreads := filemerge.UpsertTOMLTableKey(withFeatures, "agents", "max_threads", "4")
-		withMaxDepth := filemerge.UpsertTOMLTableKey(withMaxThreads, "agents", "max_depth", "2")
+		withFeatures := upsertCodexTableKeyBeforeMCPServers(existing, "features", "multi_agent", "true")
+		withMaxThreads := upsertCodexTableKeyBeforeMCPServers(withFeatures, "agents", "max_threads", "4")
+		withMaxDepth := upsertCodexTableKeyBeforeMCPServers(withMaxThreads, "agents", "max_depth", "2")
 
 		// Step 2 — top-level instruction-file keys (before the first section header).
 		withInstr := filemerge.UpsertTopLevelTOMLString(withMaxDepth, "model_instructions_file", instructionsPath)
@@ -561,6 +572,40 @@ func injectWithOptions(configHomeDir, promptDir string, adapter agents.Adapter, 
 	}
 
 	return InjectionResult{Changed: changed, Files: files}, nil
+}
+
+// upsertCodexTableKeyBeforeMCPServers behaves like filemerge.UpsertTOMLTableKey,
+// except that a missing table is created before the first [mcp_servers.*]
+// table instead of at EOF. Context7 and Engram both strip and re-append their
+// MCP block at EOF, so MCP servers must stay contiguous at the end of the file:
+// a table appended after an existing MCP block would be reordered by the next
+// Context7 upsert, and install and sync would never produce the same bytes.
+func upsertCodexTableKeyBeforeMCPServers(content, section, key, rawValue string) string {
+	content = strings.ReplaceAll(content, "\r\n", "\n")
+	lines := strings.Split(content, "\n")
+	firstMCP := -1
+	// Table headers are only recognized outside TOML multiline strings, so a
+	// developer_instructions value that mentions "[mcp_servers.x]" is text.
+	var multiline byte
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		inString := multiline != 0
+		multiline = filemerge.ScanTOMLMultilineString(line, multiline)
+		if inString {
+			continue
+		}
+		if trimmed == "["+section+"]" {
+			return filemerge.UpsertTOMLTableKey(content, section, key, rawValue)
+		}
+		if firstMCP < 0 && strings.HasPrefix(trimmed, "[mcp_servers.") {
+			firstMCP = i
+		}
+	}
+	if firstMCP < 0 {
+		return filemerge.UpsertTOMLTableKey(content, section, key, rawValue)
+	}
+	head := filemerge.UpsertTOMLTableKey(strings.Join(lines[:firstMCP], "\n"), section, key, rawValue)
+	return head + "\n" + strings.Join(lines[firstMCP:], "\n")
 }
 
 func injectClaudeUserConfig(homeDir string, adapter agents.Adapter) (InjectionResult, error) {
@@ -697,7 +742,7 @@ func mergeJSONFile(path string, overlay []byte) (filemerge.WriteResult, error) {
 		return filemerge.WriteResult{}, err
 	}
 
-	return filemerge.WriteFileAtomic(path, merged, 0o644)
+	return filemerge.WriteFileAtomic(path, merged, filemerge.ExistingFileMode(path, 0o644))
 }
 
 var osReadFile = func(path string) ([]byte, error) {
