@@ -74,7 +74,8 @@ var ErrMissingReviewContract = errors.New("review execution contract source is n
 
 // ReviewContractSource renders the runtime-bound native review execution
 // contract. It is reviewassets.ReviewExecutionContractFor in production; the
-// seam exists only because reviewassets already imports this package.
+// seam exists only because reviewassets already imports this package. Callers
+// pass it through RoutingOptions.ReviewContract or RenderOrchestratorWithSource.
 type ReviewContractSource func(model.AgentID) (string, error)
 
 var (
@@ -82,8 +83,10 @@ var (
 	reviewContractSource ReviewContractSource
 )
 
-// SetReviewContractSource wires the review execution contract renderer. The
-// installer registers it once at startup, before any guidance is rendered.
+// SetReviewContractSource sets the package-level fallback used only when a
+// caller supplies no source of its own. Production callers pass the source
+// explicitly (RoutingOptions.ReviewContract); the fallback exists so tests can
+// render with RoutingOptions{} after wiring it once in TestMain.
 func SetReviewContractSource(source ReviewContractSource) {
 	reviewContractMu.Lock()
 	defer reviewContractMu.Unlock()
@@ -91,19 +94,22 @@ func SetReviewContractSource(source ReviewContractSource) {
 }
 
 // reviewExecutionContract returns the contract for a runtime that receives
-// receipt-driven development, or ok=false for one that does not.
-func reviewExecutionContract(agent model.AgentID) (contract string, ok bool, err error) {
+// receipt-driven development, or ok=false for one that does not. A non-nil
+// source wins over the package-level fallback.
+func reviewExecutionContract(agent model.AgentID, source ReviewContractSource) (contract string, ok bool, err error) {
 	if _, err := capabilitymanifest.ForAgent(agent); err != nil {
 		return "", false, err
 	}
 	if !model.SupportsReceiptDrivenDevelopment(agent) {
 		return "", false, nil
 	}
-	reviewContractMu.RLock()
-	source := reviewContractSource
-	reviewContractMu.RUnlock()
 	if source == nil {
-		return "", false, ErrMissingReviewContract
+		reviewContractMu.RLock()
+		source = reviewContractSource
+		reviewContractMu.RUnlock()
+	}
+	if source == nil {
+		return "", false, fmt.Errorf("review contract source was not wired for %q (set RoutingOptions.ReviewContract): %w", agent, ErrMissingReviewContract)
 	}
 	contract, err = source(agent)
 	if err != nil {
@@ -162,7 +168,16 @@ func orchestratorAsset(agent model.AgentID) string {
 // review wording fails closed.
 //
 // Pi is rejected: its prompt is owned by the Gentle Shell package.
+//
+// It renders with the package-level review contract source; production callers
+// use RenderOrchestratorWithSource or RoutingOptions.ReviewContract instead.
 func RenderOrchestrator(agent model.AgentID) (string, error) {
+	return RenderOrchestratorWithSource(agent, nil)
+}
+
+// RenderOrchestratorWithSource is RenderOrchestrator with an explicit review
+// contract source, which takes precedence over the package-level fallback.
+func RenderOrchestratorWithSource(agent model.AgentID, source ReviewContractSource) (string, error) {
 	if agent == model.AgentPi {
 		return "", fmt.Errorf("render orchestrator for %q: the Pi prompt is owned by Gentle Shell", agent)
 	}
@@ -186,7 +201,7 @@ func RenderOrchestrator(agent model.AgentID) (string, error) {
 
 	// v3.7.0 removed the section for runtimes that do not advertise the
 	// review transport instead of handing them a lifecycle they cannot run.
-	contract, reviews, err := reviewExecutionContract(agent)
+	contract, reviews, err := reviewExecutionContract(agent, source)
 	if err != nil {
 		return "", fmt.Errorf("render orchestrator for %q: %w", agent, err)
 	}
