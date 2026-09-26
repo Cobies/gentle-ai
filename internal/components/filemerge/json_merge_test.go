@@ -85,6 +85,33 @@ func TestRemoveLegacyOpenCodeAgentMarkersPreservesInlineCommentByRefusal(t *test
 	}
 }
 
+func TestRemoveLegacyOpenCodeAgentMarkersAcceptsEmptySettings(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		path string
+		raw  []byte
+	}{
+		{name: "zero bytes", path: "opencode.json", raw: nil},
+		{name: "whitespace", path: "opencode.json", raw: []byte(" \t\r\n ")},
+		{name: "whitespace JSONC", path: "opencode.jsonc", raw: []byte(" \n ")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := RemoveLegacyOpenCodeAgentMarkers(tc.path, tc.raw, []string{"gentle-orchestrator"})
+			if err != nil || string(got) != string(tc.raw) {
+				t.Fatalf("empty settings must remain unchanged without error: got %q, err %v", got, err)
+			}
+		})
+	}
+}
+
+func TestRemoveLegacyOpenCodeAgentMarkersRejectsCommentOnlyJSONC(t *testing.T) {
+	raw := []byte("// user note\n")
+	got, err := RemoveLegacyOpenCodeAgentMarkers("opencode.jsonc", raw, []string{"gentle-orchestrator"})
+	if err == nil || string(got) != string(raw) {
+		t.Fatalf("comment-only settings must be refused unchanged: got %q, err %v", got, err)
+	}
+}
+
 func TestRemoveLegacyOpenCodeAgentMarkersRejectsDuplicateKeys(t *testing.T) {
 	cases := []string{
 		`{"agent":{"gentle-orchestrator":{"__managed_by":"gentle-ai/sdd"}},"agent":{"custom":true}}`,

@@ -209,6 +209,9 @@ func UnmarshalJSONObject(raw []byte) (map[string]any, error) {
 // rejectDuplicateJSONKeys checks every object before a map decoder can collapse
 // duplicate user keys. The migration must never serialize such a document.
 func rejectDuplicateJSONKeys(raw []byte) error {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return nil
+	}
 	decoder := json.NewDecoder(bytes.NewReader(normalizeJSON(raw)))
 	var walk func() error
 	walk = func() error {
