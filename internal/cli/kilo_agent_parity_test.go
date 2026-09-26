@@ -316,7 +316,7 @@ func TestRetireKiloReviewAgentsPreservesSettingsMode(t *testing.T) {
 	if err := os.WriteFile(path, seed, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	changed, err := retireOpenCodeFamilyReviewAgents(path, "kilocode")
+	changed, err := retireOpenCodeFamilyReviewAgents(path, "kilocode", nil)
 	if err != nil || !changed {
 		t.Fatalf("retireOpenCodeFamilyReviewAgents = %v, %v; want a change", changed, err)
 	}
@@ -336,7 +336,91 @@ func TestRetireKiloReviewAgentsPreservesSettingsMode(t *testing.T) {
 	if _, ok := task["review-risk"]; ok || task["jd-judge-a"] != "allow" {
 		t.Fatalf("task permissions = %#v, want only review-risk dropped", task)
 	}
-	if changed, err := retireOpenCodeFamilyReviewAgents(path, "opencode"); err != nil || changed {
+	if changed, err := retireOpenCodeFamilyReviewAgents(path, "opencode", nil); err != nil || changed {
 		t.Fatalf("OpenCode keeps its review agents: changed=%v err=%v", changed, err)
+	}
+}
+
+// TestKiloReviewTaskPermissionCleanupRequiresOwnershipProof proves install and
+// sync drop an orchestrator task permission for a review agent only when this
+// run removed that agent as Gentle AI's: in the managed shape, or under the
+// v3.7.0 __managed_by marker. A permission whose agent was already absent is the
+// user's and survives.
+func TestKiloReviewTaskPermissionCleanupRequiresOwnershipProof(t *testing.T) {
+	runs := []struct {
+		name string
+		run  func(t *testing.T)
+	}{
+		{"install", func(t *testing.T) {
+			t.Helper()
+			if _, err := RunInstall([]string{"--agent", "kilocode", "--preset", "full-gentleman"}, system.DetectionResult{}); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"sync", func(t *testing.T) {
+			t.Helper()
+			if _, err := RunSync([]string{"--agent", "kilocode"}); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	}
+	managedRisk, ok := openCodeFamilyManagedReviewShape("review-risk")
+	if !ok {
+		t.Fatal("no managed shape for review-risk")
+	}
+	for _, tc := range []struct {
+		name      string
+		agents    map[string]any
+		wantTask  bool
+		wantAgent bool
+	}{
+		{"user permission without agent entry survives", map[string]any{}, true, false},
+		{"managed entry and its permission are removed", map[string]any{"review-risk": managedRisk}, false, false},
+		{"legacy marked entry and its permission are removed", map[string]any{
+			"review-risk": map[string]any{"__managed_by": "gentle-ai/sdd", "mode": "subagent", "prompt": "legacy"},
+		}, false, false},
+	} {
+		for _, run := range runs {
+			t.Run(tc.name+"/"+run.name, func(t *testing.T) {
+				home := installTestHome(t)
+				path := kiloSettingsPath(home)
+				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				agents := map[string]any{
+					"gentle-orchestrator": map[string]any{"permission": map[string]any{"task": map[string]any{"review-risk": "allow"}}},
+				}
+				for name, entry := range tc.agents {
+					agents[name] = entry
+				}
+				seed, err := json.MarshalIndent(map[string]any{"agent": agents}, "", "  ")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, seed, 0o600); err != nil {
+					t.Fatal(err)
+				}
+
+				run.run(t)
+				first, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				after := kiloAgents(t, first)
+				if _, got := after["review-risk"]; got != tc.wantAgent {
+					t.Errorf("review-risk agent present = %v, want %v:\n%s", got, tc.wantAgent, first)
+				}
+				orchestrator, _ := after["gentle-orchestrator"].(map[string]any)
+				permission, _ := orchestrator["permission"].(map[string]any)
+				task, _ := permission["task"].(map[string]any)
+				if _, got := task["review-risk"]; got != tc.wantTask {
+					t.Errorf("review-risk task permission present = %v, want %v:\n%s", got, tc.wantTask, first)
+				}
+				run.run(t)
+				if second, _ := os.ReadFile(path); !bytes.Equal(first, second) {
+					t.Errorf("second %s changed settings bytes:\nfirst:\n%s\nsecond:\n%s", run.name, first, second)
+				}
+			})
+		}
 	}
 }

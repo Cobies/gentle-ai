@@ -57,8 +57,14 @@ type templateBootstrapper interface {
 // RoutingOptions supplies a caller-resolved settings path for adapters whose
 // guidance is delivered through a managed orchestrator definition. The adapter
 // retains its normal targetDir-derived path when SettingsPath is empty.
+//
+// ReviewContract renders the native review execution contract embedded in the
+// orchestrator of a receipt-driven development runtime. It takes precedence
+// over the package-level fallback (SetReviewContractSource); installers must
+// always set it.
 type RoutingOptions struct {
 	SettingsPath                string
+	ReviewContract              ReviewContractSource
 	CodexPhaseModelAssignments  map[string]string
 	CodexModelAssignments       map[string]model.CodexEffort
 	CodexCarrilModelAssignments map[string]string
@@ -107,7 +113,7 @@ func InjectRoutingWithOptions(targetDir string, agent model.AgentID, options Rou
 	// half-applied. Pi is the only runtime without one: Gentle Shell owns it.
 	var orchestrator string
 	if agent != model.AgentPi {
-		orchestrator, err = RenderOrchestrator(agent)
+		orchestrator, err = RenderOrchestratorWithSource(agent, options.ReviewContract)
 		if err != nil {
 			return Result{}, err
 		}

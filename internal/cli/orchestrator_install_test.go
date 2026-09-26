@@ -9,6 +9,7 @@ import (
 	"github.com/gentleman-programming/gentle-ai/v3/internal/catalog"
 	"github.com/gentleman-programming/gentle-ai/v3/internal/components/agentguidance"
 	"github.com/gentleman-programming/gentle-ai/v3/internal/components/opencodedefault"
+	"github.com/gentleman-programming/gentle-ai/v3/internal/components/reviewassets"
 	"github.com/gentleman-programming/gentle-ai/v3/internal/model"
 )
 
@@ -80,7 +81,7 @@ func TestInstallAndSyncDeliverOrchestratorOnceForEveryRuntime(t *testing.T) {
 			path, prompt := installedGuidance(t, home, agent)
 			installed := readTextFile(t, path)
 
-			rendered, err := agentguidance.RenderOrchestrator(agent)
+			rendered, err := agentguidance.RenderOrchestratorWithSource(agent, reviewassets.ReviewExecutionContractFor)
 			if err != nil {
 				t.Fatalf("RenderOrchestrator(%q) error = %v", agent, err)
 			}
