@@ -35,17 +35,17 @@ func TestNativeReviewPostApplyErrorsRestoreDeduplicatedSnapshot(t *testing.T) {
 			runCommand = func(string, ...string) error { return nil }
 			cmdLookPath = func(string) (string, error) { return "", exec.ErrNotFound }
 			t.Cleanup(func() { osUserHomeDir, runCommand, cmdLookPath = originalHome, originalCommand, originalLookPath })
-			if _, err := RunInstall([]string{"--agent", "cursor"}, system.DetectionResult{}); err != nil {
+			if _, err := RunInstall([]string{"--agent", "kiro-ide"}, system.DetectionResult{}); err != nil {
 				t.Fatalf("seed install: %v", err)
 			}
-			adapter, err := agents.NewAdapter(model.AgentCursor)
+			adapter, err := agents.NewAdapter(model.AgentKiroIDE)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if _, err := reviewassets.InstallNativeAgents(home, adapter, reviewassets.InstallOptions{CodeGraphGuidanceMarkdown: "previous guidance"}); err != nil {
 				t.Fatal(err)
 			}
-			targets := []string{filepath.Join(adapter.SubAgentsDir(home), reviewassets.OwnershipLedgerFilename), filepath.Join(adapter.SubAgentsDir(home), "review-risk.md")}
+			targets := []string{filepath.Join(adapter.SubAgentsDir(home), reviewassets.OwnershipLedgerFilename), filepath.Join(adapter.SubAgentsDir(home), "jd-judge-a.md")}
 			before := make(map[string][]byte)
 			for _, path := range targets {
 				before[path], err = os.ReadFile(path)
@@ -88,16 +88,16 @@ func TestNativeReviewPostApplyErrorsRestoreDeduplicatedSnapshot(t *testing.T) {
 				snapshotDir := filepath.Join(backupRoot, "next")
 				return pipeline.StagePlan{
 					Prepare: []pipeline.Step{prepareBackupStep{id: "backup", snapshotter: backup.NewSnapshotter(), snapshotDir: snapshotDir, targets: targets, state: state, backupRoot: backupRoot}},
-					Apply:   []pipeline.Step{rollbackRestoreStep{id: "restore", state: state, homeDir: home, workspaceDir: workspace}, nativeReviewAgentStep{id: "native", agent: model.AgentCursor, homeDir: home, workspaceDir: workspace, scope: ScopeGlobal, selection: selection, changedFiles: changed, state: state}},
+					Apply:   []pipeline.Step{rollbackRestoreStep{id: "restore", state: state, homeDir: home, workspaceDir: workspace}, nativeReviewAgentStep{id: "native", agent: model.AgentKiroIDE, homeDir: home, workspaceDir: workspace, scope: ScopeGlobal, selection: selection, changedFiles: changed, state: state}},
 				}
 			}
-			selection := model.Selection{Agents: []model.AgentID{model.AgentCursor}}
+			selection := model.Selection{Agents: []model.AgentID{model.AgentKiroIDE}}
 			var runErr error
 			if branch == "install digest" {
 				installStagePlan = func(rt *installRuntime) pipeline.StagePlan {
 					return planFor(rt.backupRoot, rt.workspaceDir, rt.state, selection, nil)
 				}
-				_, runErr = RunInstall([]string{"--agent", "cursor"}, system.DetectionResult{})
+				_, runErr = RunInstall([]string{"--agent", "kiro-ide"}, system.DetectionResult{})
 			} else {
 				syncStagePlan = func(rt *syncRuntime) pipeline.StagePlan {
 					plan := planFor(rt.backupRoot, rt.workspaceDir, rt.state, selection, &rt.changedFiles)
@@ -147,7 +147,7 @@ func TestTUIDeduplicatedNativeReviewSnapshotSurvivesPostApplyRollback(t *testing
 	for _, outcome := range []string{"post-apply rollback", "persisted success"} {
 		t.Run(outcome, func(t *testing.T) {
 			home := t.TempDir()
-			adapter, err := agents.NewAdapter(model.AgentCursor)
+			adapter, err := agents.NewAdapter(model.AgentKiroIDE)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -155,7 +155,7 @@ func TestTUIDeduplicatedNativeReviewSnapshotSurvivesPostApplyRollback(t *testing
 				t.Fatal(err)
 			}
 			ledger := filepath.Join(adapter.SubAgentsDir(home), reviewassets.OwnershipLedgerFilename)
-			agent := filepath.Join(adapter.SubAgentsDir(home), "review-risk.md")
+			agent := filepath.Join(adapter.SubAgentsDir(home), "jd-judge-a.md")
 			targets := []string{ledger, agent}
 			before := make(map[string][]byte)
 			for _, path := range targets {
@@ -164,7 +164,7 @@ func TestTUIDeduplicatedNativeReviewSnapshotSurvivesPostApplyRollback(t *testing
 					t.Fatal(err)
 				}
 			}
-			selection := model.Selection{Agents: []model.AgentID{model.AgentCursor}}
+			selection := model.Selection{Agents: []model.AgentID{model.AgentKiroIDE}}
 			resolved := planner.ResolvedPlan{Agents: selection.Agents}
 			var transaction *runtimeState
 			original := tuiInstallStagePlan
@@ -177,7 +177,7 @@ func TestTUIDeduplicatedNativeReviewSnapshotSurvivesPostApplyRollback(t *testing
 					Prepare: []pipeline.Step{prepareBackupStep{id: "backup", snapshotter: backup.NewSnapshotter(), snapshotDir: filepath.Join(rt.backupRoot, "next"), targets: targets, state: rt.state, backupRoot: rt.backupRoot}},
 					Apply: []pipeline.Step{
 						rollbackRestoreStep{id: "restore", state: rt.state, homeDir: home, workspaceDir: rt.workspaceDir},
-						nativeReviewAgentStep{id: "native", agent: model.AgentCursor, homeDir: home, workspaceDir: rt.workspaceDir, scope: ScopeGlobal, selection: selection, state: rt.state},
+						nativeReviewAgentStep{id: "native", agent: model.AgentKiroIDE, homeDir: home, workspaceDir: rt.workspaceDir, scope: ScopeGlobal, selection: selection, state: rt.state},
 					},
 				}
 			}
@@ -226,12 +226,12 @@ func TestTUIDeduplicatedNativeReviewSnapshotSurvivesPostApplyRollback(t *testing
 
 func TestNativeReviewLedgerInstallBackupAndManualActions(t *testing.T) {
 	home, workspace := t.TempDir(), t.TempDir()
-	adapter, err := agents.NewAdapter(model.AgentCursor)
+	adapter, err := agents.NewAdapter(model.AgentKiroIDE)
 	if err != nil {
 		t.Fatal(err)
 	}
 	ledger := filepath.Join(adapter.SubAgentsDir(home), reviewassets.OwnershipLedgerFilename)
-	selection := model.Selection{Agents: []model.AgentID{model.AgentCursor}}
+	selection := model.Selection{Agents: []model.AgentID{model.AgentKiroIDE}}
 	targets, err := backupTargets(home, workspace, ScopeGlobal, selection, planner.ResolvedPlan{Agents: selection.Agents})
 	if err != nil {
 		t.Fatal(err)
@@ -239,7 +239,7 @@ func TestNativeReviewLedgerInstallBackupAndManualActions(t *testing.T) {
 	if !containsPath(targets, ledger) {
 		t.Fatalf("install backup missing ledger %s", ledger)
 	}
-	path := filepath.Join(adapter.SubAgentsDir(home), "review-risk.md")
+	path := filepath.Join(adapter.SubAgentsDir(home), "jd-judge-a.md")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -247,7 +247,7 @@ func TestNativeReviewLedgerInstallBackupAndManualActions(t *testing.T) {
 		t.Fatal(err)
 	}
 	state := &runtimeState{}
-	step := nativeReviewAgentStep{id: "test", agent: model.AgentCursor, homeDir: home, workspaceDir: workspace, scope: ScopeGlobal, selection: selection, state: state}
+	step := nativeReviewAgentStep{id: "test", agent: model.AgentKiroIDE, homeDir: home, workspaceDir: workspace, scope: ScopeGlobal, selection: selection, state: state}
 	if err := step.Run(); err != nil {
 		t.Fatal(err)
 	}

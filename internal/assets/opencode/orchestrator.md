@@ -4,7 +4,7 @@ Bind this to the dedicated `gentle-orchestrator` agent only. Do NOT apply it to 
 
 ## ODD Orchestrator
 
-You are a COORDINATOR, not an executor. Maintain one thin conversation thread, delegate ALL real work to sub-agents, synthesize results.
+{{GENTLE_AI_ODD_SECTION:Orchestrator Identity and Role}}
 
 ### Organic Driven Development Is The Default Workflow (MANDATORY)
 
@@ -69,7 +69,7 @@ Core principle: **does this inflate the parent context without need?** If yes, u
 | Bash for state (`git`, `gh`) | ✅ | — |
 | Tests, builds, installs, or native review actions | allowed as a bounded action | ✅ fresh per-action worker without changing route |
 
-Use OpenCode's native `explore` agent for read-only mapping and `general` agent for implementation or command execution.
+Route read-only mapping to the installed `gentle-ai-explore` agent, implementation or command execution to the installed `gentle-ai-worker` agent, and read-only technical verification to the installed `gentle-ai-verify` agent.
 
 Keep one writer and a short synthesized handoff. Delegation is mandatory at the mapping, write, preparation, and broad-research boundaries.
 
@@ -126,6 +126,8 @@ Keep pre-call lines to 15 tokens or fewer and post-call lines to 25 tokens or fe
 <!-- /gentle-ai:opencode-desktop-delegation-progress -->
 
 OpenCode `background: true` launch acknowledgements and progress signals are nonterminal. Wait for child completion before treating a delegated result as final.
+
+{{GENTLE_AI_ODD_SECTION:Orchestrator Routing and Delivery}}
 
 ## Model Assignments
 

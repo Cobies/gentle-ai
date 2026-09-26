@@ -4,7 +4,7 @@ Bind this to the Claude Code orchestrator rule only. Do NOT apply it to delegate
 
 ## Agent Teams Orchestrator
 
-You are a COORDINATOR, not an executor. Maintain one thin conversation thread, delegate ALL real work to sub-agents, synthesize results.
+{{GENTLE_AI_ODD_SECTION:Orchestrator Identity and Role}}
 
 ### Organic Driven Development Is The Default Workflow (MANDATORY)
 
@@ -110,3 +110,9 @@ The canonical native bounded-review contract is injected from the shared provide
 - Use a single writer thread for implementation; do not run parallel writers unless isolated worktrees are explicitly approved.
 - Let native review select its bounded checking plan; delivery remains human-owned under ordinary repository policy.
 - Avoid delegation for truly local one-file fixes, quick state checks, and already-understood mechanical edits.
+
+{{GENTLE_AI_ODD_SECTION:Orchestrator Routing and Delivery}}
+
+### Skill Registry Protocol
+
+{{GENTLE_AI_ODD_SECTION:Skill Registry Protocol}}

@@ -64,7 +64,7 @@ func ApplyOpenCodeBackgroundPolicy(settingsPath string, enabled bool) (Result, e
 	if err != nil {
 		return Result{}, err
 	}
-	written, err := filemerge.WriteFileAtomic(settingsPath, overlay, 0o644)
+	written, err := filemerge.WriteFileAtomic(settingsPath, overlay, filemerge.ExistingFileMode(settingsPath, 0o644))
 	if err != nil {
 		return Result{}, err
 	}

@@ -25,6 +25,7 @@ import (
 	"github.com/gentleman-programming/gentle-ai/v3/internal/components/engram"
 	"github.com/gentleman-programming/gentle-ai/v3/internal/components/gga"
 	"github.com/gentleman-programming/gentle-ai/v3/internal/components/opencodedefault"
+	"github.com/gentleman-programming/gentle-ai/v3/internal/components/skills"
 	"github.com/gentleman-programming/gentle-ai/v3/internal/components/telemetryruntime"
 	"github.com/gentleman-programming/gentle-ai/v3/internal/model"
 	opencodeactivation "github.com/gentleman-programming/gentle-ai/v3/internal/opencode"
@@ -2070,5 +2071,62 @@ func TestUpdateStateAfterUninstallReReadsLatestStateAfterLockContention(t *testi
 	}
 	if got.BackgroundIntent != "" {
 		t.Fatalf("BackgroundIntent = %q, want cleared after opencode removal", got.BackgroundIntent)
+	}
+}
+
+func TestUninstallSkillsRemovesLegacySharedMarkerAfterUpgrade(t *testing.T) {
+	for _, tt := range []struct {
+		name          string
+		dirMarker     bool
+		wantMarker    bool
+		wantSharedDir bool
+	}{
+		{name: "generated regular marker is removed with emptied _shared"},
+		{name: "non-regular marker is preserved", dirMarker: true, wantMarker: true, wantSharedDir: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			home := t.TempDir()
+			skillDir := claude.NewAdapter().SkillsDir(home)
+			shared, err := skills.SharedReferencePaths(skillDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, path := range shared {
+				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte("managed reference"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			marker := skills.LegacySharedMarkerPath(skillDir)
+			if tt.dirMarker {
+				if err := os.MkdirAll(marker, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := os.WriteFile(marker, []byte("legacy generated marker"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			svc, err := NewService(home, t.TempDir(), "dev")
+			if err != nil {
+				t.Fatal(err)
+			}
+			svc.snapshotter = stubSnapshotter{}
+			result, err := svc.PartialUninstall([]model.AgentID{model.AgentClaudeCode}, []model.ComponentID{model.ComponentSkills})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if _, err := os.Lstat(marker); (err == nil) != tt.wantMarker {
+				t.Fatalf("legacy marker present = %v, want %v (err %v)", err == nil, tt.wantMarker, err)
+			}
+			if got := slices.Contains(result.RemovedFiles, marker); got == tt.wantMarker {
+				t.Fatalf("RemovedFiles contains marker = %v, want %v: %v", got, !tt.wantMarker, result.RemovedFiles)
+			}
+			if _, err := os.Stat(filepath.Dir(marker)); (err == nil) != tt.wantSharedDir {
+				t.Fatalf("_shared present = %v, want %v (err %v)", err == nil, tt.wantSharedDir, err)
+			}
+		})
 	}
 }

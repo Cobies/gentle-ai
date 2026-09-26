@@ -2,6 +2,8 @@
 
 Bind this to the dedicated orchestrator agent or rule only. Do NOT apply it to delegated workers.
 
+{{GENTLE_AI_ODD_SECTION:Orchestrator Identity and Role}}
+
 ## Language Domain Contract
 
 - The active persona controls direct user/orchestrator conversation only. Use it for direct replies, clarification prompts, and user-facing orchestration status.
@@ -115,6 +117,8 @@ The canonical native bounded-review contract is injected from the shared provide
 - Let native review select its bounded checking plan; delivery remains human-owned under ordinary repository policy.
 - Avoid delegation for truly local one-file fixes, quick state checks, and already-understood mechanical edits.
 - If Codex's sub-agent tool policy blocks automatic spawning, stop and tell the user that the hard gate requires delegation before continuing.
+
+{{GENTLE_AI_ODD_SECTION:Orchestrator Routing and Delivery}}
 
 ## Capability Check (run once, at session start)
 

@@ -129,7 +129,7 @@ func (t *windowsCompatibilityRefreshTransaction) Run() (runErr error) {
 	if slicesContainsComponent(t.components, model.ComponentSkills) {
 		skillIDs := selectedSkillIDs(t.selection)
 		if len(skillIDs) > 0 {
-			result, err := skills.InjectDirectoryWithWriter(t.writer.root, skillIDs, t.writer.Write)
+			result, err := skills.InjectDirectoryWithWriter(t.writer.root, skillIDs, t.writer.Write, t.writer.Remove)
 			if err != nil {
 				return fmt.Errorf("refresh compatibility skills: %w", err)
 			}

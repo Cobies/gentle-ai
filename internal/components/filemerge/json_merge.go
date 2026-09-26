@@ -206,6 +206,169 @@ func UnmarshalJSONObject(raw []byte) (map[string]any, error) {
 	return unmarshalJSONObject(raw)
 }
 
+// rejectDuplicateJSONKeys checks every object before a map decoder can collapse
+// duplicate user keys. The migration must never serialize such a document.
+func rejectDuplicateJSONKeys(raw []byte) error {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return nil
+	}
+	decoder := json.NewDecoder(bytes.NewReader(normalizeJSON(raw)))
+	var walk func() error
+	walk = func() error {
+		token, err := decoder.Token()
+		if err != nil {
+			return err
+		}
+		delim, ok := token.(json.Delim)
+		if !ok {
+			return nil
+		}
+		switch delim {
+		case '{':
+			seen := map[string]bool{}
+			for decoder.More() {
+				keyToken, err := decoder.Token()
+				if err != nil {
+					return err
+				}
+				key := keyToken.(string)
+				if seen[key] {
+					return fmt.Errorf("duplicate JSON key %q", key)
+				}
+				seen[key] = true
+				if err := walk(); err != nil {
+					return err
+				}
+			}
+		case '[':
+			for decoder.More() {
+				if err := walk(); err != nil {
+					return err
+				}
+			}
+		default:
+			return fmt.Errorf("unexpected JSON delimiter %q", delim)
+		}
+		_, err = decoder.Token()
+		return err
+	}
+	return walk()
+}
+
+// RemoveLegacyOpenCodeAgentMarkers drops only the retired SDD ownership marker
+// from explicitly named agent definitions. JSONC edits remain local to the
+// property, preserving unrelated comments and formatting.
+func RemoveLegacyOpenCodeAgentMarkers(path string, raw []byte, names []string) ([]byte, error) {
+	if err := rejectDuplicateJSONKeys(raw); err != nil {
+		return raw, fmt.Errorf("refuse OpenCode settings with duplicate or malformed keys: %w", err)
+	}
+	root, err := unmarshalJSONObject(raw)
+	if err != nil {
+		return raw, fmt.Errorf("refuse malformed OpenCode settings: %w", err)
+	}
+	agents, _ := root["agent"].(map[string]any)
+	eligible := make([]string, 0, len(names))
+	for _, name := range names {
+		def, _ := agents[name].(map[string]any)
+		if def["__managed_by"] == "gentle-ai/sdd" {
+			eligible = append(eligible, name)
+		}
+	}
+	if len(eligible) == 0 {
+		return raw, nil
+	}
+	if !strings.HasSuffix(path, ".jsonc") && json.Valid(raw) {
+		for _, name := range eligible {
+			delete(agents[name].(map[string]any), "__managed_by")
+		}
+		encoded, err := MarshalJSONPreservingPermissions(raw, root)
+		if err != nil {
+			return nil, err
+		}
+		return append(encoded, '\n'), nil
+	}
+	text := string(raw)
+	if topLevelJSONCKeyCount(text, "agent") != 1 {
+		return raw, fmt.Errorf("duplicate OpenCode agent key")
+	}
+	_, start, end, ok := topLevelJSONCPropertyValueRange(text, "agent")
+	if !ok {
+		return raw, fmt.Errorf("missing OpenCode agent object")
+	}
+	agentText := text[start:end]
+	for _, name := range eligible {
+		if topLevelJSONCKeyCount(agentText, name) != 1 {
+			return raw, fmt.Errorf("duplicate OpenCode agent %q", name)
+		}
+		_, a, b, ok := topLevelJSONCPropertyValueRange(agentText, name)
+		if !ok {
+			return raw, fmt.Errorf("missing OpenCode agent %q", name)
+		}
+		defText := agentText[a:b]
+		if topLevelJSONCKeyCount(defText, "__managed_by") != 1 {
+			return raw, fmt.Errorf("duplicate OpenCode ownership marker in %q", name)
+		}
+		key, value, finish, ok := topLevelJSONCPropertyValueRange(defText, "__managed_by")
+		if !ok {
+			return raw, fmt.Errorf("missing OpenCode ownership marker in %q", name)
+		}
+		// Refuse comments in the property's syntax or immediately before its key:
+		// deleting the property would otherwise silently discard user notes.
+		colon := scanJSONCWhitespaceAndComments(defText, key+len(strconvQuote("__managed_by")))
+		previous := key - 1
+		for previous >= 0 && isJSONWhitespace(defText[previous]) {
+			previous--
+		}
+		boundary := previous
+		for boundary >= 0 && defText[boundary] != ',' && defText[boundary] != '{' {
+			boundary--
+		}
+		if strings.Contains(defText[key+len(strconvQuote("__managed_by")):colon], "/") ||
+			strings.Contains(defText[colon+1:value], "/") ||
+			strings.Contains(defText[boundary+1:key], "/") {
+			return raw, fmt.Errorf("refuse to remove OpenCode marker with attached comment in %q", name)
+		}
+		// The property value is a JSON string. Its scanner may include an
+		// adjacent line comment in the value range; locate the closing quote
+		// independently before deciding which bytes are safe to remove.
+		closing := value + 1
+		for closing < len(defText) {
+			if defText[closing] == '\\' {
+				closing += 2
+				continue
+			}
+			if defText[closing] == '"' {
+				closing++
+				break
+			}
+			closing++
+		}
+		if closing > finish || strings.Contains(defText[closing:finish], "/") {
+			return raw, fmt.Errorf("refuse to remove OpenCode marker with attached comment in %q", name)
+		}
+		// Include a following comma when present, otherwise the preceding comma.
+		after := scanJSONCWhitespaceAndComments(defText, finish)
+		if after < len(defText) && defText[after] == ',' {
+			// A comment between the value and comma may belong to the user.
+			// Refuse rather than deleting it with the marker property.
+			if strings.Contains(defText[finish:after], "/") {
+				return raw, fmt.Errorf("refuse to remove OpenCode marker with attached comment in %q", name)
+			}
+			finish = after + 1
+		} else {
+			before := key - 1
+			for before >= 0 && isJSONWhitespace(defText[before]) {
+				before--
+			}
+			if before >= 0 && defText[before] == ',' {
+				key = before
+			}
+		}
+		agentText = agentText[:a] + defText[:key] + defText[finish:] + agentText[b:]
+	}
+	return []byte(text[:start] + agentText + text[end:]), nil
+}
+
 func RemoveJSONAgentTools(raw []byte, names ...string) ([]byte, error) {
 	root, err := unmarshalJSONObject(raw)
 	if err != nil {

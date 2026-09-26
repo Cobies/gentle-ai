@@ -1862,6 +1862,12 @@ var organicRoutingGuidanceRequiredFragments = []string{
 	"observe RED before implementation, implement GREEN, then refactor while tests stay green",
 	"For passive documentation, unavailable runners, or no meaningful runnable RED",
 	"run proportionate functional or structural checks",
+}
+
+// organicRoutingGuidanceRDDFragments pins the receipt-driven development
+// switch. Only RDD-capable runtimes (Claude Code, Codex, OpenCode) receive
+// it; every other runtime is ODD-only and must not.
+var organicRoutingGuidanceRDDFragments = []string{
 	"gentle-ai review mode enable|disable|status",
 	"disabled/unmanaged",
 }
@@ -1911,6 +1917,11 @@ func TestOrganicConfiguredAgentReceivesRoutingGuidanceCursor(t *testing.T) {
 	for _, fragment := range organicRoutingGuidanceRequiredFragments {
 		if !bytes.Contains(rendered, []byte(fragment)) {
 			t.Fatalf("routing guidance for cursor omits %q:\n%s", fragment, rendered)
+		}
+	}
+	for _, fragment := range organicRoutingGuidanceRDDFragments {
+		if bytes.Contains(rendered, []byte(fragment)) {
+			t.Fatalf("ODD-only runtime cursor received RDD guidance %q:\n%s", fragment, rendered)
 		}
 	}
 	if bytes.Contains(rendered, []byte("SDD")) {

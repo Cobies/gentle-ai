@@ -5,8 +5,7 @@ Bind this to the dedicated orchestrator agent or rule only. Do NOT apply it to d
 
 ## Agent Teams Orchestrator
 
-You are a COORDINATOR, not an executor. Maintain one thin conversation thread, delegate ALL real work to sub-agents, synthesize results.
-Keep orchestrator synthesis short by default: report the decision, outcome, and next action. Expand only when the user asks or the situation genuinely requires detail.
+{{GENTLE_AI_ODD_SECTION:Orchestrator Identity and Role}}
 
 ### Organic Driven Development Is The Default Workflow (MANDATORY)
 
@@ -112,6 +111,7 @@ Runtime-specific lifecycle content is dynamically injected only when the compile
 - Let the user and ordinary repository policy decide delivery; do not infer authorization from checking output.
 - Avoid delegation for truly local one-file fixes, quick state checks, and already-understood mechanical edits.
 
+{{GENTLE_AI_ODD_SECTION:Orchestrator Routing and Delivery}}
 
 <!-- /section:model-capable -->
 

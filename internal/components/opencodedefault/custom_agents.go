@@ -35,6 +35,13 @@ func DiscoverCustomAgents(settingsPath string) ([]string, error) {
 	for _, phase := range opencode.ConfigurableAgentPhases() {
 		reserved[phase] = true
 	}
+	// #4471: the ODD parity agents ported from Gentle Shell are managed like
+	// JD/review-lens phases but are not counted as "configurable legacy SDD
+	// identities" (that function also backs the telemetry runtime agent-class
+	// allowlist, which does not need these three names).
+	for _, phase := range opencode.GentleAIODDPhases() {
+		reserved[phase] = true
+	}
 	var custom []string
 	for name, definition := range agents {
 		if _, valid := definition.(map[string]any); !valid {

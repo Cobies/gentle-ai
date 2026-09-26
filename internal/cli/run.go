@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -894,8 +895,7 @@ type nativeReviewAgentStep struct {
 func (s nativeReviewAgentStep) ID() string { return s.id }
 
 func nativeReviewAgentSupported(agent model.AgentID) bool {
-	_, ok := reviewassets.NativeAgentManifest[agent]
-	return ok
+	return reviewassets.NativeAgentsSupported(agent)
 }
 
 func (s nativeReviewAgentStep) Run() error {
@@ -946,6 +946,13 @@ func (s managedOpenCodePluginsInstallStep) Run() error {
 // on disk is a stale instruction to invoke authority that no longer exists —
 // it has to be removed, not refreshed.
 const legacyTriggerRulesSection = "trigger-rules"
+
+// routingReviewContract renders the native review execution contract the
+// orchestrator guidance embeds. reviewassets already depends on agentguidance,
+// so the installer passes it through RoutingOptions.ReviewContract instead of
+// agentguidance importing it. It is a variable only so tests can prove the
+// routing step fails closed without it.
+var routingReviewContract agentguidance.ReviewContractSource = reviewassets.ReviewExecutionContractFor
 
 // agentRoutingGuidanceStep delivers the organic routing guidance for one agent.
 //
@@ -1019,6 +1026,40 @@ func (s agentRoutingGuidanceStep) Run() error {
 
 	targetDir := routingGuidanceDir(s.homeDir, s.workspaceDir, s.scope, adapter)
 
+	var defaultAgentPlan *opencodedefault.InstallPlan
+	if s.agent == model.AgentOpenCode {
+		settingsPath := routingGuidanceOptions(s.homeDir, s.workspaceDir, adapter).SettingsPath
+		// The default-agent plan must observe settings before the managed
+		// orchestrator is merged below; see opencodedefault.PrepareInstall.
+		defaultAgentPlan, err = opencodedefault.PrepareInstall(settingsPath)
+		if err != nil {
+			return fmt.Errorf("prepare OpenCode default agent: %w", err)
+		}
+		changed, _, err := migrateLegacyOpenCodeAgents(settingsPath, model.AgentOpenCode)
+		if changed && s.changedFiles != nil {
+			*s.changedFiles = append(*s.changedFiles, settingsPath)
+		}
+		if err != nil {
+			return fmt.Errorf("migrate legacy OpenCode agents: %w", err)
+		}
+	}
+	// legacyRemovedKilo carries the review agents the v3.7.0 marker migration
+	// removed in this run, so their task permissions can be retired below.
+	var legacyRemovedKilo []string
+	if s.agent == model.AgentKilocode {
+		// Kilo received the same marked v3.7.0 overlay (#4471). Migrate before
+		// routing injection so a marked orchestrator prompt is not preserved.
+		settingsPath := adapter.SettingsPath(targetDir)
+		changed, removed, err := migrateLegacyOpenCodeAgents(settingsPath, model.AgentKilocode)
+		legacyRemovedKilo = removed
+		if changed && s.changedFiles != nil {
+			*s.changedFiles = append(*s.changedFiles, settingsPath)
+		}
+		if err != nil {
+			return fmt.Errorf("migrate legacy Kilo agents: %w", err)
+		}
+	}
+
 	// Strip first: an installation upgraded from an older release still carries
 	// the retired block, and leaving it beside fresh guidance would hand the
 	// agent two conflicting sets of instructions.
@@ -1052,44 +1093,298 @@ func (s agentRoutingGuidanceStep) Run() error {
 		}
 		s.recordChanged(policy)
 	}
+	if s.agent == model.AgentKilocode {
+		// Kilo reads an OpenCode-compatible config; v3.7.0 disabled sharing
+		// there too, only when the user had not chosen a mode (#4471).
+		settingsPath := adapter.SettingsPath(targetDir)
+		shareChanged, err := opencodedefault.ApplyShareDefault(settingsPath)
+		if err != nil {
+			return fmt.Errorf("default Kilo share mode: %w", err)
+		}
+		if shareChanged && s.changedFiles != nil {
+			*s.changedFiles = append(*s.changedFiles, settingsPath)
+		}
+		rolesChanged, err := installOpenCodeReviewProviderRoles(settingsPath, model.AgentKilocode)
+		if err != nil {
+			return fmt.Errorf("install Kilo review provider roles: %w", err)
+		}
+		parityChanged, err := installOpenCodeFamilyParityAgents(settingsPath, model.AgentKilocode)
+		if err != nil {
+			return fmt.Errorf("install Kilo parity agents: %w", err)
+		}
+		retiredChanged, err := retireOpenCodeFamilyReviewAgents(settingsPath, model.AgentKilocode, legacyRemovedKilo)
+		if err != nil {
+			return fmt.Errorf("retire Kilo review agents: %w", err)
+		}
+		if (rolesChanged || parityChanged || retiredChanged) && s.changedFiles != nil {
+			*s.changedFiles = append(*s.changedFiles, settingsPath)
+		}
+	}
 	if s.agent == model.AgentOpenCode {
-		changed, err := installOpenCodeReviewProviderRoles(options.SettingsPath)
+		changed, err := installOpenCodeReviewProviderRoles(options.SettingsPath, model.AgentOpenCode)
 		if err != nil {
 			return fmt.Errorf("install OpenCode review provider roles: %w", err)
 		}
 		if changed && s.changedFiles != nil {
 			*s.changedFiles = append(*s.changedFiles, options.SettingsPath)
 		}
+		parityChanged, err := installOpenCodeODDParityAgents(options.SettingsPath)
+		if err != nil {
+			return fmt.Errorf("install OpenCode ODD parity agents: %w", err)
+		}
+		if parityChanged && s.changedFiles != nil {
+			*s.changedFiles = append(*s.changedFiles, options.SettingsPath)
+		}
+		// default_agent and share were owned by the retired SDD overlay; the
+		// OpenCode routing owner restores them with v3.7.0 semantics (#4471).
+		defaultChanged, err := defaultAgentPlan.Apply()
+		if err != nil {
+			return fmt.Errorf("set OpenCode default agent: %w", err)
+		}
+		if defaultChanged && s.changedFiles != nil {
+			*s.changedFiles = append(*s.changedFiles, options.SettingsPath, opencodedefault.OwnershipPath(options.SettingsPath))
+		}
+		shareChanged, err := opencodedefault.ApplyShareDefault(options.SettingsPath)
+		if err != nil {
+			return fmt.Errorf("default OpenCode share mode: %w", err)
+		}
+		if shareChanged && s.changedFiles != nil {
+			*s.changedFiles = append(*s.changedFiles, options.SettingsPath)
+		}
 	}
 	return nil
 }
 
+// migrateLegacyOpenCodeAgents runs inside the routing apply step, after the
+// transaction snapshot and before guidance and parity overlays. The v3.7.0
+// marker is ownership proof: retired SDD roles and built-in overrides are
+// removed entirely (their model/variant no longer have a meaningful target).
+// Current roles are reset to model/variant only, so subsequent writers install
+// their current prompt and permissions without retaining obsolete keys. The
+// current role set is per runtime: Kilo shares the OpenCode config format but
+// not the full role set (see openCodeFamilyManagedRoles).
+//
+// It also reports the review agents it removed under the marker, which is the
+// ownership proof retireOpenCodeFamilyReviewAgents needs to drop their
+// orchestrator task permissions in the same run.
+func migrateLegacyOpenCodeAgents(settingsPath string, agent model.AgentID) (bool, []string, error) {
+	raw, err := os.ReadFile(settingsPath)
+	if os.IsNotExist(err) {
+		return false, nil, nil
+	}
+	if err != nil {
+		return false, nil, err
+	}
+	root, err := filemerge.UnmarshalJSONObject(raw)
+	if err != nil {
+		return false, nil, err
+	}
+	agents, _ := root["agent"].(map[string]any)
+	current := map[string]bool{"gentle-orchestrator": true}
+	for _, name := range openCodeFamilyManagedRoles(agent) {
+		current[name] = true
+	}
+	rdd := model.SupportsReceiptDrivenDevelopment(agent)
+	changed := false
+	var removedReview []string
+	for name, value := range agents {
+		entry, ok := value.(map[string]any)
+		if !ok || entry["__managed_by"] != "gentle-ai/sdd" {
+			continue
+		}
+		changed = true
+		switch {
+		case name == "general", name == "explore", strings.HasPrefix(name, "sdd-"):
+			delete(agents, name)
+		case !rdd && isOpenCodeFamilyReviewAgent(name):
+			// The v3.7.0 marker proves ownership of a review agent this
+			// runtime no longer receives.
+			delete(agents, name)
+			removedReview = append(removedReview, name)
+		case current[name]:
+			fresh := map[string]any{}
+			for _, field := range []string{"model", "variant"} {
+				if value, ok := entry[field]; ok {
+					fresh[field] = value
+				}
+			}
+			agents[name] = fresh
+		default:
+			delete(entry, "__managed_by")
+		}
+	}
+	if !changed {
+		return false, nil, nil
+	}
+	// Match the existing OpenCode writers: JSONC input is accepted and the
+	// settings document is normalized to JSON on write, retaining permission
+	// rule order and all unrelated top-level values.
+	encoded, err := filemerge.MarshalJSONPreservingPermissions(raw, root)
+	if err != nil {
+		return false, nil, err
+	}
+	result, err := filemerge.WriteFileAtomic(settingsPath, append(encoded, '\n'), filemerge.ExistingFileMode(settingsPath, 0o644))
+	// WriteFileAtomic may publish the replacement and still report an error;
+	// keep its Changed state so the caller records the file either way.
+	return result.Changed, removedReview, err
+}
+
+// openCodeFamilyManagedRoles lists the subagents the routing owner installs for
+// an OpenCode-compatible runtime, in the v3.7.0 shape for that runtime. Kilo
+// never received review-validator (it hosts no provider relay to issue it) nor
+// the gentle-ai-* ODD trio (its rendered orchestrator routing names no
+// subagents, so it delegates to Kilo's native agents). Review agents belong to
+// receipt-driven development and reach only its runtimes.
+func openCodeFamilyManagedRoles(agent model.AgentID) []string {
+	var names []string
+	if model.SupportsReceiptDrivenDevelopment(agent) {
+		names = append(names, "review-refuter")
+	}
+	if agent == model.AgentOpenCode {
+		names = append(names, "review-validator")
+	}
+	for _, spec := range openCodeFamilyParityAgents(agent) {
+		names = append(names, spec.name)
+	}
+	return names
+}
+
+// openCodeFamilyReviewAgents are the receipt-driven development agents the
+// routing owner has ever written to an OpenCode-compatible settings file.
+var openCodeFamilyReviewAgents = []string{
+	"review-risk", "review-readability", "review-reliability", "review-resilience",
+	"review-refuter", "review-validator",
+}
+
+func isOpenCodeFamilyReviewAgent(name string) bool {
+	for _, candidate := range openCodeFamilyReviewAgents {
+		if candidate == name {
+			return true
+		}
+	}
+	return false
+}
+
+// retireOpenCodeFamilyReviewAgents removes the review agents earlier releases
+// wrote to a runtime without receipt-driven development. An entry is removed
+// only while it still has the exact managed shape (a model or variant the user
+// assigned does not make it theirs); any other entry under a review name is the
+// user's and is preserved together with its orchestrator task permission.
+//
+// A task permission is dropped only for a review agent this run removed as
+// Gentle AI's: here in the managed shape, or earlier in the same run under the
+// v3.7.0 marker (legacyRemoved). A permission whose agent was already absent
+// carries no ownership proof and is the user's.
+func retireOpenCodeFamilyReviewAgents(settingsPath string, agent model.AgentID, legacyRemoved []string) (bool, error) {
+	if model.SupportsReceiptDrivenDevelopment(agent) {
+		return false, nil
+	}
+	raw, err := os.ReadFile(settingsPath)
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	root, err := filemerge.UnmarshalJSONObject(raw)
+	if err != nil {
+		return false, err
+	}
+	agents, _ := root["agent"].(map[string]any)
+	if agents == nil {
+		return false, nil
+	}
+	changed := false
+	removed := map[string]bool{}
+	for _, name := range legacyRemoved {
+		removed[name] = true
+	}
+	for _, name := range openCodeFamilyReviewAgents {
+		entry, ok := agents[name].(map[string]any)
+		if !ok {
+			continue
+		}
+		owned, err := hasOpenCodeFamilyManagedReviewShape(name, entry)
+		if err != nil {
+			return false, err
+		}
+		if owned {
+			delete(agents, name)
+			removed[name] = true
+			changed = true
+		}
+	}
+	orchestrator, _ := agents["gentle-orchestrator"].(map[string]any)
+	permission, _ := orchestrator["permission"].(map[string]any)
+	if task, ok := permission["task"].(map[string]any); ok {
+		for _, name := range openCodeFamilyReviewAgents {
+			if _, present := agents[name]; present || !removed[name] {
+				continue
+			}
+			if _, granted := task[name]; granted {
+				delete(task, name)
+				changed = true
+			}
+		}
+	}
+	if !changed {
+		return false, nil
+	}
+	encoded, err := filemerge.MarshalJSONPreservingPermissions(raw, root)
+	if err != nil {
+		return false, err
+	}
+	result, err := filemerge.WriteFileAtomic(settingsPath, append(encoded, '\n'), filemerge.ExistingFileMode(settingsPath, 0o644))
+	return result.Changed, err
+}
+
+// hasOpenCodeFamilyManagedReviewShape reports whether entry is exactly what the
+// routing owner wrote for a review agent, allowing only the model and variant a
+// user may assign on top of it.
+func hasOpenCodeFamilyManagedReviewShape(name string, entry map[string]any) (bool, error) {
+	shape, ok := openCodeFamilyManagedReviewShape(name)
+	if !ok {
+		return false, nil
+	}
+	comparable := make(map[string]any, len(entry))
+	for key, value := range entry {
+		if key == "model" || key == "variant" {
+			continue
+		}
+		comparable[key] = value
+	}
+	got, err := json.Marshal(comparable)
+	if err != nil {
+		return false, err
+	}
+	want, err := json.Marshal(shape)
+	if err != nil {
+		return false, err
+	}
+	return bytes.Equal(got, want), nil
+}
+
 // Provider STATUS can issue these roles without SDD. Keep their task permissions
 // with the OpenCode routing owner, not with the retired SDD overlay.
-func installOpenCodeReviewProviderRoles(settingsPath string) (bool, error) {
+func installOpenCodeReviewProviderRoles(settingsPath string, agent model.AgentID) (bool, error) {
 	raw, err := os.ReadFile(settingsPath)
 	if err != nil {
 		return false, err
 	}
-	overlay, err := json.Marshal(map[string]any{"agent": map[string]any{
-		"gentle-orchestrator": map[string]any{"permission": map[string]any{"task": map[string]any{
-			"review-refuter": "allow", "review-validator": "allow",
-		}}},
-		"review-refuter": map[string]any{
-			"mode": "subagent", "hidden": true,
-			"description": "Read-only refuter for provider-issued review findings",
-			"prompt":      "Evaluate only the Go-issued review refuter task. Inspect only the frozen candidate through the provided commands. Do not edit files or delegate. Return only the requested result.",
-			"permission":  map[string]any{"write": "deny", "edit": "deny", "task": "deny"},
-		},
-		"review-validator": map[string]any{
-			"mode": "subagent", "hidden": true,
-			"description": "Targeted read-only validator for provider-issued review checks",
-			"prompt":      "Execute only the Go-issued targeted validation. Do not edit files or delegate. Inspect only the frozen candidate using the provided gentle-ai review inspect-candidate command, not the live worktree. Return exactly the requested JSON.",
-			"permission": map[string]any{"write": "deny", "edit": "deny", "task": "deny", "bash": map[string]any{
-				"gentle-ai review inspect-candidate --purpose targeted-validation *": "allow", "*": "deny",
-			}},
-		},
-	}})
+	task := map[string]any{}
+	for _, name := range openCodeFamilyManagedRoles(agent) {
+		task[name] = "allow"
+	}
+	roles := map[string]any{
+		"gentle-orchestrator": map[string]any{"permission": map[string]any{"task": task}},
+	}
+	if model.SupportsReceiptDrivenDevelopment(agent) {
+		roles["review-refuter"] = reviewRefuterRole()
+	}
+	if agent == model.AgentOpenCode {
+		roles["review-validator"] = reviewValidatorRole()
+	}
+	overlay, err := json.Marshal(map[string]any{"agent": roles})
 	if err != nil {
 		return false, err
 	}
@@ -1097,7 +1392,188 @@ func installOpenCodeReviewProviderRoles(settingsPath string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	result, err := filemerge.WriteFileAtomic(settingsPath, merged, 0o644)
+	result, err := filemerge.WriteFileAtomic(settingsPath, merged, filemerge.ExistingFileMode(settingsPath, 0o644))
+	return result.Changed, err
+}
+
+// reviewRefuterRole is the review-refuter entry the routing owner writes.
+func reviewRefuterRole() map[string]any {
+	return map[string]any{
+		"mode": "subagent", "hidden": true,
+		"description": "Read-only refuter for provider-issued review findings",
+		"prompt":      "Evaluate only the Go-issued review refuter task. Inspect only the frozen candidate through the provided commands. Do not edit files or delegate. Return only the requested result.",
+		"permission":  map[string]any{"write": "deny", "edit": "deny", "task": "deny"},
+	}
+}
+
+// reviewValidatorRole is the review-validator entry the routing owner writes.
+func reviewValidatorRole() map[string]any {
+	return map[string]any{
+		"mode": "subagent", "hidden": true,
+		"description": "Targeted read-only validator for provider-issued review checks",
+		"prompt":      "Execute only the Go-issued targeted validation. Do not edit files or delegate. Inspect only the frozen candidate using the provided gentle-ai review inspect-candidate command, not the live worktree. Return exactly the requested JSON.",
+		"permission": map[string]any{"write": "deny", "edit": "deny", "task": "deny", "bash": map[string]any{
+			"gentle-ai review inspect-candidate --purpose targeted-validation *": "allow", "*": "deny",
+		}},
+	}
+}
+
+// openCodeFamilyManagedReviewShape returns the exact entry the routing owner
+// writes for one RDD agent, or ok=false for a name it never writes.
+func openCodeFamilyManagedReviewShape(name string) (map[string]any, bool) {
+	switch name {
+	case "review-refuter":
+		return reviewRefuterRole(), true
+	case "review-validator":
+		return reviewValidatorRole(), true
+	}
+	for _, spec := range openCodeParityAgents {
+		if spec.name == name && strings.HasPrefix(name, "review-") {
+			entry, err := openCodeParityAgentEntry(spec)
+			if err != nil {
+				return nil, false
+			}
+			return entry, true
+		}
+	}
+	return nil, false
+}
+
+// openCodeParityAgentEntry renders one parity spec as the routing owner writes it.
+func openCodeParityAgentEntry(spec openCodeParityAgentSpec) (map[string]any, error) {
+	prompt, err := assets.Read("opencode/agents/" + spec.name + ".md")
+	if err != nil {
+		return nil, fmt.Errorf("read embedded prompt for %q: %w", spec.name, err)
+	}
+	return map[string]any{
+		"mode": "subagent", "hidden": true,
+		"description": spec.description,
+		"prompt":      prompt,
+		"permission":  spec.permission,
+	}, nil
+}
+
+// openCodeParityAgentSpec is one entry of the parity set from #4471: the
+// Gentle Shell global agents (gentle-ai-explore/verify/worker, the three JD
+// roles, and the four review lenses) ported to OpenCode subagents at
+// functional parity.
+type openCodeParityAgentSpec struct {
+	name        string
+	description string
+	// permission holds only the OpenCode permission keys that diverge from
+	// the platform default ("allow"); omitted keys stay at their default.
+	permission map[string]any
+}
+
+// openCodeParityAgents is the canonical parity source (gentle-pi
+// assets/agents/*.md at 89b8de3b5). Prompt bodies are embedded verbatim (with
+// documented OpenCode-specific adaptations) under internal/assets/opencode/agents.
+// Model and variant are deliberately omitted from every entry so a deep merge
+// never overwrites a user's own model assignment for these agents.
+var openCodeParityAgents = []openCodeParityAgentSpec{
+	{
+		name:        "gentle-ai-explore",
+		description: "Read-only exploration and mapping for generic ODD work.",
+		permission:  map[string]any{"write": "deny", "edit": "deny", "bash": "deny", "task": "deny"},
+	},
+	{
+		name:        "gentle-ai-verify",
+		description: "Read-only technical verification for generic ODD work.",
+		permission:  map[string]any{"write": "deny", "edit": "deny", "task": "deny"},
+	},
+	{
+		name:        "gentle-ai-worker",
+		description: "Scoped package-owned implementation writer for bounded ODD work. Edits code, runs focused tests, and returns review-ready evidence without committing.",
+		permission:  map[string]any{"task": "deny"},
+	},
+	{
+		name:        "jd-judge-a",
+		description: "Judgment Day blind adversarial reviewer A. Read-only; reports findings and does not fix code.",
+		permission:  map[string]any{"write": "deny", "edit": "deny", "task": "deny"},
+	},
+	{
+		name:        "jd-judge-b",
+		description: "Judgment Day blind adversarial reviewer B. Read-only; independently reports findings and does not fix code.",
+		permission:  map[string]any{"write": "deny", "edit": "deny", "task": "deny"},
+	},
+	{
+		name:        "jd-fix-agent",
+		description: "Judgment Day surgical fix agent for confirmed findings. Can edit code and run focused tests.",
+		permission:  map[string]any{"task": "deny"},
+	},
+	{
+		name:        "review-risk",
+		description: "R1 Risk reviewer — security, privilege boundaries, data exposure, dependency risks, and merge-blocking vulnerabilities.",
+		permission:  map[string]any{"write": "deny", "edit": "deny", "bash": "deny", "task": "deny"},
+	},
+	{
+		name:        "review-readability",
+		description: "R2 Readability reviewer — naming, complexity, intention, maintainability, review size, and context clarity.",
+		permission:  map[string]any{"write": "deny", "edit": "deny", "bash": "deny", "task": "deny"},
+	},
+	{
+		name:        "review-reliability",
+		description: "R3 Reliability reviewer — behavior-first tests, coverage value, edge cases, determinism, contracts, and regressions.",
+		permission:  map[string]any{"write": "deny", "edit": "deny", "bash": "deny", "task": "deny"},
+	},
+	{
+		name:        "review-resilience",
+		description: "R4 Resilience reviewer — fallbacks, retry/backoff, graceful degradation, observability, load, rollback, and SLO risks.",
+		permission:  map[string]any{"write": "deny", "edit": "deny", "bash": "deny", "task": "deny"},
+	},
+}
+
+// installOpenCodeODDParityAgents installs the ODD/JD/review-lens subagents at
+// functional parity with Gentle Shell's global agents (#4471). Prior to this,
+// only gentle-orchestrator, gentleman, review-refuter, and review-validator
+// survived the SDD overlay's retirement; JD and the four review lenses were
+// dropped as collateral.
+func installOpenCodeODDParityAgents(settingsPath string) (bool, error) {
+	return installOpenCodeFamilyParityAgents(settingsPath, model.AgentOpenCode)
+}
+
+// openCodeFamilyParityAgents returns the parity specs installed for an
+// OpenCode-compatible runtime. Kilo keeps the v3.7.0 JD set with the same
+// prompts and permissions, without the gentle-ai-* ODD trio, and without the
+// review lenses: receipt-driven development reaches only its own runtimes.
+func openCodeFamilyParityAgents(agent model.AgentID) []openCodeParityAgentSpec {
+	if agent == model.AgentOpenCode {
+		return openCodeParityAgents
+	}
+	rdd := model.SupportsReceiptDrivenDevelopment(agent)
+	specs := make([]openCodeParityAgentSpec, 0, len(openCodeParityAgents))
+	for _, spec := range openCodeParityAgents {
+		if strings.HasPrefix(spec.name, "gentle-ai-") || (!rdd && isOpenCodeFamilyReviewAgent(spec.name)) {
+			continue
+		}
+		specs = append(specs, spec)
+	}
+	return specs
+}
+
+func installOpenCodeFamilyParityAgents(settingsPath string, agent model.AgentID) (bool, error) {
+	raw, err := os.ReadFile(settingsPath)
+	if err != nil {
+		return false, err
+	}
+	specs := openCodeFamilyParityAgents(agent)
+	agentsOverlay := make(map[string]any, len(specs))
+	for _, spec := range specs {
+		entry, err := openCodeParityAgentEntry(spec)
+		if err != nil {
+			return false, err
+		}
+		agentsOverlay[spec.name] = entry
+	}
+	overlay, err := json.Marshal(map[string]any{"agent": agentsOverlay})
+	if err != nil {
+		return false, err
+	}
+	merged, err := filemerge.MergeJSONObjects(raw, overlay)
+	if err != nil {
+		return false, err
+	}
+	result, err := filemerge.WriteFileAtomic(settingsPath, merged, filemerge.ExistingFileMode(settingsPath, 0o644))
 	return result.Changed, err
 }
 
@@ -1210,7 +1686,7 @@ func stripLegacyTriggerRulesFromOrchestrator(settingsPath string) (agentguidance
 		return agentguidance.Result{}, fmt.Errorf("merge legacy %q removal into %q: %w", legacyTriggerRulesSection, settingsPath, err)
 	}
 
-	writeResult, err := filemerge.WriteFileAtomic(settingsPath, merged, 0o644)
+	writeResult, err := filemerge.WriteFileAtomic(settingsPath, merged, filemerge.ExistingFileMode(settingsPath, 0o644))
 	if err != nil {
 		return agentguidance.Result{}, err
 	}
@@ -2375,7 +2851,8 @@ func backupTargets(homeDir, workspaceDir string, scope InstallScope, selection m
 			paths[filepath.Join(adapter.GlobalConfigDir(homeDir), "hooks.json")] = struct{}{}
 		}
 		// Native review and Judgment Day agents are installed independently of SDD.
-		if names := reviewassets.NativeAgentManifest[adapter.Agent()]; len(names) > 0 {
+		// Retired review agents are listed too: the installer may remove them.
+		if names := reviewassets.NativeAgentFileNames(adapter.Agent()); len(names) > 0 {
 			dir := adapter.SubAgentsDir(componentInjectionDirScoped(homeDir, workspaceDir, scope, adapter))
 			paths[filepath.Join(dir, reviewassets.OwnershipLedgerFilename)] = struct{}{}
 			for _, name := range names {
@@ -2463,9 +2940,27 @@ func adapterSkillBackupTargets(homeDir, workspaceDir string, scope InstallScope,
 				return nil, fmt.Errorf("enumerate %s skill backup targets: %w", adapter.Agent(), err)
 			}
 			paths = append(paths, ordinary...)
+			support, err := skillSupportBackupTargets(componentInjectionDirScoped(homeDir, workspaceDir, scope, adapter), adapter, selection)
+			if err != nil {
+				return nil, err
+			}
+			paths = append(paths, support...)
 		}
 	}
 	return paths, nil
+}
+
+// skillSupportBackupTargets declares the shared references, skill commands,
+// and obsolete shared marker the skills component writes or removes.
+func skillSupportBackupTargets(targetDir string, adapter agents.Adapter, selection model.Selection) ([]string, error) {
+	support, err := skills.SupportFilePaths(targetDir, adapter, selectedSkillIDs(selection))
+	if err != nil {
+		return nil, fmt.Errorf("enumerate %s skill support backup targets: %w", adapter.Agent(), err)
+	}
+	if skillDir := adapter.SkillsDir(targetDir); skillDir != "" {
+		support = append(support, skills.LegacySharedMarkerPath(skillDir))
+	}
+	return support, nil
 }
 
 // claudeMCPSettingsCleanupPaths returns legacy Claude settings files that MCP
@@ -2517,6 +3012,9 @@ func routingGuidancePaths(homeDir, workspaceDir string, scope InstallScope, adap
 			continue
 		}
 		paths = append(paths, routing...)
+		if adapter.Agent() == model.AgentOpenCode && options.SettingsPath != "" {
+			paths = append(paths, opencodedefault.OwnershipPath(options.SettingsPath))
+		}
 	}
 	return paths
 }
@@ -2619,6 +3117,13 @@ func componentPathsWithWorkspaceScoped(homeDir, workspaceDir string, scope Insta
 				path := skills.SkillPathForAgent(targetDir, adapter, skillID)
 				if path != "" {
 					paths = append(paths, path)
+				}
+			}
+			if len(selectedSkillIDs(selection)) > 0 {
+				// Enumeration only fails on a corrupt build; the skills step then
+				// fails loudly while writing, so no path is declared here.
+				if support, err := skills.SupportFilePaths(targetDir, adapter, selectedSkillIDs(selection)); err == nil {
+					paths = append(paths, support...)
 				}
 			}
 		case model.ComponentContext7:
@@ -2726,14 +3231,14 @@ func effectiveOpenCodeSettingsPath(homeDir, workspaceDir string, scope InstallSc
 // routingGuidanceOptions carries OpenCode's caller-resolved effective settings
 // authority into the routing-guidance adapter. Routing remains global because
 // OpenCode does not load workspace-scoped orchestrator guidance; other agents
-// retain their existing targetDir-derived routing path.
+// retain their existing targetDir-derived routing path. Every runtime receives
+// the review contract source its orchestrator render needs.
 func routingGuidanceOptions(homeDir, workspaceDir string, adapter agents.Adapter) agentguidance.RoutingOptions {
-	if adapter.Agent() != model.AgentOpenCode {
-		return agentguidance.RoutingOptions{}
+	options := agentguidance.RoutingOptions{ReviewContract: routingReviewContract}
+	if adapter.Agent() == model.AgentOpenCode {
+		options.SettingsPath = effectiveOpenCodeSettingsPath(homeDir, workspaceDir, ScopeGlobal, adapter)
 	}
-	return agentguidance.RoutingOptions{
-		SettingsPath: effectiveOpenCodeSettingsPath(homeDir, workspaceDir, ScopeGlobal, adapter),
-	}
+	return options
 }
 
 func componentInjectionDir(homeDir, workspaceDir string, adapter agents.Adapter) string {
