@@ -6,6 +6,104 @@ import (
 	"testing"
 )
 
+func TestRemoveLegacyOpenCodeAgentMarkers(t *testing.T) {
+	for _, path := range []string{"opencode.json", "opencode.jsonc"} {
+		t.Run(path, func(t *testing.T) {
+			raw := []byte(`{"agent":{"gentle-orchestrator":{"__managed_by":"gentle-ai/sdd","prompt":"keep"},"custom":{"__managed_by":"gentle-ai/sdd"},"sdd-apply":{"__managed_by":"other"}},"theme":"keep"}`)
+			got, err := RemoveLegacyOpenCodeAgentMarkers(path, raw, []string{"gentle-orchestrator", "sdd-apply"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			root, err := UnmarshalJSONObject(got)
+			if err != nil {
+				t.Fatal(err)
+			}
+			agents := root["agent"].(map[string]any)
+			if _, ok := agents["gentle-orchestrator"].(map[string]any)["__managed_by"]; ok {
+				t.Fatalf("marker retained: %s", got)
+			}
+			if agents["gentle-orchestrator"].(map[string]any)["prompt"] != "keep" || agents["custom"].(map[string]any)["__managed_by"] != "gentle-ai/sdd" || agents["sdd-apply"].(map[string]any)["__managed_by"] != "other" {
+				t.Fatalf("user data changed: %s", got)
+			}
+			again, err := RemoveLegacyOpenCodeAgentMarkers(path, got, []string{"gentle-orchestrator", "sdd-apply"})
+			if err != nil || string(again) != string(got) {
+				t.Fatalf("not idempotent: %s %v", again, err)
+			}
+			if path == "opencode.jsonc" && !strings.Contains(string(got), `"theme":"keep"`) {
+				t.Fatal("lost unrelated formatting")
+			}
+		})
+	}
+}
+
+func TestRemoveLegacyOpenCodeAgentMarkersJSONCCommentsAndRefusals(t *testing.T) {
+	raw := []byte(`{
+ // outside
+ "agent": {
+   "gentle-orchestrator": {
+     // retain prompt note
+     "prompt": "keep",
+     "__managed_by": "gentle-ai/sdd",
+   },
+   "custom": {"__managed_by": "gentle-ai/sdd"},
+ },
+}`)
+	got, err := RemoveLegacyOpenCodeAgentMarkers("opencode.jsonc", raw, []string{"gentle-orchestrator"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, part := range []string{"// outside", "// retain prompt note", `"custom": {"__managed_by": "gentle-ai/sdd"}`} {
+		if !strings.Contains(string(got), part) {
+			t.Fatalf("lost %q: %s", part, got)
+		}
+	}
+	if _, err := UnmarshalJSONObject(got); err != nil {
+		t.Fatalf("invalid output: %v", err)
+	}
+	for _, bad := range []string{`{"agent":`, `{"agent":{"gentle-orchestrator":{"__managed_by":"gentle-ai/sdd"}},"agent":{"gentle-orchestrator":{"__managed_by":"gentle-ai/sdd"}}}`} {
+		result, err := RemoveLegacyOpenCodeAgentMarkers("opencode.jsonc", []byte(bad), []string{"gentle-orchestrator"})
+		if err == nil || string(result) != bad {
+			t.Fatalf("unsafe rewrite of %q: %s %v", bad, result, err)
+		}
+	}
+}
+
+func TestRemoveLegacyOpenCodeAgentMarkersPreservesInlineCommentByRefusal(t *testing.T) {
+	for _, raw := range []string{
+		`{"agent":{"gentle-orchestrator":{"__managed_by" /* user note */ : "gentle-ai/sdd","prompt":"keep"}}}`,
+		`{"agent":{"gentle-orchestrator":{"__managed_by" // user note
+ : "gentle-ai/sdd","prompt":"keep"}}}`,
+		`{"agent":{"gentle-orchestrator":{/* user note */ "__managed_by":"gentle-ai/sdd","prompt":"keep"}}}`,
+		`{"agent":{"gentle-orchestrator":{"__managed_by":"gentle-ai/sdd" /* user's note */,"prompt":"keep"}}}`,
+		`{"agent":{"gentle-orchestrator":{"__managed_by":"gentle-ai/sdd" // user's note
+  ,"prompt":"keep"}}}`,
+	} {
+		got, err := RemoveLegacyOpenCodeAgentMarkers("opencode.jsonc", []byte(raw), []string{"gentle-orchestrator"})
+		if err == nil || string(got) != raw {
+			t.Fatalf("inline comment must be preserved by refusal: %s, %v", got, err)
+		}
+	}
+}
+
+func TestRemoveLegacyOpenCodeAgentMarkersRejectsDuplicateKeys(t *testing.T) {
+	cases := []string{
+		`{"agent":{"gentle-orchestrator":{"__managed_by":"gentle-ai/sdd"}},"agent":{"custom":true}}`,
+		`{"agent":{"gentle-orchestrator":{"__managed_by":"gentle-ai/sdd"},"gentle-orchestrator":{"prompt":"user"}}}`,
+		`{"agent":{"gentle-orchestrator":{"__managed_by":"gentle-ai/sdd","__managed_by":"other"}}}`,
+		`{"theme":1,"theme":2,"agent":{"gentle-orchestrator":{"__managed_by":"gentle-ai/sdd"}}}`,
+	}
+	for _, path := range []string{"opencode.json", "opencode.jsonc"} {
+		for _, raw := range cases {
+			t.Run(path+raw, func(t *testing.T) {
+				got, err := RemoveLegacyOpenCodeAgentMarkers(path, []byte(raw), []string{"gentle-orchestrator"})
+				if err == nil || string(got) != raw {
+					t.Fatalf("duplicate key must fail closed: %s %v", got, err)
+				}
+			})
+		}
+	}
+}
+
 func TestPermissionOverlayNewWildcardCannotOverrideExistingDeny(t *testing.T) {
 	got, err := MergeJSONObjects([]byte(`{"permission":{"bash":{"ssh*":"deny"}}}`), []byte(`{"permission":{"bash":{"*":"allow"}}}`))
 	if err != nil || !strings.Contains(strings.Join(strings.Fields(string(got)), ""), `"bash":{"*":"allow","ssh*":"deny"}`) {
