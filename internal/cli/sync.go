@@ -446,6 +446,17 @@ func (r *syncRuntime) stagePlan() pipeline.StagePlan {
 		}
 	}
 
+	// Retire remaining markers only after routing has consumed them as ownership
+	// proof to remove retired agents and refresh current roles. Assignments may
+	// also write settings, so cleanup runs after those updates as well.
+	for _, adapter := range adapters {
+		if adapter.Agent() == model.AgentOpenCode {
+			apply = append(apply, &openCodeMarkerMigrationSyncStep{
+				path: effectiveOpenCodeSettingsPath(r.homeDir, r.workspaceDir, ScopeGlobal, adapter), changedFiles: &r.changedFiles,
+			})
+		}
+	}
+
 	// Managed OpenCode-compatible plugins are versioned runtime artifacts tied
 	// to the installed binary (OpenCode and Kilocode receive them). When the
 	// persisted selection lacks the SDD component, no SDD step is planned and
@@ -524,6 +535,11 @@ func syncBackupTargets(homeDir, workspaceDir string, selection model.Selection, 
 					paths[path] = struct{}{}
 				}
 			}
+		}
+	}
+	for _, adapter := range adapters {
+		if adapter.Agent() == model.AgentOpenCode {
+			paths[effectiveOpenCodeSettingsPath(homeDir, workspaceDir, ScopeGlobal, adapter)] = struct{}{}
 		}
 	}
 	if len(selection.ModelAssignments) > 0 {
@@ -718,6 +734,66 @@ func syncPersonaPathsWithWorkspace(homeDir, workspaceDir string, selection model
 // changedFiles is a shared slice pointer. Each step appends candidate paths
 // from its aggregate InjectionResult when any file changed. RunSync compares
 // candidates with pre-sync snapshots before exposing persisted changes.
+// openCodeMarkerMigrationSyncStep retires only known legacy generated-agent
+// markers. The pipeline snapshot includes its settings path for rollback.
+type openCodeMarkerMigrationSyncStep struct {
+	path         string
+	changedFiles *[]string
+	before       []byte
+	mode         os.FileMode
+	changed      bool
+}
+
+func (s *openCodeMarkerMigrationSyncStep) ID() string { return "sync:opencode:legacy-markers" }
+
+func (s *openCodeMarkerMigrationSyncStep) Run() error {
+	info, err := os.Lstat(s.path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("stat OpenCode settings: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("refuse non-regular OpenCode settings %q: inspect the path and use a regular settings file (not a symlink), then rerun gentle-ai sync", s.path)
+	}
+	raw, err := os.ReadFile(s.path)
+	if err != nil {
+		return fmt.Errorf("read OpenCode settings: %w", err)
+	}
+	names := append([]string{"gentle-orchestrator"}, opencodeactivation.GentleAIODDPhases()...)
+	names = append(names, opencodeactivation.JDPhases()...)
+	names = append(names, opencodeactivation.ReviewPhases()...)
+	// Older installations used sdd-* names; these are eligible only when
+	// their definition still carries the exact retired ownership marker.
+	names = append(names, "sdd-orchestrator", "sdd-init", "sdd-explore", "sdd-propose", "sdd-spec", "sdd-design", "sdd-tasks", "sdd-apply", "sdd-verify", "sdd-archive", "sdd-onboard")
+	updated, err := filemerge.RemoveLegacyOpenCodeAgentMarkers(s.path, raw, names)
+	if err != nil {
+		return fmt.Errorf("migrate OpenCode agent markers: %w", err)
+	}
+	if bytes.Equal(raw, updated) {
+		return nil
+	}
+	s.before, s.mode = raw, info.Mode().Perm()
+	result, err := filemerge.WriteFileAtomic(s.path, updated, s.mode)
+	s.changed = result.Changed
+	if result.Changed && s.changedFiles != nil {
+		*s.changedFiles = append(*s.changedFiles, s.path)
+	}
+	if err != nil {
+		return fmt.Errorf("write OpenCode agent markers: %w", err)
+	}
+	return nil
+}
+
+func (s *openCodeMarkerMigrationSyncStep) Rollback() error {
+	if !s.changed {
+		return nil
+	}
+	_, err := filemerge.WriteFileAtomic(s.path, s.before, s.mode)
+	return err
+}
+
 // openCodeModelAssignmentSyncStep persists picker choices independently of the
 // retired SDD component. Only current picker identities are eligible; legacy
 // saved SDD keys must not be resurrected by an ordinary sync.
