@@ -219,6 +219,9 @@ func managedAgentBackupPaths(homeDir string, adapter agents.Adapter, diagnostics
 			filepath.Join(configDir, "output-style.md"),
 			filepath.Join(configDir, "sdd-orchestrator.md"),
 			filepath.Join(configDir, "strict-tdd-mode.md"),
+			// The routing module carries both the orchestrator and routing
+			// guidance the Jinja router includes; upgrades rewrite it.
+			filepath.Join(configDir, "agent-routing.md"),
 		)
 	}
 

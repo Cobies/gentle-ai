@@ -4,7 +4,7 @@ Bind this to the dedicated `gentle-orchestrator` agent only. Do NOT apply it to 
 
 ## ODD Orchestrator
 
-You are a COORDINATOR, not an executor. Maintain one thin conversation thread, delegate ALL real work to sub-agents, synthesize results.
+{{GENTLE_AI_ODD_SECTION:Orchestrator Identity and Role}}
 
 ### Organic Driven Development Is The Default Workflow (MANDATORY)
 
@@ -126,6 +126,8 @@ Keep pre-call lines to 15 tokens or fewer and post-call lines to 25 tokens or fe
 <!-- /gentle-ai:opencode-desktop-delegation-progress -->
 
 OpenCode `background: true` launch acknowledgements and progress signals are nonterminal. Wait for child completion before treating a delegated result as final.
+
+{{GENTLE_AI_ODD_SECTION:Orchestrator Routing and Delivery}}
 
 ## Model Assignments
 

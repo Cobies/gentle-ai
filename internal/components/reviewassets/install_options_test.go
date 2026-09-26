@@ -127,7 +127,7 @@ func TestNativeAgentOwnedModelUpdates(t *testing.T) {
 }
 
 func TestNativeAgentNoLedgerDoesNotAdoptMatchingBytes(t *testing.T) {
-	adapter, err := agents.NewAdapter(model.AgentCursor)
+	adapter, err := agents.NewAdapter(model.AgentKiroIDE)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func TestNativeAgentNoLedgerDoesNotAdoptMatchingBytes(t *testing.T) {
 	if _, err := reviewassets.InstallNativeAgents(home, adapter, reviewassets.InstallOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	name := "review-risk.md"
+	name := "jd-judge-a.md"
 	path := filepath.Join(dir, name)
 	before, err := os.ReadFile(path)
 	if err != nil {
@@ -172,7 +172,7 @@ func TestNativeAgentInvalidLedgerFailsClosed(t *testing.T) {
 		{name: "malformed", body: "{"}, {name: "unsupported", body: `{"version":2,"files":{}}`}, {name: "symlink", link: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			adapter, err := agents.NewAdapter(model.AgentCursor)
+			adapter, err := agents.NewAdapter(model.AgentKiroIDE)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -196,7 +196,7 @@ func TestNativeAgentInvalidLedgerFailsClosed(t *testing.T) {
 			if _, err := reviewassets.InstallNativeAgents(home, adapter, reviewassets.InstallOptions{}); err == nil {
 				t.Fatal("invalid ledger accepted")
 			}
-			if _, err := os.Lstat(filepath.Join(dir, "review-risk.md")); !os.IsNotExist(err) {
+			if _, err := os.Lstat(filepath.Join(dir, "jd-judge-a.md")); !os.IsNotExist(err) {
 				t.Fatalf("partial install despite invalid ledger: %v", err)
 			}
 		})
@@ -204,7 +204,7 @@ func TestNativeAgentInvalidLedgerFailsClosed(t *testing.T) {
 }
 
 func TestNativeAgentSymlinkFailsClosed(t *testing.T) {
-	adapter, err := agents.NewAdapter(model.AgentCursor)
+	adapter, err := agents.NewAdapter(model.AgentKiroIDE)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +217,7 @@ func TestNativeAgentSymlinkFailsClosed(t *testing.T) {
 	if err := os.WriteFile(target, []byte("safe"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(target, filepath.Join(dir, "review-risk.md")); err != nil {
+	if err := os.Symlink(target, filepath.Join(dir, "jd-judge-a.md")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := reviewassets.InstallNativeAgents(home, adapter, reviewassets.InstallOptions{}); err == nil {

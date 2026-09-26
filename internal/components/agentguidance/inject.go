@@ -74,8 +74,12 @@ type RoutingOptions struct {
 // land the guidance in a scope the agent never loads, or inside a template its
 // own installer rewrites from an embedded asset on the next sync.
 //
-// Only the marked section is owned by Gentle AI: everything a user wrote around
-// it is preserved verbatim, and a second identical injection is a no-op.
+// Every non-Pi runtime also receives its orchestrator instructions as a second
+// managed section placed ahead of routing (see RenderOrchestrator); a v3.7.0
+// sdd-orchestrator block is converted in place so exactly one remains.
+//
+// Only the marked sections are owned by Gentle AI: everything a user wrote
+// around them is preserved verbatim, and a second identical injection is a no-op.
 func InjectRoutingWithOptions(targetDir string, agent model.AgentID, options RoutingOptions) (Result, error) {
 	// Render before resolving the delivery so an unsupported agent is rejected
 	// without having touched the filesystem.
@@ -98,13 +102,30 @@ func InjectRoutingWithOptions(targetDir string, agent model.AgentID, options Rou
 	// preserves it when other component writers retain that section.
 	rendered = InjectRemoteAuthorization(rendered)
 
+	// The orchestrator travels with routing into the same always-loaded scope
+	// and the same write, so the two can never land in different files or be
+	// half-applied. Pi is the only runtime without one: Gentle Shell owns it.
+	var orchestrator string
+	if agent != model.AgentPi {
+		orchestrator, err = RenderOrchestrator(agent)
+		if err != nil {
+			return Result{}, err
+		}
+	}
+	merge := func(existing string) string {
+		if orchestrator != "" {
+			existing = injectOrchestratorSection(existing, orchestrator)
+		}
+		return filemerge.InjectMarkdownSection(existing, RoutingSectionID, rendered)
+	}
+
 	switch delivery.kind {
 	case deliveryOrchestratorPrompt:
-		return injectOrchestratorPrompt(delivery, agent, rendered)
+		return injectOrchestratorPrompt(delivery, agent, merge)
 	case deliveryJinjaModule:
-		return injectJinjaModule(targetDir, delivery, agent, rendered)
+		return injectJinjaModule(targetDir, delivery, agent, merge)
 	default:
-		return injectPromptSection(delivery, rendered)
+		return injectPromptSection(delivery, merge)
 	}
 }
 
@@ -218,9 +239,12 @@ func DeliversThroughOrchestratorPrompt(agent model.AgentID) bool {
 	return agent == model.AgentOpenCode || agent == model.AgentKilocode
 }
 
-// injectPromptSection is the default delivery: a managed marker section inside
+// guidanceMerge folds every managed guidance section into existing content.
+type guidanceMerge func(existing string) string
+
+// injectPromptSection is the default delivery: managed marker sections inside
 // the adapter's own system prompt file.
-func injectPromptSection(delivery routingDelivery, rendered string) (Result, error) {
+func injectPromptSection(delivery routingDelivery, merge guidanceMerge) (Result, error) {
 	promptPath := delivery.paths[0]
 
 	existing, err := readFileOrEmpty(promptPath)
@@ -228,9 +252,9 @@ func injectPromptSection(delivery routingDelivery, rendered string) (Result, err
 		return Result{}, err
 	}
 
-	updated := filemerge.InjectMarkdownSection(existing, RoutingSectionID, rendered)
+	updated := merge(existing)
 
-	writeResult, err := filemerge.WriteFileAtomic(promptPath, []byte(updated), 0o644)
+	writeResult, err := filemerge.WriteFileAtomic(promptPath, []byte(updated), filemerge.ExistingFileMode(promptPath, 0o644))
 	if err != nil {
 		return Result{}, err
 	}
@@ -244,7 +268,7 @@ func injectPromptSection(delivery routingDelivery, rendered string) (Result, err
 // verbatim from an embedded asset on every run, so anything injected into that
 // file is destroyed by the next sync. The module survives because the router
 // only references it.
-func injectJinjaModule(targetDir string, delivery routingDelivery, agent model.AgentID, rendered string) (Result, error) {
+func injectJinjaModule(targetDir string, delivery routingDelivery, agent model.AgentID, merge guidanceMerge) (Result, error) {
 	// Bootstrap first: the module is only ever read through the router template,
 	// so the template must exist before the module is worth writing.
 	if err := delivery.bootstrapper.BootstrapTemplate(targetDir); err != nil {
@@ -261,9 +285,9 @@ func injectJinjaModule(targetDir string, delivery routingDelivery, agent model.A
 		return Result{}, err
 	}
 
-	updated := filemerge.InjectMarkdownSection(existing, RoutingSectionID, rendered)
+	updated := merge(existing)
 
-	writeResult, err := filemerge.WriteFileAtomic(modulePath, []byte(updated), 0o644)
+	writeResult, err := filemerge.WriteFileAtomic(modulePath, []byte(updated), filemerge.ExistingFileMode(modulePath, 0o644))
 	if err != nil {
 		return Result{}, err
 	}
@@ -294,7 +318,7 @@ func requireModuleIsIncluded(adapter agents.Adapter, agent model.AgentID, target
 // injectOrchestratorPrompt delivers guidance inside the managed orchestrator
 // agent definition of the adapter's settings document — the always-loaded scope
 // for the OpenCode family. Every other key in that document is preserved.
-func injectOrchestratorPrompt(delivery routingDelivery, agent model.AgentID, rendered string) (Result, error) {
+func injectOrchestratorPrompt(delivery routingDelivery, agent model.AgentID, merge guidanceMerge) (Result, error) {
 	settingsPath := delivery.paths[0]
 
 	raw, err := readBytesOrEmpty(settingsPath)
@@ -315,7 +339,7 @@ func injectOrchestratorPrompt(delivery routingDelivery, agent model.AgentID, ren
 		return Result{}, err
 	}
 
-	updatedPrompt := filemerge.InjectMarkdownSection(existingPrompt, RoutingSectionID, rendered)
+	updatedPrompt := merge(existingPrompt)
 
 	overlay, err := json.Marshal(map[string]any{
 		"agent": map[string]any{

@@ -3164,7 +3164,7 @@ func TestRunSyncNoOpWhenNoAgentsDiscovered(t *testing.T) {
 // reports the managed actions that were executed, not just verification results.
 func TestNativeReviewSyncPipelineRollbackRestoresLedgerAndAgent(t *testing.T) {
 	home := t.TempDir()
-	adapter, err := agents.NewAdapter(model.AgentCursor)
+	adapter, err := agents.NewAdapter(model.AgentKiroIDE)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3173,7 +3173,7 @@ func TestNativeReviewSyncPipelineRollbackRestoresLedgerAndAgent(t *testing.T) {
 	}
 	dir := adapter.SubAgentsDir(home)
 	ledger := filepath.Join(dir, reviewassets.OwnershipLedgerFilename)
-	path := filepath.Join(dir, "review-risk.md")
+	path := filepath.Join(dir, "jd-judge-a.md")
 	ledgerBefore, err := os.ReadFile(ledger)
 	if err != nil {
 		t.Fatal(err)
@@ -3182,7 +3182,7 @@ func TestNativeReviewSyncPipelineRollbackRestoresLedgerAndAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	selection := model.Selection{Agents: []model.AgentID{model.AgentCursor}}
+	selection := model.Selection{Agents: []model.AgentID{model.AgentKiroIDE}}
 	runtime, err := newSyncRuntime(home, selection)
 	if err != nil {
 		t.Fatal(err)
@@ -3214,12 +3214,12 @@ func TestNativeReviewSyncPipelineRollbackRestoresLedgerAndAgent(t *testing.T) {
 
 func TestNativeReviewSyncPreservesUnknownAndSnapshotsLedger(t *testing.T) {
 	home, workspace := t.TempDir(), t.TempDir()
-	adapter, err := agents.NewAdapter(model.AgentCursor)
+	adapter, err := agents.NewAdapter(model.AgentKiroIDE)
 	if err != nil {
 		t.Fatal(err)
 	}
-	selection := model.Selection{Agents: []model.AgentID{model.AgentCursor}}
-	path := filepath.Join(adapter.SubAgentsDir(home), "review-risk.md")
+	selection := model.Selection{Agents: []model.AgentID{model.AgentKiroIDE}}
+	path := filepath.Join(adapter.SubAgentsDir(home), "jd-judge-a.md")
 	ledger := filepath.Join(adapter.SubAgentsDir(home), reviewassets.OwnershipLedgerFilename)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
@@ -3240,7 +3240,7 @@ func TestNativeReviewSyncPreservesUnknownAndSnapshotsLedger(t *testing.T) {
 	}
 	state := &runtimeState{}
 	changed := []string{}
-	step := nativeReviewAgentStep{id: "sync-test", agent: model.AgentCursor, homeDir: home, workspaceDir: workspace, scope: ScopeGlobal, selection: selection, changedFiles: &changed, state: state}
+	step := nativeReviewAgentStep{id: "sync-test", agent: model.AgentKiroIDE, homeDir: home, workspaceDir: workspace, scope: ScopeGlobal, selection: selection, changedFiles: &changed, state: state}
 	if err := step.Run(); err != nil {
 		t.Fatal(err)
 	}
@@ -5183,9 +5183,11 @@ func TestRunSyncWithSelectionPiRetirementDoesNotTouchOtherAgents(t *testing.T) {
 	mustWriteFile(t, appendSystemPath, []byte(
 		"<!-- gentle-ai:sdd-orchestrator -->\nSDD body\n<!-- /gentle-ai:sdd-orchestrator -->\n"))
 
+	// The legacy Claude block is Gentle AI-owned and is converted to the
+	// current orchestrator; the Pi cleanup must leave user text alone.
 	claudePath := systemPromptFileFor(t, home, model.AgentClaudeCode)
-	claudeContent := "user preamble\n\n" +
-		"<!-- gentle-ai:sdd-orchestrator -->\nKEEP-CLAUDE-SDD\n<!-- /gentle-ai:sdd-orchestrator -->\n"
+	claudeContent := "KEEP-CLAUDE-USER preamble\n\n" +
+		"<!-- gentle-ai:sdd-orchestrator -->\nlegacy SDD body\n<!-- /gentle-ai:sdd-orchestrator -->\n"
 	mustWriteFile(t, claudePath, []byte(claudeContent))
 
 	mustWriteFile(t, state.Path(home), []byte(`{"installed_agents":["pi","claude-code"]}`))
@@ -5200,8 +5202,12 @@ func TestRunSyncWithSelectionPiRetirementDoesNotTouchOtherAgents(t *testing.T) {
 	if _, err := os.Lstat(appendSystemPath); !os.IsNotExist(err) {
 		t.Fatalf("Pi APPEND_SYSTEM.md remains after owned-only cleanup: %v", err)
 	}
-	if got := readTextFile(t, claudePath); !strings.Contains(got, "KEEP-CLAUDE-SDD") {
+	got := readTextFile(t, claudePath)
+	if !strings.HasPrefix(got, "KEEP-CLAUDE-USER preamble\n") {
 		t.Fatalf("Claude system prompt lost unrelated content: %q", got)
+	}
+	if strings.Contains(got, "gentle-ai:sdd-orchestrator") || strings.Count(got, "<!-- gentle-ai:orchestrator -->") != 1 {
+		t.Fatalf("Claude legacy orchestrator was not converted to exactly one current block: %q", got)
 	}
 }
 
