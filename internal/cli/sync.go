@@ -755,7 +755,7 @@ func (s *openCodeMarkerMigrationSyncStep) Run() error {
 		return fmt.Errorf("stat OpenCode settings: %w", err)
 	}
 	if !info.Mode().IsRegular() {
-		return fmt.Errorf("refuse non-regular OpenCode settings %q", s.path)
+		return fmt.Errorf("refuse non-regular OpenCode settings %q: inspect the path and use a regular settings file (not a symlink), then rerun gentle-ai sync", s.path)
 	}
 	raw, err := os.ReadFile(s.path)
 	if err != nil {
