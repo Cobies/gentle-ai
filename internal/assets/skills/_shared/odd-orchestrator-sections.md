@@ -22,6 +22,27 @@ The `on` branch below holds only while the native review reaches a terminal outc
 - Exploration stays a separate delegation only when the parent needs the map to decide or route; reading that prepares a write belongs to the writer doing that write.
 <!-- sdd-orchestrator-section:Delegated Verification Gate (MANDATORY):end -->
 
+<!-- sdd-orchestrator-section:Delegated Verification Gate (MANDATORY) (ODD only):start -->
+Verification of a delegated writer's work is proportionate to the risk of the change, judged from what it touches: **passive** (documentation, images, or comments with no executable effect), **medium** (an ordinary behavior change covered by focused tests), or **high** (security, credentials, data loss, concurrency, migrations, installers, public contracts, or anything unclear). When the tier is unclear, treat the change as high.
+
+- **Passive**: structural readback only.
+- **Medium**: writer self-verification — the bounded writer runs the parent-authorized `## Verification` commands in the foreground and reports `<command>: <observed result>`. Add a separate verifier only when the writer ran on a small-model profile (low effort or a mini model).
+- **High or unclear**: writer self-verification plus an independent verifier — a fresh read-only worker that re-runs the verification commands and inspects the diff without the writer's context. The small-model bias raises the tier by one for verification purposes.
+- The parent spot check — re-running one reported command before delivery — stays in every tier.
+- The writer receives `## Verification` naming the exact commands to run, and may receive `## Known environmental failures` naming exact test names or command lines already failing on the base as evidence; any other failing required command still forces `partial`.
+- Exploration stays a separate delegation only when the parent needs the map to decide or route; reading that prepares a write belongs to the writer doing that write.
+<!-- sdd-orchestrator-section:Delegated Verification Gate (MANDATORY) (ODD only):end -->
+
+<!-- sdd-orchestrator-section:Native Checking Contract (ODD only):start -->
+- Final source-mutating normalization (formatters, generators, fixers) happens before functional verification. After verification, only check-only formatting, typechecking, and tests may run; any byte, path, or mode change after verification requires re-running the affected checks.
+- A passive ordinary document or image needs structural readback, not an artificial semantic-verification subagent. Active, mixed, operational, executable, mode-changing, or unknown content gets functional verification at the tier the Delegated Verification Gate assigns.
+- For a trivial passive documentation-only edit, structural readback is the complete proportional check; do not open a separate semantic-verification ceremony.
+- If an applicable verifier is unavailable, report it as unavailable; never invent a pass, retry indefinitely, or escalate into extra ceremony.
+- An applicable quick check runs once. Long or very-long work gets one cost/side-effect forecast before launch. Unavailable, partial, declined, or exhausted proof becomes one actionable **Needs your decision** result.
+- Functional proof and independent verification both project as **Checking**. One verified change permits at most one scoped correction; there is no loop-until-clean behavior.
+- Commit, push, PR, direct-main, emergency, and release gates follow ordinary repository policy; checking output never authorizes delivery.
+<!-- sdd-orchestrator-section:Native Checking Contract (ODD only):end -->
+
 <!-- sdd-orchestrator-section:Delegated Verification Gate (Reduced Form):start -->
 This runtime has no subagent delegation mechanism, so there is no separate writer or verifier to gate: the orchestrator itself performs the bounded action and its own verification. The native risk tier from `gentle-ai review assess --cwd <repo> --json` (`gentle-ai.review-assessment/v1`, `risk` one of `passive`, `medium`, `high`; any failure or an unrecognized verb is treated as `high`) still decides whether verification commands run at all:
 

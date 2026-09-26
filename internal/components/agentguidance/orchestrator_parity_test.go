@@ -16,8 +16,8 @@ import (
 //
 // The list carries ODD and orchestration sections only: receipt-driven
 // development applies to a subset of runtimes, so RDD sections (Provider Defect
-// Handoff, Delegated Verification Gate, Native Checking Contract, and the review
-// lifecycle) are asserted where RDD ships, not here.
+// Handoff, the user-owned switch, and the review lifecycle) are asserted where
+// RDD ships (rdd_gating_test.go), not here.
 //
 // Deliberately absent: Organic feature continuity and the memory lifecycle
 // rule (owned by the routing block's ODD protocol and the Engram protocol),

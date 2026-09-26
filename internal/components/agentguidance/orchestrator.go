@@ -32,7 +32,39 @@ const (
 	runtimeAgentIDPlaceholder       = "{{GENTLE_AI_RUNTIME_AGENT_ID}}"
 	reviewExecutionHeading          = "#### Review Execution Contract"
 	reviewExecutionNextHeading      = "Cost and Context Balance"
+	providerDefectHandoffHeading    = "#### Gentle AI Provider Defect Handoff (MANDATORY)"
+	nativeCheckingHeading           = "#### Native Checking Contract"
+	nativeCheckingSection           = "Native Checking Contract"
+	// oddOnlySectionSuffix names the shared-section variant a runtime without
+	// receipt-driven development receives in place of the canonical body.
+	oddOnlySectionSuffix = " (ODD only)"
 )
+
+// nonRDDReplacements rewrites the inline review wording the runtime assets
+// share into its ODD-only form. Whole sections are handled separately.
+var nonRDDReplacements = strings.NewReplacer(
+	"| Tests, builds, installs, or native review actions |", "| Tests, builds, installs, or verification actions |",
+	"tests, builds, installs, and native review actors may use fresh workers", "tests, builds, installs, and verification actors may use fresh workers",
+	"run applicable tests, builds, and native review actions as bounded steps", "run applicable tests, builds, and verification actions as bounded steps",
+	"- Let the native review and delivery providers select checking and delivery actions; repeated gates reuse exact authority and never reopen review for unchanged content.", "- Let the user and ordinary repository policy decide delivery; do not infer authorization from checking output.",
+	"- Let native review select its bounded checking plan; delivery remains human-owned under ordinary repository policy.", "- Let the user and ordinary repository policy decide delivery; do not infer authorization from checking output.",
+)
+
+// nonRDDLeakMarkers fail a render closed: a runtime without receipt-driven
+// development must never be handed a piece of the review lifecycle because an
+// asset gained wording the gate above does not know about yet.
+var nonRDDLeakMarkers = []string{
+	"RDD",
+	"receipt",
+	"Receipt",
+	"refuter",
+	"native review",
+	"Native review",
+	"gentle-ai review",
+	"review-integration",
+	"Native Compact Review Orchestration",
+	"Provider Defect Handoff",
+}
 
 // ErrMissingReviewContract fails closed when a runtime that advertises the
 // native review transport would receive an orchestrator without its review
@@ -58,14 +90,13 @@ func SetReviewContractSource(source ReviewContractSource) {
 	reviewContractSource = source
 }
 
-// reviewExecutionContract returns the contract for a runtime that advertises
-// the review transport, or ok=false for one that does not.
+// reviewExecutionContract returns the contract for a runtime that receives
+// receipt-driven development, or ok=false for one that does not.
 func reviewExecutionContract(agent model.AgentID) (contract string, ok bool, err error) {
-	manifest, err := capabilitymanifest.ForAgent(agent)
-	if err != nil {
+	if _, err := capabilitymanifest.ForAgent(agent); err != nil {
 		return "", false, err
 	}
-	if !manifest.Advertises(capabilitymanifest.ContractReviewTransportV1) {
+	if !model.SupportsReceiptDrivenDevelopment(agent) {
 		return "", false, nil
 	}
 	reviewContractMu.RLock()
@@ -121,8 +152,14 @@ func orchestratorAsset(agent model.AgentID) string {
 
 // RenderOrchestrator composes the orchestrator instructions one runtime
 // installs: its asset with the shared ODD sections expanded, the native review
-// execution contract bound to the runtime identity where the runtime's
-// capability manifest advertises the review transport, and no template tokens.
+// execution contract bound to the runtime identity where the runtime receives
+// receipt-driven development, and no template tokens.
+//
+// A runtime outside model.SupportsReceiptDrivenDevelopment receives ODD only:
+// the provider defect handoff (which exists to settle the review consent
+// envelope) and the review lifecycle are removed, and the verification and
+// checking contracts take their ODD-only form. A render that would still carry
+// review wording fails closed.
 //
 // Pi is rejected: its prompt is owned by the Gentle Shell package.
 func RenderOrchestrator(agent model.AgentID) (string, error) {
@@ -136,7 +173,8 @@ func RenderOrchestrator(agent model.AgentID) (string, error) {
 		return "", fmt.Errorf("render orchestrator for %q: %w", agent, err)
 	}
 
-	content, err = expandSharedOrchestratorSections(content)
+	rdd := model.SupportsReceiptDrivenDevelopment(agent)
+	content, err = expandSharedOrchestratorSections(content, rdd)
 	if err != nil {
 		return "", fmt.Errorf("render orchestrator for %q: %w", agent, err)
 	}
@@ -158,6 +196,13 @@ func RenderOrchestrator(agent model.AgentID) (string, error) {
 		content = removeSection(content, reviewExecutionHeading, reviewExecutionNextHeading)
 	}
 
+	if !rdd {
+		content, err = stripReceiptDrivenDevelopment(content)
+		if err != nil {
+			return "", fmt.Errorf("render orchestrator for %q: %w", agent, err)
+		}
+	}
+
 	content = strings.ReplaceAll(content, runtimeAgentIDPlaceholder, string(agent))
 	if strings.Contains(content, "{{GENTLE_AI_") {
 		return "", fmt.Errorf("render orchestrator for %q: unresolved template placeholder in %s", agent, path)
@@ -165,11 +210,36 @@ func RenderOrchestrator(agent model.AgentID) (string, error) {
 	return strings.TrimSpace(content) + "\n", nil
 }
 
+// stripReceiptDrivenDevelopment turns a rendered orchestrator into its ODD-only
+// form for a runtime without receipt-driven development.
+func stripReceiptDrivenDevelopment(content string) (string, error) {
+	content = removeHeadingBlock(content, providerDefectHandoffHeading)
+
+	shared, err := assets.Read(sharedOrchestratorSectionsAsset)
+	if err != nil {
+		return "", err
+	}
+	checking := sharedOrchestratorSection(shared, nativeCheckingSection+oddOnlySectionSuffix)
+	if checking == "" {
+		return "", fmt.Errorf("shared orchestrator section %q has no canonical body", nativeCheckingSection+oddOnlySectionSuffix)
+	}
+	content = replaceHeadingBlockBody(content, nativeCheckingHeading, checking)
+	content = nonRDDReplacements.Replace(content)
+
+	for _, marker := range nonRDDLeakMarkers {
+		if strings.Contains(content, marker) {
+			return "", fmt.Errorf("orchestrator without receipt-driven development still carries review content %q", marker)
+		}
+	}
+	return content, nil
+}
+
 // expandSharedOrchestratorSections resolves every shared-section placeholder in
 // one pass. A canonical body is literal text, so a placeholder inside one is not
 // a nested reference. An unknown section fails rather than shipping a prompt
-// with a literal template token in it.
-func expandSharedOrchestratorSections(content string) (string, error) {
+// with a literal template token in it. Without receipt-driven development, a
+// section's "(ODD only)" variant replaces its canonical body when one exists.
+func expandSharedOrchestratorSections(content string, rdd bool) (string, error) {
 	shared, err := assets.Read(sharedOrchestratorSectionsAsset)
 	if err != nil {
 		return "", err
@@ -177,7 +247,13 @@ func expandSharedOrchestratorSections(content string) (string, error) {
 	var missing []string
 	expanded := sharedOrchestratorSectionPlaceholder.ReplaceAllStringFunc(content, func(match string) string {
 		name := sharedOrchestratorSectionPlaceholder.FindStringSubmatch(match)[1]
-		body := sharedOrchestratorSection(shared, name)
+		body := ""
+		if !rdd {
+			body = sharedOrchestratorSection(shared, name+oddOnlySectionSuffix)
+		}
+		if body == "" {
+			body = sharedOrchestratorSection(shared, name)
+		}
 		if body == "" {
 			missing = append(missing, name)
 			return match
@@ -217,6 +293,50 @@ func sectionBounds(content, heading, nextHeading string) (int, int, bool) {
 		}
 	}
 	return start, end, true
+}
+
+// headingBlockBounds returns the byte range of the block that opens at the
+// heading line and ends before the next heading of the same or a higher level.
+func headingBlockBounds(content, heading string) (int, int, bool) {
+	start := lineStartIndex(content, heading+"\n")
+	if start < 0 {
+		return 0, 0, false
+	}
+	level := len(heading) - len(strings.TrimLeft(heading, "#"))
+	offset := start + len(heading) + 1
+	for offset < len(content) {
+		lineEnd := strings.IndexByte(content[offset:], '\n')
+		line := content[offset:]
+		if lineEnd >= 0 {
+			line = content[offset : offset+lineEnd]
+		}
+		if hashes := len(line) - len(strings.TrimLeft(line, "#")); hashes > 0 && hashes <= level && strings.HasPrefix(line[hashes:], " ") {
+			return start, offset, true
+		}
+		if lineEnd < 0 {
+			break
+		}
+		offset += lineEnd + 1
+	}
+	return start, len(content), true
+}
+
+// removeHeadingBlock drops the heading and its body.
+func removeHeadingBlock(content, heading string) string {
+	start, end, ok := headingBlockBounds(content, heading)
+	if !ok {
+		return content
+	}
+	return strings.TrimRight(content[:start], "\n") + "\n\n" + strings.TrimLeft(content[end:], "\n")
+}
+
+// replaceHeadingBlockBody keeps the heading and replaces its body.
+func replaceHeadingBlockBody(content, heading, body string) string {
+	start, end, ok := headingBlockBounds(content, heading)
+	if !ok {
+		return content
+	}
+	return content[:start] + heading + "\n\n" + strings.TrimSpace(body) + "\n\n" + strings.TrimLeft(content[end:], "\n")
 }
 
 func replaceSectionBody(content, heading, nextHeading, body string) string {

@@ -99,6 +99,29 @@ func TestInstallAndSyncDeliverOrchestratorOnceForEveryRuntime(t *testing.T) {
 			if strings.Contains(prompt, legacyOrchestratorOpenMarker) {
 				t.Fatal("install wrote the retired sdd-orchestrator marker")
 			}
+			if !strings.Contains(prompt, "Use at most one scoped independent read-only assumption challenge") {
+				t.Fatal("installed prompt lost the ODD assumption challenge")
+			}
+			// Receipt-driven development reaches only its runtimes.
+			rdd := model.SupportsReceiptDrivenDevelopment(agent)
+			for _, marker := range []string{
+				"Native Compact Review Orchestration",
+				"Gentle AI Provider Defect Handoff",
+				"Receipt-driven development is user-owned",
+				"gentle-ai review mode enable|disable|status",
+				"The native RDD refuter owns native review claims",
+			} {
+				if got := strings.Contains(prompt, marker); got != rdd {
+					t.Errorf("installed prompt carries %q = %v, want %v", marker, got, rdd)
+				}
+			}
+			if !rdd {
+				for _, forbidden := range []string{"gentle-ai review", "RDD", "receipt", "refuter", "native review"} {
+					if strings.Contains(prompt, forbidden) {
+						t.Errorf("non-RDD runtime prompt carries %q", forbidden)
+					}
+				}
+			}
 
 			runInstallInjectionSteps(t, newTestInstallRuntime(t, home, selection))
 			if got := readTextFile(t, path); got != installed {

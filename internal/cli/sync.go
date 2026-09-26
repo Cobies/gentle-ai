@@ -546,7 +546,7 @@ func syncBackupTargets(homeDir, workspaceDir string, selection model.Selection, 
 		paths[path] = struct{}{}
 	}
 	for _, adapter := range adapters {
-		if names := reviewassets.NativeAgentManifest[adapter.Agent()]; len(names) > 0 {
+		if names := reviewassets.NativeAgentFileNames(adapter.Agent()); len(names) > 0 {
 			dir := adapter.SubAgentsDir(componentInjectionDirScoped(homeDir, workspaceDir, ScopeGlobal, adapter))
 			paths[filepath.Join(dir, reviewassets.OwnershipLedgerFilename)] = struct{}{}
 			for _, name := range names {

@@ -106,28 +106,33 @@ func TestInjectRoutingInstallsOrchestratorForEveryRuntime(t *testing.T) {
 				"ODD protocol",
 				"Organic Driven Development Is The Default Workflow",
 				"Lossless Blocking Prompts",
-				"Gentle AI Provider Defect Handoff",
 				"Delegation Rules",
 				"Delegated Verification Gate",
 				"Native Checking Contract",
 				"Language Domain Contract",
 				"Cost and Context Balance",
-				"Receipt-driven development is user-owned",
 			} {
 				if got := headingCount(prompt, heading); got != 1 {
 					t.Errorf("heading %q appears %d times, want 1", heading, got)
 				}
 			}
 
-			// v3.7.0 rendered the native review lifecycle only for runtimes
-			// whose capability manifest advertises the review transport, and
-			// removed the placeholder section for every other runtime.
+			// Receipt-driven development ships only to its runtimes: the
+			// provider defect handoff, the user-owned switch, and the native
+			// review lifecycle, whose placeholder section every other runtime
+			// loses.
 			wantReview := 0
-			if advertisesReviewTransport(t, agent) {
+			if model.SupportsReceiptDrivenDevelopment(agent) {
 				wantReview = 1
 			}
-			if got := headingCount(prompt, "Native Compact Review Orchestration"); got != wantReview {
-				t.Errorf("Native Compact Review Orchestration appears %d times, want %d", got, wantReview)
+			for _, heading := range []string{
+				"Gentle AI Provider Defect Handoff",
+				"Receipt-driven development is user-owned",
+				"Native Compact Review Orchestration",
+			} {
+				if got := headingCount(prompt, heading); got != wantReview {
+					t.Errorf("heading %q appears %d times, want %d", heading, got, wantReview)
+				}
 			}
 			if wantReview == 1 && !strings.Contains(prompt, "--agent "+string(agent)) && !strings.Contains(prompt, "`"+string(agent)+"`") {
 				t.Errorf("review contract is not bound to runtime %q", agent)
