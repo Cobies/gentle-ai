@@ -274,7 +274,7 @@ func RemoveLegacyOpenCodeAgentMarkers(path string, raw []byte, names []string) (
 	if len(eligible) == 0 {
 		return raw, nil
 	}
-	if !strings.HasSuffix(path, ".jsonc") {
+	if !strings.HasSuffix(path, ".jsonc") && json.Valid(raw) {
 		for _, name := range eligible {
 			delete(agents[name].(map[string]any), "__managed_by")
 		}
