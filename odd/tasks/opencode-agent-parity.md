@@ -39,8 +39,8 @@ Parity set (canonical source: gentle-pi `assets/agents/*.md` at 89b8de3b5): `gen
 - [x] T1 — Install parity agents for OpenCode (embedded prompts, permissions from Gentle Shell tool sets), orchestrator routing, model assignment/picker allowlist, parity inventory test. Route: delegated (writer trigger: 2+ non-trivial files).
 - [x] T2 — Upgrade migration: strip `__managed_by`, remove owned retired entries, replace owned current-role entries; regression tests from a v3.7.0 config fixture. Route: delegated (same writer, sequential).
 - [x] T4 — Restore non-SDD assets dropped by the SDD retirement (authorized by user 2026-09-25): install `skills/_shared/*` still referenced by orchestrators/skills (skill-resolver, engram-convention, persistence-contract, research-lifecycle, review-ledger-contract(-pi), README) for every runtime that installed them in v3.7.0, under a non-SDD owner; restore `skill-creator`/`skill-registry` commands for OpenCode, Kilo, Qwen; restore OpenCode `default_agent: gentle-orchestrator` (with existing opencodedefault ownership file) and `share: disabled`. Tests: per-runtime install inventory asserts every `_shared/*.md` referenced by installed orchestrator/skills exists (no dangling refs); OpenCode default_agent/share asserted. Route: delegated (writer trigger).
-- [ ] T5 — Kilo (OpenCode fork) has the same #4471 class: v3.7.0 wrote the same overlay into `~/.config/kilo/opencode.json` (gentle-orchestrator, jd-*, 4 lenses, refuter/validator, sdd-*) with `__managed_by`; main/branch fresh Kilo install has only gentle-orchestrator + gentleman, and upgrade keeps `__managed_by` + `sdd-*`. Restore the v3.7.0 non-SDD Kilo agent set without the marker and run the same legacy migration for Kilo. Found by T3 e2e. Route: delegated.
-- [ ] T3 — Sandbox e2e: fresh install + upgrade from v3.7.0 config in isolated HOME (no Homebrew on PATH), idempotent re-run. Route: inline (bounded action).
+- [x] T5 — Kilo (OpenCode fork) has the same #4471 class: v3.7.0 wrote the same overlay into `~/.config/kilo/opencode.json` (gentle-orchestrator, jd-*, 4 lenses, refuter/validator, sdd-*) with `__managed_by`; main/branch fresh Kilo install has only gentle-orchestrator + gentleman, and upgrade keeps `__managed_by` + `sdd-*`. Restore the v3.7.0 non-SDD Kilo agent set without the marker and run the same legacy migration for Kilo. Found by T3 e2e. Route: delegated.
+- [x] T3 — Sandbox e2e: fresh install + upgrade from v3.7.0 config in isolated HOME (no Homebrew on PATH), idempotent re-run. Route: inline (bounded action).
 
 ## Acceptance criteria
 
@@ -79,6 +79,17 @@ Forecast: ~700 authored lines + ~600 copied prompt lines. Strategy: ask-on-risk 
 - 2026-09-26: T4 follow-up (muhje48q-6-6jvn) complete. Parent: GOOS=windows vet ok, CGO_ENABLED=0 linux/windows build ok, focused isolated tests ok. Commit 3d01b3762. Review assess (base 72519acad, slice T2+T4): high, due → consent granted (user pre-authorized) → lineage review-8d7176597feaf1e4, 4 lenses; readability attempt 1 refused out_of_scope (slot reoffered, rerun admitted); APPROVED + acknowledged. Advisory non-blocking: R2-001..006, R3-001/R4-001 (ownership.go:76-79 = intended v3.7.0 recapture semantics), R3-002. Boundary → 3d01b3762.
 - 2026-09-26: T3 e2e first run (16 runtimes, env -i isolated HOME, fake bins): all exit 0 fresh/upgrade; no non-SDD file lost vs v3.7.0 in any runtime; upgrade leaves no `__managed_by` except Kilo (→ T5). Pre-existing on main too (not this branch): first sync after install rewrites GEMINI.md/AGENTS.md/config.toml in gemini/hermes/copilot/cursor/qwen/codex/kiro/kilo; codex second install rewrites config.toml → follow-up issue, out of scope.
 
+- 2026-09-26: T5 done (worker muhlebys-7-24kp): Kilo gets the v3.7.0 non-SDD set (jd-*, 4 lenses, review-refuter; review-validator stays OpenCode-only as in v3.7.0 because Kilo has no review relay) + same legacy migration. Commit 57871ec75. Review assess (base 3d01b3762): medium, under_budget (not due).
+- 2026-09-26: T3 e2e rerun with branch binary (16 runtimes, env -i): all fresh/upgrade/sync exit 0; no non-SDD file lost vs v3.7.0; zero `__managed_by` after upgrade in every runtime; OpenCode fresh+upgrade = 12 subagents + orchestrator + gentleman, default_agent=gentle-orchestrator, share=disabled; Kilo = 8 subagents + orchestrator + gentleman, share=disabled. Install→first-sync rewrite of the system-prompt file (GEMINI.md/AGENTS.md/steering/rules/config.toml) reproduces identically on main → pre-existing, out of scope.
+- 2026-09-26: full validation: `go run ./internal/gofmtcheck` ok; `go vet ./...` ok; `go test ./... -count=1` in isolated env -i on base 6c7f162f4 and branch in parallel → identical failure sets (7 tests / 4 packages: app TempDir cleanup, cli git-identity x3, reviewtransaction, update bash 3.2), zero branch-only failures.
+
+## Follow-ups (out of scope)
+
+- `internal/assets/opencode/orchestrator.md` is not read by production code (OpenCode orchestrator prompt comes from agentguidance.RenderRouting); T1 edited it for consistency only.
+- Uninstall does not remove OpenCode/Kilo parity agents (pre-existing shape of the retired overlay owner).
+- First sync after install rewrites the system-prompt file in several runtimes (pre-existing on main).
+- Pi-related Go tests read the real `~/.gentle-shell` when HOME is not isolated (test isolation defect).
+
 ## Next step
 
-T5 Kilo → rerun T3 → PR → merge.
+Push, open single PR (size:exception, Closes #4471 #4684 #4758), merge when required checks pass.
