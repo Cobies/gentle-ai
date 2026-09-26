@@ -5,7 +5,7 @@ Branch: `fix/orchestrator-prompt-install` (worktree `gentle-ai-worktrees/orchest
 
 ## Objective
 
-Every supported runtime (all agents except Pi, whose prompt is owned by the Gentle Shell package) gets the full ODD + RDD orchestrator instructions installed again, exactly as v3.7.0 installed its orchestrator section, minus SDD-only content.
+Every supported runtime (all agents except Pi, whose prompt is owned by the Gentle Shell package) gets the ODD orchestrator instructions installed again, as v3.7.0 installed its orchestrator section, minus SDD-only content, with Gentle Shell orchestration parity. RDD content and RDD agents apply only to Claude Code, Codex and OpenCode (plus Pi); every other runtime is ODD-only (T5).
 
 ## Problem
 
@@ -82,4 +82,4 @@ Forecast: ~400–700 authored lines (+ tests). Strategy: ask-on-risk. RDD on (gl
 
 ## Next step
 
-Commit e2e test update, review assess, then delivery (PR) per user decision.
+PR #5005 open; merge when required checks pass.
