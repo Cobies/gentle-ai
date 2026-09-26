@@ -1197,7 +1197,7 @@ func migrateLegacyOpenCodeAgents(settingsPath string, agent model.AgentID) (bool
 	if err != nil {
 		return false, err
 	}
-	result, err := filemerge.WriteFileAtomic(settingsPath, append(encoded, '\n'), 0o644)
+	result, err := filemerge.WriteFileAtomic(settingsPath, append(encoded, '\n'), filemerge.ExistingFileMode(settingsPath, 0o644))
 	return result.Changed, err
 }
 
@@ -1255,7 +1255,7 @@ func installOpenCodeReviewProviderRoles(settingsPath string, agent model.AgentID
 	if err != nil {
 		return false, err
 	}
-	result, err := filemerge.WriteFileAtomic(settingsPath, merged, 0o644)
+	result, err := filemerge.WriteFileAtomic(settingsPath, merged, filemerge.ExistingFileMode(settingsPath, 0o644))
 	return result.Changed, err
 }
 
@@ -1381,7 +1381,7 @@ func installOpenCodeFamilyParityAgents(settingsPath string, agent model.AgentID)
 	if err != nil {
 		return false, err
 	}
-	result, err := filemerge.WriteFileAtomic(settingsPath, merged, 0o644)
+	result, err := filemerge.WriteFileAtomic(settingsPath, merged, filemerge.ExistingFileMode(settingsPath, 0o644))
 	return result.Changed, err
 }
 
@@ -1494,7 +1494,7 @@ func stripLegacyTriggerRulesFromOrchestrator(settingsPath string) (agentguidance
 		return agentguidance.Result{}, fmt.Errorf("merge legacy %q removal into %q: %w", legacyTriggerRulesSection, settingsPath, err)
 	}
 
-	writeResult, err := filemerge.WriteFileAtomic(settingsPath, merged, 0o644)
+	writeResult, err := filemerge.WriteFileAtomic(settingsPath, merged, filemerge.ExistingFileMode(settingsPath, 0o644))
 	if err != nil {
 		return agentguidance.Result{}, err
 	}

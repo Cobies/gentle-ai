@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -197,5 +198,28 @@ func TestApplyShareDefault(t *testing.T) {
 	}
 	if _, err := os.Stat(missing); !os.IsNotExist(err) {
 		t.Fatal("share default created a settings file")
+	}
+}
+
+func TestApplyShareDefaultPreservesPrivateMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission bits are not meaningful on Windows")
+	}
+	settings := filepath.Join(t.TempDir(), "opencode.json")
+	if err := os.WriteFile(settings, []byte(`{"provider":{"example":{"options":{"apiKey":"secret"}}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(settings, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := ApplyShareDefault(settings); err != nil || !changed {
+		t.Fatalf("changed=%v err=%v", changed, err)
+	}
+	info, err := os.Stat(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("settings mode = %v, want 0600", got)
 	}
 }

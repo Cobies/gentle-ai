@@ -331,7 +331,7 @@ func injectOrchestratorPrompt(delivery routingDelivery, agent model.AgentID, ren
 		return Result{}, fmt.Errorf("merge routing guidance into %q: %w", settingsPath, err)
 	}
 
-	writeResult, err := filemerge.WriteFileAtomic(settingsPath, merged, 0o644)
+	writeResult, err := filemerge.WriteFileAtomic(settingsPath, merged, filemerge.ExistingFileMode(settingsPath, 0o644))
 	if err != nil {
 		return Result{}, err
 	}

@@ -112,7 +112,7 @@ func ApplyShareDefault(settingsPath string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	written, err := filemerge.WriteFileAtomic(settingsPath, settings, 0o644)
+	written, err := filemerge.WriteFileAtomic(settingsPath, settings, filemerge.ExistingFileMode(settingsPath, 0o644))
 	return written.Changed, err
 }
 func PrepareUninstall(settingsPath string) (*UninstallPlan, error) {
