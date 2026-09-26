@@ -83,6 +83,8 @@ Forecast: ~700 authored lines + ~600 copied prompt lines. Strategy: ask-on-risk 
 - 2026-09-26: T3 e2e rerun with branch binary (16 runtimes, env -i): all fresh/upgrade/sync exit 0; no non-SDD file lost vs v3.7.0; zero `__managed_by` after upgrade in every runtime; OpenCode fresh+upgrade = 12 subagents + orchestrator + gentleman, default_agent=gentle-orchestrator, share=disabled; Kilo = 8 subagents + orchestrator + gentleman, share=disabled. Install→first-sync rewrite of the system-prompt file (GEMINI.md/AGENTS.md/steering/rules/config.toml) reproduces identically on main → pre-existing, out of scope.
 - 2026-09-26: full validation: `go run ./internal/gofmtcheck` ok; `go vet ./...` ok; `go test ./... -count=1` in isolated env -i on base 6c7f162f4 and branch in parallel → identical failure sets (7 tests / 4 packages: app TempDir cleanup, cli git-identity x3, reviewtransaction, update bash 3.2), zero branch-only failures.
 
+- 2026-09-26: PR #4998 opened (type:bug, size:exception). All required CI passed; CodeRabbit no actionable comments. Copilot raised 2 valid medium findings (legacy `_shared/SKILL.md` marker kept on Windows compat transaction and on uninstall) → fixed test-first (worker mui15vi8-8-1t23), commit 3f8df5171. Review assess (base 3d01b3762): medium, slice_budget_reached → consent granted (pre-authorized) → lineage review-09a6850f955d9903 (review-reliability) APPROVED + acknowledged; advisory R3-001..003 only.
+
 ## Follow-ups (out of scope)
 
 - `internal/assets/opencode/orchestrator.md` is not read by production code (OpenCode orchestrator prompt comes from agentguidance.RenderRouting); T1 edited it for consistency only.
@@ -92,4 +94,4 @@ Forecast: ~700 authored lines + ~600 copied prompt lines. Strategy: ask-on-risk 
 
 ## Next step
 
-Push, open single PR (size:exception, Closes #4471 #4684 #4758), merge when required checks pass.
+Push fix, reply to review threads, merge PR #4998 when required checks pass.
