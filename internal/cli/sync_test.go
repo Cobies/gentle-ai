@@ -5183,9 +5183,11 @@ func TestRunSyncWithSelectionPiRetirementDoesNotTouchOtherAgents(t *testing.T) {
 	mustWriteFile(t, appendSystemPath, []byte(
 		"<!-- gentle-ai:sdd-orchestrator -->\nSDD body\n<!-- /gentle-ai:sdd-orchestrator -->\n"))
 
+	// The legacy Claude block is Gentle AI-owned and is converted to the
+	// current orchestrator; the Pi cleanup must leave user text alone.
 	claudePath := systemPromptFileFor(t, home, model.AgentClaudeCode)
-	claudeContent := "user preamble\n\n" +
-		"<!-- gentle-ai:sdd-orchestrator -->\nKEEP-CLAUDE-SDD\n<!-- /gentle-ai:sdd-orchestrator -->\n"
+	claudeContent := "KEEP-CLAUDE-USER preamble\n\n" +
+		"<!-- gentle-ai:sdd-orchestrator -->\nlegacy SDD body\n<!-- /gentle-ai:sdd-orchestrator -->\n"
 	mustWriteFile(t, claudePath, []byte(claudeContent))
 
 	mustWriteFile(t, state.Path(home), []byte(`{"installed_agents":["pi","claude-code"]}`))
@@ -5200,8 +5202,12 @@ func TestRunSyncWithSelectionPiRetirementDoesNotTouchOtherAgents(t *testing.T) {
 	if _, err := os.Lstat(appendSystemPath); !os.IsNotExist(err) {
 		t.Fatalf("Pi APPEND_SYSTEM.md remains after owned-only cleanup: %v", err)
 	}
-	if got := readTextFile(t, claudePath); !strings.Contains(got, "KEEP-CLAUDE-SDD") {
+	got := readTextFile(t, claudePath)
+	if !strings.HasPrefix(got, "KEEP-CLAUDE-USER preamble\n") {
 		t.Fatalf("Claude system prompt lost unrelated content: %q", got)
+	}
+	if strings.Contains(got, "gentle-ai:sdd-orchestrator") || strings.Count(got, "<!-- gentle-ai:orchestrator -->") != 1 {
+		t.Fatalf("Claude legacy orchestrator was not converted to exactly one current block: %q", got)
 	}
 }
 

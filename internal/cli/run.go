@@ -947,6 +947,13 @@ func (s managedOpenCodePluginsInstallStep) Run() error {
 // it has to be removed, not refreshed.
 const legacyTriggerRulesSection = "trigger-rules"
 
+// The orchestrator guidance embeds the native review execution contract, which
+// reviewassets renders; reviewassets already depends on agentguidance, so the
+// installer wires the source here instead of agentguidance importing it.
+func init() {
+	agentguidance.SetReviewContractSource(reviewassets.ReviewExecutionContractFor)
+}
+
 // agentRoutingGuidanceStep delivers the organic routing guidance for one agent.
 //
 // It is deliberately not a component step. Routing guidance is what lets an
