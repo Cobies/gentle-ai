@@ -1036,11 +1036,11 @@ func (s agentRoutingGuidanceStep) Run() error {
 			return fmt.Errorf("prepare OpenCode default agent: %w", err)
 		}
 		changed, _, err := migrateLegacyOpenCodeAgents(settingsPath, model.AgentOpenCode)
-		if err != nil {
-			return fmt.Errorf("migrate legacy OpenCode agents: %w", err)
-		}
 		if changed && s.changedFiles != nil {
 			*s.changedFiles = append(*s.changedFiles, settingsPath)
+		}
+		if err != nil {
+			return fmt.Errorf("migrate legacy OpenCode agents: %w", err)
 		}
 	}
 	// legacyRemovedKilo carries the review agents the v3.7.0 marker migration
@@ -1052,11 +1052,11 @@ func (s agentRoutingGuidanceStep) Run() error {
 		settingsPath := adapter.SettingsPath(targetDir)
 		changed, removed, err := migrateLegacyOpenCodeAgents(settingsPath, model.AgentKilocode)
 		legacyRemovedKilo = removed
-		if err != nil {
-			return fmt.Errorf("migrate legacy Kilo agents: %w", err)
-		}
 		if changed && s.changedFiles != nil {
 			*s.changedFiles = append(*s.changedFiles, settingsPath)
+		}
+		if err != nil {
+			return fmt.Errorf("migrate legacy Kilo agents: %w", err)
 		}
 	}
 
@@ -1224,10 +1224,9 @@ func migrateLegacyOpenCodeAgents(settingsPath string, agent model.AgentID) (bool
 		return false, nil, err
 	}
 	result, err := filemerge.WriteFileAtomic(settingsPath, append(encoded, '\n'), filemerge.ExistingFileMode(settingsPath, 0o644))
-	if err != nil {
-		return false, nil, err
-	}
-	return result.Changed, removedReview, nil
+	// WriteFileAtomic may publish the replacement and still report an error;
+	// keep its Changed state so the caller records the file either way.
+	return result.Changed, removedReview, err
 }
 
 // openCodeFamilyManagedRoles lists the subagents the routing owner installs for
