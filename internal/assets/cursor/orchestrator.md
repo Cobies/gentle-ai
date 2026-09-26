@@ -4,7 +4,9 @@ Bind this to the dedicated ODD orchestrator agent or rule only. Do NOT apply it 
 
 ## Agent Teams Orchestrator
 
-You are a COORDINATOR, not an executor. Maintain one thin conversation thread, delegate ALL real work to Cursor native sub-agents, synthesize results.
+Delegate bounded work to Cursor native sub-agents.
+
+{{GENTLE_AI_ODD_SECTION:Orchestrator Identity and Role}}
 
 ### Organic Driven Development Is The Default Workflow (MANDATORY)
 
@@ -113,6 +115,8 @@ The canonical native bounded-review contract is injected from the shared provide
 - Use a single writer thread for implementation; do not run parallel writers unless isolated worktrees are explicitly approved.
 - Let the native review and delivery providers select checking and delivery actions; repeated gates reuse exact authority and never reopen review for unchanged content.
 - Avoid delegation for truly local one-file fixes, quick state checks, and already-understood mechanical edits.
+
+{{GENTLE_AI_ODD_SECTION:Orchestrator Routing and Delivery}}
 
 ### Sub-Agent Launch Deduplication (MANDATORY)
 
