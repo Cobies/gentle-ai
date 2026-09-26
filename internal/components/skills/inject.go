@@ -115,8 +115,12 @@ func InjectDirectoryWithCapability(skillDir string, skillIDs []model.SkillID, ca
 // compatibility root with a caller-selected writer, keeping its
 // physical-directory contract. Besides the selected skills it writes the
 // skills/_shared references bound to the generic runtime slot, because every
-// runtime reads this root (v3.7.0 behavior, #4471).
-func InjectDirectoryWithWriter(skillDir string, skillIDs []model.SkillID, writeFile func(string, []byte, fs.FileMode) (filemerge.WriteResult, error)) (InjectionResult, error) {
+// runtime reads this root (v3.7.0 behavior, #4471). It then removes the
+// obsolete LegacySharedMarkerPath through removeFile, so every transaction
+// implementation converges on the same on-disk result. removeFile reports
+// whether a file was removed and is responsible for only removing a regular
+// file.
+func InjectDirectoryWithWriter(skillDir string, skillIDs []model.SkillID, writeFile func(string, []byte, fs.FileMode) (filemerge.WriteResult, error), removeFile func(string) (bool, error)) (InjectionResult, error) {
 	result, err := InjectDirectoryWithCapabilityWithWriter(skillDir, skillIDs, "", writeFile)
 	if err != nil {
 		return InjectionResult{}, err
@@ -127,6 +131,15 @@ func InjectDirectoryWithWriter(skillDir string, skillIDs []model.SkillID, writeF
 	}
 	result.Changed = result.Changed || shared.Changed
 	result.Files = append(result.Files, shared.Files...)
+	marker := LegacySharedMarkerPath(skillDir)
+	removed, err := removeFile(marker)
+	if err != nil {
+		return InjectionResult{}, fmt.Errorf("remove legacy compatibility shared marker: %w", err)
+	}
+	if removed {
+		result.Changed = true
+		result.Files = append(result.Files, marker)
+	}
 	return result, nil
 }
 

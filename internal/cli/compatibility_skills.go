@@ -192,20 +192,12 @@ func (s compatibilitySkillsRefreshStep) Run() error {
 	if slices.Contains(s.components, model.ComponentSkills) {
 		skillIDs := selectedSkillIDs(s.selection)
 		if len(skillIDs) > 0 {
-			result, injectErr := skills.InjectDirectoryWithWriter(skillDir, skillIDs, writer.Write)
+			result, injectErr := skills.InjectDirectoryWithWriter(skillDir, skillIDs, writer.Write, writer.Remove)
 			if injectErr != nil {
 				return fmt.Errorf("refresh compatibility skills: %w", injectErr)
 			}
 			if result.Changed {
 				changed = append(changed, result.Files...)
-			}
-			marker := skills.LegacySharedMarkerPath(skillDir)
-			removed, removeErr := writer.Remove(marker)
-			if removeErr != nil {
-				return fmt.Errorf("remove legacy compatibility shared marker: %w", removeErr)
-			}
-			if removed {
-				changed = append(changed, marker)
 			}
 		}
 	}

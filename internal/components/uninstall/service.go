@@ -943,6 +943,11 @@ func (s *Service) componentOperations(adapter agents.Adapter, componentID model.
 			targets = append(targets, path)
 			ops = append(ops, removeFile(path))
 		}
+		// Upgraded installs may still hold the obsolete generated marker; install
+		// only ever removes it as a regular file, so uninstall does the same.
+		marker := skills.LegacySharedMarkerPath(skillDir)
+		targets = append(targets, marker)
+		ops = append(ops, removeRegularFile(marker))
 		ops = append(ops, removeDirIfEmpty(filepath.Join(skillDir, "_shared")))
 		commands, err := skills.AllSkillCommandPaths(homeDir, adapter)
 		if err != nil {
@@ -1481,6 +1486,31 @@ func removeFile(path string) operation {
 					return false, false, nil
 				}
 				return false, false, statErr
+			}
+			if err := removeFileIfExists(path); err != nil {
+				return false, false, err
+			}
+			return true, true, nil
+		},
+	}
+}
+
+// removeRegularFile removes path only when it is a regular file, leaving
+// symlinks, directories, and other non-regular entries untouched.
+func removeRegularFile(path string) operation {
+	return operation{
+		typeID: opRemoveFile,
+		path:   path,
+		apply: func(path string) (bool, bool, error) {
+			info, err := os.Lstat(path)
+			if os.IsNotExist(err) {
+				return false, false, nil
+			}
+			if err != nil {
+				return false, false, err
+			}
+			if !info.Mode().IsRegular() {
+				return false, false, nil
 			}
 			if err := removeFileIfExists(path); err != nil {
 				return false, false, err

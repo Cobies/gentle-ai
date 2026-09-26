@@ -114,7 +114,7 @@ func TestInjectWritesSupportFiles(t *testing.T) {
 
 func TestInjectDirectoryWithWriterBindsGenericRuntimeSlot(t *testing.T) {
 	skillDir := t.TempDir()
-	result, err := InjectDirectoryWithWriter(skillDir, []model.SkillID{model.SkillCreator}, filemerge.WriteFileAtomic)
+	result, err := InjectDirectoryWithWriter(skillDir, []model.SkillID{model.SkillCreator}, filemerge.WriteFileAtomic, removeRegularTestFile)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,5 +133,60 @@ func TestInjectDirectoryWithWriterBindsGenericRuntimeSlot(t *testing.T) {
 		if !slices.Contains(result.Files, path) {
 			t.Fatalf("declared shared reference %s was not written: %v", path, result.Files)
 		}
+	}
+}
+
+func removeRegularTestFile(path string) (bool, error) {
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if !info.Mode().IsRegular() {
+		return false, nil
+	}
+	return true, os.Remove(path)
+}
+
+// TestInjectDirectoryWithWriterRemovesLegacySharedMarker proves the shared
+// compatibility operation, used by every transaction implementation, removes
+// the obsolete _shared/SKILL.md through the caller's remover (#4471).
+func TestInjectDirectoryWithWriterRemovesLegacySharedMarker(t *testing.T) {
+	skillDir := t.TempDir()
+	marker := LegacySharedMarkerPath(skillDir)
+	if err := os.MkdirAll(filepath.Dir(marker), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(marker, []byte("legacy generated marker"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var removals []string
+	remove := func(path string) (bool, error) {
+		removals = append(removals, path)
+		return removeRegularTestFile(path)
+	}
+
+	result, err := InjectDirectoryWithWriter(skillDir, []model.SkillID{model.SkillCreator}, filemerge.WriteFileAtomic, remove)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(removals, []string{marker}) {
+		t.Fatalf("remover calls = %v, want only the legacy marker %s", removals, marker)
+	}
+	if _, err := os.Lstat(marker); !os.IsNotExist(err) {
+		t.Fatalf("legacy marker still present: %v", err)
+	}
+	if !result.Changed || !slices.Contains(result.Files, marker) {
+		t.Fatalf("result changed=%v files=%v, want the removed marker reported", result.Changed, result.Files)
+	}
+
+	again, err := InjectDirectoryWithWriter(skillDir, []model.SkillID{model.SkillCreator}, filemerge.WriteFileAtomic, remove)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Changed || slices.Contains(again.Files, marker) {
+		t.Fatalf("second refresh changed=%v files=%v, want idempotent", again.Changed, again.Files)
 	}
 }
