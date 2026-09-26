@@ -69,7 +69,7 @@ Core principle: **does this inflate the parent context without need?** If yes, u
 | Bash for state (`git`, `gh`) | ✅ | — |
 | Tests, builds, installs, or native review actions | allowed as a bounded action | ✅ fresh per-action worker without changing route |
 
-Use OpenCode's native `explore` agent for read-only mapping and `general` agent for implementation or command execution.
+Route read-only mapping to the installed `gentle-ai-explore` agent, implementation or command execution to the installed `gentle-ai-worker` agent, and read-only technical verification to the installed `gentle-ai-verify` agent.
 
 Keep one writer and a short synthesized handoff. Delegation is mandatory at the mapping, write, preparation, and broad-research boundaries.
 

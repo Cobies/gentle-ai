@@ -25,6 +25,7 @@ import (
 	"github.com/gentleman-programming/gentle-ai/v3/internal/components/gga"
 	"github.com/gentleman-programming/gentle-ai/v3/internal/components/opencodedefault"
 	"github.com/gentleman-programming/gentle-ai/v3/internal/components/opencoderuntimeplugins"
+	"github.com/gentleman-programming/gentle-ai/v3/internal/components/skills"
 	"github.com/gentleman-programming/gentle-ai/v3/internal/components/telemetryruntime"
 	"github.com/gentleman-programming/gentle-ai/v3/internal/components/theme"
 	"github.com/gentleman-programming/gentle-ai/v3/internal/model"
@@ -932,6 +933,30 @@ func (s *Service) componentOperations(adapter agents.Adapter, componentID model.
 			targets = append(targets, dirPath)
 			ops = append(ops, removeTree(dirPath), removeDirIfEmpty(skillDir))
 		}
+		// _shared may hold user-authored notes, so only the embedded references
+		// the skills component writes are removed, never the whole directory.
+		shared, err := skills.SharedReferencePaths(skillDir)
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, path := range shared {
+			targets = append(targets, path)
+			ops = append(ops, removeFile(path))
+		}
+		// Upgraded installs may still hold the obsolete generated marker; install
+		// only ever removes it as a regular file, so uninstall does the same.
+		marker := skills.LegacySharedMarkerPath(skillDir)
+		targets = append(targets, marker)
+		ops = append(ops, removeRegularFile(marker))
+		ops = append(ops, removeDirIfEmpty(filepath.Join(skillDir, "_shared")))
+		commands, err := skills.AllSkillCommandPaths(homeDir, adapter)
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, path := range commands {
+			targets = append(targets, path)
+			ops = append(ops, removeFile(path), removeDirIfEmpty(filepath.Dir(path)))
+		}
 	case model.ComponentGGA:
 		for _, path := range globalBackupTargets(homeDir) {
 			targets = append(targets, path)
@@ -1470,6 +1495,31 @@ func removeFile(path string) operation {
 	}
 }
 
+// removeRegularFile removes path only when it is a regular file, leaving
+// symlinks, directories, and other non-regular entries untouched.
+func removeRegularFile(path string) operation {
+	return operation{
+		typeID: opRemoveFile,
+		path:   path,
+		apply: func(path string) (bool, bool, error) {
+			info, err := os.Lstat(path)
+			if os.IsNotExist(err) {
+				return false, false, nil
+			}
+			if err != nil {
+				return false, false, err
+			}
+			if !info.Mode().IsRegular() {
+				return false, false, nil
+			}
+			if err := removeFileIfExists(path); err != nil {
+				return false, false, err
+			}
+			return true, true, nil
+		},
+	}
+}
+
 func removeTree(path string) operation {
 	return operation{
 		typeID: opRemoveTree,
@@ -1611,6 +1661,12 @@ func mergeRewriteOps(a, b operation) operation {
 func compareOperations(a, b operation) int {
 	if a.typeID != b.typeID {
 		return int(a.typeID) - int(b.typeID)
+	}
+	if a.typeID == opRemoveIfEmpty {
+		// Deepest path first: a child directory such as skills/_shared must be
+		// evaluated before its parent, or the parent is still non-empty when
+		// checked and survives an uninstall that emptied it.
+		return strings.Compare(b.path, a.path)
 	}
 	return strings.Compare(a.path, b.path)
 }

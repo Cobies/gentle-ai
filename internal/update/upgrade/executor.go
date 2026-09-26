@@ -26,10 +26,12 @@ import (
 	"github.com/gentleman-programming/gentle-ai/v3/internal/backup"
 	"github.com/gentleman-programming/gentle-ai/v3/internal/components/gga"
 	"github.com/gentleman-programming/gentle-ai/v3/internal/components/legacyassets"
+	"github.com/gentleman-programming/gentle-ai/v3/internal/components/opencodedefault"
 	"github.com/gentleman-programming/gentle-ai/v3/internal/components/opencoderuntimeplugins"
 	"github.com/gentleman-programming/gentle-ai/v3/internal/components/skills"
 	"github.com/gentleman-programming/gentle-ai/v3/internal/components/theme"
 	"github.com/gentleman-programming/gentle-ai/v3/internal/model"
+	"github.com/gentleman-programming/gentle-ai/v3/internal/opencode"
 	"github.com/gentleman-programming/gentle-ai/v3/internal/state"
 	"github.com/gentleman-programming/gentle-ai/v3/internal/system"
 	"github.com/gentleman-programming/gentle-ai/v3/internal/update"
@@ -230,6 +232,11 @@ func managedAgentBackupPaths(homeDir string, adapter agents.Adapter, diagnostics
 
 	if adapter.SupportsSlashCommands() {
 		add(legacyassets.SlashCommandPaths(adapter.Agent(), adapter.CommandsDir(homeDir))...)
+		commands, err := skills.AllSkillCommandPaths(homeDir, adapter)
+		if err != nil {
+			writeBackupDiagnostic(diagnostics, "backup: skipping skill commands for %s: %v", adapter.Agent(), err)
+		}
+		add(commands...)
 	}
 
 	if adapter.SupportsSubAgents() {
@@ -248,6 +255,10 @@ func managedAgentBackupPaths(homeDir string, adapter agents.Adapter, diagnostics
 		add(theme.VisualThemePaths(homeDir, adapter)...)
 	case model.AgentOpenCode:
 		add(theme.VisualThemePaths(homeDir, adapter)...)
+		// The routing step records default-agent ownership beside the effective
+		// settings path, which honors an absolute OPENCODE_CONFIG_DIR; the
+		// snapshot must resolve it the same way.
+		add(opencodedefault.OwnershipPath(opencode.EffectiveSettingsPath(homeDir, "")))
 		// The SDD plugin writer resolves the config directory through the
 		// adapter and owns the plugin list; the snapshot must match it (#3219).
 		pluginsDir := filepath.Join(adapter.GlobalConfigDir(homeDir), "plugins")

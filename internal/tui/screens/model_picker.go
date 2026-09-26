@@ -220,8 +220,14 @@ func ModelPickerRows() []string {
 }
 
 func modelPickerRowsWithCustomIdentity(includeReview bool, customAgents []string) []ModelPickerRow {
-	rows := make([]ModelPickerRow, 0, 1+1+len(opencode.JDPhases())+1+len(opencode.ReviewPhases())+3+len(customAgents)+2)
+	rows := make([]ModelPickerRow, 0, 1+1+len(opencode.GentleAIODDPhases())+1+len(opencode.JDPhases())+1+len(opencode.ReviewPhases())+3+len(customAgents)+2)
 	rows = append(rows, ModelPickerRow{Kind: ModelPickerRowKindAgent, Label: SDDOrchestratorPhase, AgentID: SDDOrchestratorPhase})
+	if len(opencode.GentleAIODDPhases()) > 0 {
+		rows = append(rows, ModelPickerRow{Kind: ModelPickerRowKindSeparator, Label: "--- Gentle AI agents ---"})
+		for _, phase := range opencode.GentleAIODDPhases() {
+			rows = append(rows, ModelPickerRow{Kind: ModelPickerRowKindAgent, Label: phase, AgentID: phase})
+		}
+	}
 	if len(opencode.JDPhases()) > 0 {
 		rows = append(rows, ModelPickerRow{Kind: ModelPickerRowKindSeparator, Label: "--- Judgment Day ---"})
 		for _, phase := range opencode.JDPhases() {
@@ -289,7 +295,11 @@ func SeparatorRowIdx() int {
 	if len(jd) == 0 {
 		return -1
 	}
-	return 1
+	idx := 1
+	if odd := opencode.GentleAIODDPhases(); len(odd) > 0 {
+		idx += 1 + len(odd)
+	}
+	return idx
 }
 
 // ProviderEntries returns sorted provider entries with display names and model counts.

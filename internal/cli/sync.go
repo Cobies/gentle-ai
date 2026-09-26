@@ -638,6 +638,11 @@ func syncAdapterSkillBackupTargets(homeDir, workspaceDir string, selection model
 				return nil, fmt.Errorf("enumerate %s skill backup targets: %w", adapter.Agent(), err)
 			}
 			paths = append(paths, ordinary...)
+			support, err := skillSupportBackupTargets(componentInjectionDir(homeDir, workspaceDir, adapter), adapter, selection)
+			if err != nil {
+				return nil, err
+			}
+			paths = append(paths, support...)
 		}
 	}
 	return paths, nil
@@ -740,6 +745,9 @@ func (s openCodeModelAssignmentSyncStep) Run() error {
 		return fmt.Errorf("discover OpenCode custom agents: %w", err)
 	}
 	allowed := map[string]bool{"gentle-orchestrator": true, "general": true, "explore": true}
+	for _, name := range opencodeactivation.GentleAIODDPhases() {
+		allowed[name] = true
+	}
 	for _, name := range opencodeactivation.JDPhases() {
 		allowed[name] = true
 	}

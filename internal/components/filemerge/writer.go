@@ -106,6 +106,26 @@ func WriteFileAtomic(path string, content []byte, perm fs.FileMode) (WriteResult
 	return result, nil
 }
 
+// ExistingFileMode returns the permission bits of the regular file at path, or
+// fallback when path is absent or is not a regular file. A regular file with no
+// permission bits yields 0600 so it is never widened. Callers rewriting a
+// user-owned file pass the result to WriteFileAtomic so a private file (for
+// example a settings document holding credentials) is never widened on rewrite.
+func ExistingFileMode(path string, fallback fs.FileMode) fs.FileMode {
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		return fallback
+	}
+	perm := info.Mode().Perm()
+	if perm == 0 {
+		// WriteFileAtomic treats perm 0 as its 0644 default, which would widen
+		// a file the user locked down entirely; owner-only is the narrowest
+		// mode that still lets the rewrite read its own result back.
+		return 0o600
+	}
+	return perm
+}
+
 // StreamResult describes the bytes that landed at the destination.
 type StreamResult struct {
 	Bytes  int64

@@ -208,7 +208,7 @@ func TestPrimaryODDOnlyOrchestrator(t *testing.T) {
 				}
 			}
 			if runtime == "opencode" {
-				for _, required := range []string{"Delegation Visibility (OpenCode Desktop)", "native `explore` agent", "`general` agent", "Sub-Agent Launch Deduplication", "Sub-Agent Context Protocol"} {
+				for _, required := range []string{"Delegation Visibility (OpenCode Desktop)", "`gentle-ai-explore`", "`gentle-ai-worker`", "`gentle-ai-verify`", "Sub-Agent Launch Deduplication", "Sub-Agent Context Protocol"} {
 					if !strings.Contains(content, required) {
 						t.Errorf("missing OpenCode contract %q", required)
 					}
@@ -599,10 +599,31 @@ func TestOpenCodeEmbeddedAssetLayout(t *testing.T) {
 		seen[entry.Name()] = true
 	}
 
-	for _, name := range []string{"commands", "plugins", "persona-gentleman.md", "background-subagents.md", "orchestrator.md"} {
+	for _, name := range []string{"commands", "plugins", "agents", "persona-gentleman.md", "background-subagents.md", "orchestrator.md"} {
 		if !seen[name] {
 			t.Fatalf("opencode embedded assets missing %q", name)
 		}
+	}
+
+	// #4471: the parity agent prompts ported from Gentle Shell's global
+	// agents. Missing one here means a fresh install drops that agent.
+	agentEntries, err := FS.ReadDir("opencode/agents")
+	if err != nil {
+		t.Fatalf("ReadDir(opencode/agents) error = %v", err)
+	}
+	wantAgents := map[string]bool{
+		"gentle-ai-explore.md": true, "gentle-ai-verify.md": true, "gentle-ai-worker.md": true,
+		"jd-judge-a.md": true, "jd-judge-b.md": true, "jd-fix-agent.md": true,
+		"review-risk.md": true, "review-readability.md": true, "review-reliability.md": true, "review-resilience.md": true,
+	}
+	if len(agentEntries) != len(wantAgents) {
+		t.Fatalf("opencode agents count = %d, want %d parity agents", len(agentEntries), len(wantAgents))
+	}
+	for _, entry := range agentEntries {
+		delete(wantAgents, entry.Name())
+	}
+	for name := range wantAgents {
+		t.Fatalf("opencode embedded agents missing %q", name)
 	}
 
 	commandEntries, err := FS.ReadDir("opencode/commands")

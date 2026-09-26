@@ -24,6 +24,7 @@ import (
 	"github.com/gentleman-programming/gentle-ai/v3/internal/components/communitytool"
 	"github.com/gentleman-programming/gentle-ai/v3/internal/components/engram"
 	"github.com/gentleman-programming/gentle-ai/v3/internal/components/filemerge"
+	"github.com/gentleman-programming/gentle-ai/v3/internal/components/opencodedefault"
 	"github.com/gentleman-programming/gentle-ai/v3/internal/components/opencoderuntimeplugins"
 	"github.com/gentleman-programming/gentle-ai/v3/internal/components/persona"
 	"github.com/gentleman-programming/gentle-ai/v3/internal/components/reviewassets"
@@ -1508,6 +1509,7 @@ func TestRunSyncRefreshesPersistedVisualComponents(t *testing.T) {
 		filepath.Join(home, ".claude", "settings.json"),
 		filepath.Join(home, ".claude", "CLAUDE.md"),
 		filepath.Join(home, ".config", "opencode", "opencode.json"),
+		filepath.Join(home, ".config", "opencode", ".gentle-ai-default-agent.json"),
 	}
 
 	first, err := RunSync([]string{"--agents", "claude-code,opencode"})
@@ -3676,8 +3678,13 @@ func TestRunSyncPreservesCustomOpenCodeOrchestratorPrompt(t *testing.T) {
 	if !bytes.Contains(first, []byte(customPrompt)) {
 		t.Fatalf("custom prompt lost: %s", first)
 	}
-	if !bytes.Contains(first, []byte(`"default_agent": "user-agent"`)) {
-		t.Fatalf("user default agent lost: %s", first)
+	// v3.7.0 semantics: sync manages default_agent and records the user's
+	// value so uninstall hands it back.
+	if !bytes.Contains(first, []byte(`"default_agent": "gentle-orchestrator"`)) {
+		t.Fatalf("sync did not set the managed default agent: %s", first)
+	}
+	if owner, err := os.ReadFile(opencodedefault.OwnershipPath(settingsPath)); err != nil || !bytes.Contains(owner, []byte(`"previous_default": "user-agent"`)) {
+		t.Fatalf("user default agent not recorded for uninstall: %s, %v", owner, err)
 	}
 	if !bytes.Contains(first, []byte(`"keep": true`)) {
 		t.Fatalf("user setting lost: %s", first)
@@ -3858,8 +3865,13 @@ func TestRunSyncWithSelection_IsIdempotent(t *testing.T) {
 		t.Fatalf("run 1: FilesChanged = 0, expected > 0")
 	}
 	firstSettings, _ := os.ReadFile(settingsPath)
-	if !bytes.Contains(firstSettings, []byte(`"default_agent": "user-agent"`)) || !bytes.Contains(firstSettings, []byte(`"gentle-orchestrator"`)) {
-		t.Fatal("sync must preserve the user's default agent while refreshing ODD guidance")
+	// v3.7.0 semantics: sync overwrites default_agent and records the user's
+	// value in the ownership file so uninstall can restore it.
+	if !bytes.Contains(firstSettings, []byte(`"default_agent": "gentle-orchestrator"`)) {
+		t.Fatalf("CLI sync did not overwrite default_agent: %s", firstSettings)
+	}
+	if owner, err := os.ReadFile(opencodedefault.OwnershipPath(settingsPath)); err != nil || !bytes.Contains(owner, []byte(`"previous_default": "user-agent"`)) {
+		t.Fatalf("user default agent not recorded for uninstall: %s, %v", owner, err)
 	}
 
 	// Run 2: nothing changed.

@@ -1691,3 +1691,34 @@ func TestManagedAgentBackupPathsOpenCodePluginsFollowXDGConfigHome(t *testing.T)
 		}
 	}
 }
+
+// TestManagedAgentBackupPathsOpenCodeDefaultAgentOwnershipFollowsConfigDir
+// pins that the snapshot targets the default-agent ownership record beside the
+// effective OpenCode settings path, which honors an absolute
+// OPENCODE_CONFIG_DIR, because that is where the routing step writes it.
+func TestManagedAgentBackupPathsOpenCodeDefaultAgentOwnershipFollowsConfigDir(t *testing.T) {
+	homeDir := t.TempDir()
+	configDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	t.Setenv("USERPROFILE", homeDir)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("OPENCODE_CONFIG_DIR", configDir)
+
+	reg, err := agents.NewDefaultRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter, ok := reg.Get(model.AgentOpenCode)
+	if !ok {
+		t.Fatal("opencode adapter not found in registry")
+	}
+
+	want := filepath.Join(configDir, ".gentle-ai-default-agent.json")
+	paths := managedAgentBackupPaths(homeDir, adapter, log.Writer())
+	for _, p := range paths {
+		if p == want {
+			return
+		}
+	}
+	t.Fatalf("backup paths miss default-agent ownership record %q; got %v", want, paths)
+}
