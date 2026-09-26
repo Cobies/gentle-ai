@@ -85,7 +85,11 @@ Forecast: ~700 authored lines + ~600 copied prompt lines. Strategy: ask-on-risk 
 
 - 2026-09-26: PR #4998 opened (type:bug, size:exception). All required CI passed; CodeRabbit no actionable comments. Copilot raised 2 valid medium findings (legacy `_shared/SKILL.md` marker kept on Windows compat transaction and on uninstall) → fixed test-first (worker mui15vi8-8-1t23), commit 3f8df5171. Review assess (base 3d01b3762): medium, slice_budget_reached → consent granted (pre-authorized) → lineage review-09a6850f955d9903 (review-reliability) APPROVED + acknowledged; advisory R3-001..003 only.
 
+- 2026-09-26: Copilot 2nd pass: judge `bash` kept (Gentle Shell + v3.7.0 parity; replied); settings mode widening fixed → `filemerge.ExistingFileMode` for all OpenCode-family writers added/touched (commit 209d8867e, assess medium/under_budget). Sandbox shows other pre-existing writers (~80, MCP/engram/persona/…) still force 0644 on main too → follow-up. 18/18 checks green. Copilot/CodeRabbit 3rd pass: upgrade backup must use effective OpenCode settings path (OPENCODE_CONFIG_DIR); mode 0000 must not widen → delegated (mui2ap4d-a-iuh2). Merge policy: merge after this unless a critical/blocking finding appears.
+
 ## Follow-ups (out of scope)
+
+- ~80 pre-existing config writers force mode 0644 on rewrite (systemic).
 
 - `internal/assets/opencode/orchestrator.md` is not read by production code (OpenCode orchestrator prompt comes from agentguidance.RenderRouting); T1 edited it for consistency only.
 - Uninstall does not remove OpenCode/Kilo parity agents (pre-existing shape of the retired overlay owner).
