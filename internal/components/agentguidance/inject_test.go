@@ -1,9 +1,11 @@
 package agentguidance
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -13,6 +15,7 @@ import (
 	"github.com/gentleman-programming/gentle-ai/v3/internal/components/filemerge"
 	"github.com/gentleman-programming/gentle-ai/v3/internal/components/opencodedefault"
 	"github.com/gentleman-programming/gentle-ai/v3/internal/model"
+	opencoderuntime "github.com/gentleman-programming/gentle-ai/v3/internal/opencode"
 )
 
 func TestCodexODDRoutingInjectionPreservesUserTextAndResync(t *testing.T) {
@@ -128,6 +131,9 @@ func TestRemoteAuthorizationPrimaryCarriers(t *testing.T) {
 		if agent.ID == model.AgentPi {
 			continue // The install/sync step leaves package-owned Pi prompts untouched.
 		}
+		if agent.ID == model.AgentConductor {
+			continue // Catalog-only: no standalone guidance carrier (see conductor_catalog_only_test.go).
+		}
 		covered++
 		t.Run(string(agent.ID), func(t *testing.T) {
 			home := t.TempDir()
@@ -159,6 +165,9 @@ func TestRemoteAuthorizationPrimaryCarriers(t *testing.T) {
 func TestInjectRoutingDeliversOnlyODDWorkflow(t *testing.T) {
 	t.Parallel()
 	for _, agent := range catalog.AllAgents() {
+		if agent.ID == model.AgentConductor {
+			continue // Catalog-only: no standalone guidance target.
+		}
 		t.Run(string(agent.ID), func(t *testing.T) {
 			t.Parallel()
 			result, err := InjectRoutingWithOptions(t.TempDir(), agent.ID, RoutingOptions{})
@@ -180,6 +189,9 @@ func TestInjectRoutingInstallsGuidanceForEverySupportedAgent(t *testing.T) {
 	t.Parallel()
 
 	for _, agent := range catalog.AllAgents() {
+		if agent.ID == model.AgentConductor {
+			continue // Catalog-only: covered by TestInjectRoutingNoOpsForCatalogOnlyConductor.
+		}
 		t.Run(string(agent.ID), func(t *testing.T) {
 			t.Parallel()
 
@@ -235,13 +247,27 @@ func TestInjectRoutingInstallsGuidanceForEverySupportedAgent(t *testing.T) {
 // outside the target dir — into the real user config — and the idempotency
 // guarantee silently breaks because state leaks across runs.
 //
+// The OpenCode --version probe is stubbed to "not installed": a real opencode
+// on PATH would be spawned by that probe, inherit the hostile
+// XDG_CONFIG_HOME, and create its own config dir there. That is the external
+// binary's behavior, not adapter path resolution, and it made this test pass
+// or fail depending on whether the machine had opencode installed.
+//
 // No t.Parallel here: t.Setenv is process-wide and forbids it.
 func TestInjectRoutingStaysContainedUnderHostileEnvironment(t *testing.T) {
 	hostile := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(hostile, "xdg"))
 	t.Setenv("APPDATA", filepath.Join(hostile, "AppData", "Roaming"))
+	previousVersionRunner := opencoderuntime.VersionRunnerOverride
+	opencoderuntime.VersionRunnerOverride = func(context.Context, opencoderuntime.Command) (opencoderuntime.CommandOutput, error) {
+		return opencoderuntime.CommandOutput{}, exec.ErrNotFound
+	}
+	t.Cleanup(func() { opencoderuntime.VersionRunnerOverride = previousVersionRunner })
 
 	for _, agent := range catalog.AllAgents() {
+		if agent.ID == model.AgentConductor {
+			continue // Catalog-only: no standalone guidance target.
+		}
 		t.Run(string(agent.ID), func(t *testing.T) {
 			targetDir := t.TempDir()
 
@@ -654,6 +680,9 @@ func TestInjectRoutingIsIdempotentForEverySupportedAgent(t *testing.T) {
 	t.Parallel()
 
 	for _, agent := range catalog.AllAgents() {
+		if agent.ID == model.AgentConductor {
+			continue // Catalog-only: no standalone guidance target.
+		}
 		t.Run(string(agent.ID), func(t *testing.T) {
 			t.Parallel()
 
@@ -686,6 +715,9 @@ func TestInjectRoutingDeliversNoRetiredControlPlaneVocabulary(t *testing.T) {
 	t.Parallel()
 
 	for _, agent := range catalog.AllAgents() {
+		if agent.ID == model.AgentConductor {
+			continue // Catalog-only: no standalone guidance target.
+		}
 		t.Run(string(agent.ID), func(t *testing.T) {
 			t.Parallel()
 
@@ -721,6 +753,9 @@ func markdownSectionAgents(t *testing.T) []model.AgentID {
 		if agent.ID == model.AgentOpenCode || agent.ID == model.AgentKilocode {
 			continue
 		}
+		if agent.ID == model.AgentConductor {
+			continue // Catalog-only: inherits Claude Code config, no prompt file of its own.
+		}
 		adapter, err := agents.NewAdapter(agent.ID)
 		if err != nil {
 			t.Fatalf("NewAdapter(%q) error = %v", agent.ID, err)
@@ -730,8 +765,8 @@ func markdownSectionAgents(t *testing.T) []model.AgentID {
 		}
 		selected = append(selected, agent.ID)
 	}
-	if len(selected) != supportedAgentCount-3 {
-		t.Fatalf("selected %d markdown-section agents, want %d", len(selected), supportedAgentCount-3)
+	if len(selected) != supportedAgentCount-4 {
+		t.Fatalf("selected %d markdown-section agents, want %d", len(selected), supportedAgentCount-4)
 	}
 	return selected
 }
