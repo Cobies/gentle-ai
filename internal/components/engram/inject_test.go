@@ -375,7 +375,7 @@ func TestInjectPiProvisioningCreatesMissingMCPAdapterFiles(t *testing.T) {
 	assertNestedStrings(t, settings, []string{"npm:pi-mcp-adapter"}, "packages")
 
 	npmPackage := readJSONFile(t, filepath.Join(home, ".pi", "agent", "npm", "package.json"))
-	assertNestedString(t, npmPackage, "^2.6.0", "dependencies", "pi-mcp-adapter")
+	assertNestedString(t, npmPackage, "^3.1.0", "dependencies", "pi-mcp-adapter")
 }
 
 func TestInjectPiProvisioningPreservesUnrelatedContent(t *testing.T) {
@@ -395,7 +395,7 @@ func TestInjectPiProvisioningPreservesUnrelatedContent(t *testing.T) {
 	npmPackage := readJSONFile(t, filepath.Join(home, ".pi", "agent", "npm", "package.json"))
 	assertNestedString(t, npmPackage, "pi-user", "name")
 	assertNestedString(t, npmPackage, "^1.0.0", "dependencies", "left-pad")
-	assertNestedString(t, npmPackage, "^2.6.0", "dependencies", "pi-mcp-adapter")
+	assertNestedString(t, npmPackage, "^3.1.0", "dependencies", "pi-mcp-adapter")
 	assertNestedString(t, npmPackage, "^1.0.0", "devDependencies", "vitest")
 }
 
@@ -415,7 +415,7 @@ func TestInjectPiProvisioningCanonicalizesExistingEntriesAndIsIdempotent(t *test
 	settings := readJSONFile(t, filepath.Join(home, ".pi", "agent", "settings.json"))
 	assertNestedStrings(t, settings, []string{"npm:pi-mcp-adapter"}, "packages")
 	npmPackage := readJSONFile(t, filepath.Join(home, ".pi", "agent", "npm", "package.json"))
-	assertNestedString(t, npmPackage, "^2.6.0", "dependencies", "pi-mcp-adapter")
+	assertNestedString(t, npmPackage, "^3.1.0", "dependencies", "pi-mcp-adapter")
 
 	second, err := Inject(home, piAdapter())
 	if err != nil {

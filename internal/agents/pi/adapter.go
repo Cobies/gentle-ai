@@ -23,10 +23,11 @@ const (
 	piMCPAdapterPackageSpec     = "npm:pi-mcp-adapter"
 	piGentleEngramPackageSource = "npm:gentle-engram"
 	piMCPAdapterDependency      = "pi-mcp-adapter"
-	piMCPAdapterVersion         = "2.6.0"
-	piMCPAdapterVersionRange    = "^2.6.0"
+	piMCPAdapterVersion         = "3.1.0"
+	piMCPAdapterVersionRange    = "^3.1.0"
 	piAppendSystemFile          = "APPEND_SYSTEM.md"
-	piEngramMCPConfigFile       = "mcp.json"
+	piEngramMCPConfigFile       = "mcp-adapter.json"
+	piLegacyMCPConfigFile       = "mcp.json"
 	piSettingsFile              = "settings.json"
 	piNPMDirectory              = "npm"
 	piNPMPackageFile            = "package.json"
@@ -127,9 +128,16 @@ func EffectiveCodeGraphMCPPath(homeDir, workspaceDir string) (string, error) {
 		paths.MCPConfig,
 	}
 	if workspaceDir != "" {
+		workspacePiMCP := filepath.Join(workspaceDir, ".pi", piEngramMCPConfigFile)
+		if _, err := os.Stat(workspacePiMCP); os.IsNotExist(err) {
+			legacyWorkspacePiMCP := filepath.Join(workspaceDir, ".pi", piLegacyMCPConfigFile)
+			if _, lErr := os.Stat(legacyWorkspacePiMCP); lErr == nil {
+				workspacePiMCP = legacyWorkspacePiMCP
+			}
+		}
 		candidates = append(candidates,
 			filepath.Join(workspaceDir, ".mcp.json"),
-			filepath.Join(workspaceDir, ".pi", "mcp.json"),
+			workspacePiMCP,
 		)
 	}
 
@@ -424,14 +432,20 @@ func resolvePiAgentDirOverride(override, homeDir string) string {
 // own the exact config shape without teaching the generic Engram injector
 // about Pi internals.
 //
-// mcp.json is NOT written here. pi-engram init (invoked by InstallCommand)
+// mcp-adapter.json is NOT written here. pi-engram init (invoked by InstallCommand)
 // is the sole writer of that file and owns its schema.
 func (a *Adapter) ProvisionEngramMCP(homeDir string) (bool, []string, error) {
+	agentDir := AgentConfigPath(homeDir)
+	migrated, err := MigrateLegacyPiMCPConfig(agentDir)
+	if err != nil {
+		return false, nil, err
+	}
+
 	paths := []string{
 		a.SettingsPath(homeDir),
 		// Pi's npm manifest lives at <agentDir>/npm/package.json
 		// (package-manager.ts:2033), not under GlobalConfigDir's ~/.pi root.
-		filepath.Join(AgentConfigPath(homeDir), piNPMDirectory, piNPMPackageFile),
+		filepath.Join(agentDir, piNPMDirectory, piNPMPackageFile),
 	}
 	overlays := [][]byte{
 		nil,
@@ -442,7 +456,7 @@ func (a *Adapter) ProvisionEngramMCP(homeDir string) (bool, []string, error) {
 		}),
 	}
 
-	changed := false
+	changed := migrated
 	for i, path := range paths {
 		var write filemerge.WriteResult
 		var err error
@@ -458,6 +472,30 @@ func (a *Adapter) ProvisionEngramMCP(homeDir string) (bool, []string, error) {
 	}
 
 	return changed, paths, nil
+}
+
+// MigrateLegacyPiMCPConfig migrates a legacy mcp.json to mcp-adapter.json in agentDir
+// if the legacy file exists and the new config file does not yet exist.
+func MigrateLegacyPiMCPConfig(agentDir string) (bool, error) {
+	legacy := filepath.Join(agentDir, piLegacyMCPConfigFile)
+	target := filepath.Join(agentDir, piEngramMCPConfigFile)
+
+	if _, err := os.Stat(legacy); os.IsNotExist(err) {
+		return false, nil
+	} else if err != nil {
+		return false, fmt.Errorf("stat legacy Pi MCP config %q: %w", legacy, err)
+	}
+
+	if _, err := os.Stat(target); err == nil {
+		return false, nil
+	} else if !os.IsNotExist(err) {
+		return false, fmt.Errorf("stat target Pi MCP config %q: %w", target, err)
+	}
+
+	if err := os.Rename(legacy, target); err != nil {
+		return false, fmt.Errorf("migrate legacy Pi MCP config from %q to %q: %w", legacy, target, err)
+	}
+	return true, nil
 }
 
 func mergePiSettingsFile(path string) (filemerge.WriteResult, error) {

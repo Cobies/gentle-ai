@@ -1382,7 +1382,7 @@ func TestRunDoctor_OnlySelectedAgentsAreRequired(t *testing.T) {
 	if err := os.MkdirAll(piDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	piMCPPath := filepath.Join(homeDir, ".pi", "agent", "mcp.json")
+	piMCPPath := filepath.Join(homeDir, ".pi", "agent", "mcp-adapter.json")
 	if err := os.MkdirAll(filepath.Dir(piMCPPath), 0o755); err != nil {
 		t.Fatal(err)
 	}

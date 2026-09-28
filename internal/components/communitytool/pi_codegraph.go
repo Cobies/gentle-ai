@@ -298,6 +298,13 @@ func ReconcilePiCodeGraph(options PiCodeGraphOptions) (result PiCodeGraphResult,
 }
 
 func reconcilePiMCP(path string, journal *piJournal, changed map[string]struct{}, existing *piCodeGraphOwnedFile) (*piCodeGraphOwnedFile, error) {
+	migrated, err := piagent.MigrateLegacyPiMCPConfig(filepath.Dir(path))
+	if err != nil {
+		return existing, err
+	}
+	if migrated {
+		changed[path] = struct{}{}
+	}
 	data, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
 		return existing, fmt.Errorf("read Pi MCP config: %w", err)

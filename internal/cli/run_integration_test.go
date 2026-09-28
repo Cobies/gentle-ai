@@ -221,10 +221,10 @@ func TestRunInstallEngramForPiAndOpenCodeProvisionsBothMCPTargets(t *testing.T) 
 	var commands []string
 	runCommand = func(name string, args ...string) error {
 		commands = append(commands, strings.Join(append([]string{name}, args...), " "))
-		// Simulate pi-engram init writing mcp.json with the new schema.
+		// Simulate pi-engram init writing mcp-adapter.json with the new schema.
 		isNpmEngramInit := name == "npm" && len(args) >= 7 && args[5] == "pi-engram" && args[6] == "init"
 		if isNpmEngramInit {
-			mcpPath := filepath.Join(home, ".pi", "agent", "mcp.json")
+			mcpPath := filepath.Join(home, ".pi", "agent", "mcp-adapter.json")
 			if err := os.MkdirAll(filepath.Dir(mcpPath), 0o755); err != nil {
 				return err
 			}
@@ -296,12 +296,12 @@ func TestRunInstallEngramForPiTargetsConfiguredAgentDirectory(t *testing.T) {
 	t.Cleanup(restorePreflightLookPath)
 
 	runCommand = func(name string, args ...string) error {
-		// Simulate pi-engram init writing mcp.json with the new schema,
+		// Simulate pi-engram init writing mcp-adapter.json with the new schema,
 		// exactly as it does under the real Pi binary, under the
 		// configured agent directory rather than the default one.
 		isNpmEngramInit := name == "npm" && len(args) >= 7 && args[5] == "pi-engram" && args[6] == "init"
 		if isNpmEngramInit {
-			mcpPath := filepath.Join(configured, "mcp.json")
+			mcpPath := filepath.Join(configured, "mcp-adapter.json")
 			if err := os.MkdirAll(filepath.Dir(mcpPath), 0o755); err != nil {
 				return err
 			}

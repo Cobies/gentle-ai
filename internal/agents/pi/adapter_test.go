@@ -78,7 +78,7 @@ func TestAdapterPaths(t *testing.T) {
 		{"SkillsDir", a.SkillsDir(homeDir), ""},
 		{"SettingsPath", a.SettingsPath(homeDir), filepath.Join(piAgentDir, "settings.json")},
 		{"CommandsDir", a.CommandsDir(homeDir), ""},
-		{"MCPConfigPath", a.MCPConfigPath(homeDir, "context7"), filepath.Join(piAgentDir, "mcp.json")},
+		{"MCPConfigPath", a.MCPConfigPath(homeDir, "context7"), filepath.Join(piAgentDir, "mcp-adapter.json")},
 		{"OutputStyleDir", a.OutputStyleDir(homeDir), ""},
 		{"SubAgentsDir", a.SubAgentsDir(homeDir), ""},
 		{"EmbeddedSubAgentsDir", a.EmbeddedSubAgentsDir(), ""},
@@ -198,7 +198,7 @@ func TestAdapterPathsFollowConfiguredAgentDirectory(t *testing.T) {
 		{"SystemPromptDir", a.SystemPromptDir(homeDir), configured},
 		{"SystemPromptFile", a.SystemPromptFile(homeDir), filepath.Join(configured, "APPEND_SYSTEM.md")},
 		{"SettingsPath", a.SettingsPath(homeDir), filepath.Join(configured, "settings.json")},
-		{"MCPConfigPath", a.MCPConfigPath(homeDir, "context7"), filepath.Join(configured, "mcp.json")},
+		{"MCPConfigPath", a.MCPConfigPath(homeDir, "context7"), filepath.Join(configured, "mcp-adapter.json")},
 	}
 
 	for _, tt := range tests {
@@ -262,13 +262,84 @@ func TestCodeGraphPathsResolveConfiguredAgentDirectory(t *testing.T) {
 	if paths.AgentDir != configured {
 		t.Fatalf("AgentDir = %q, want %q", paths.AgentDir, configured)
 	}
-	if paths.MCPConfig != filepath.Join(configured, "mcp.json") {
+	if paths.MCPConfig != filepath.Join(configured, "mcp-adapter.json") {
 		t.Fatalf("MCPConfig = %q", paths.MCPConfig)
 	}
 	sum := sha256.Sum256([]byte(filepath.Clean(configured)))
 	wantManifest := filepath.Join(home, ".gentle-ai", fmt.Sprintf("pi-codegraph-%x.json", sum[:8]))
 	if paths.Manifest != wantManifest {
 		t.Fatalf("Manifest = %q, want %q", paths.Manifest, wantManifest)
+	}
+}
+
+func TestProvisionEngramMCPMigratesLegacyMCPConfig(t *testing.T) {
+	home := t.TempDir()
+	setRealHome(t, home)
+	configured := filepath.Join(home, "custom-pi")
+	t.Setenv("PI_CODING_AGENT_DIR", configured)
+
+	legacyPath := filepath.Join(configured, "mcp.json")
+	targetPath := filepath.Join(configured, "mcp-adapter.json")
+
+	legacyContent := `{"mcpServers":{"custom":{"command":"test"}}}`
+	if err := os.MkdirAll(configured, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacyPath, []byte(legacyContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	a := NewAdapter()
+	changed, _, err := a.ProvisionEngramMCP(home)
+	if err != nil {
+		t.Fatalf("ProvisionEngramMCP() error = %v", err)
+	}
+	if !changed {
+		t.Fatalf("ProvisionEngramMCP() changed = false, want true")
+	}
+
+	if _, err := os.Stat(legacyPath); !os.IsNotExist(err) {
+		t.Fatalf("legacy file %q still exists: %v", legacyPath, err)
+	}
+	data, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatalf("target file %q could not be read: %v", targetPath, err)
+	}
+	if string(data) != legacyContent {
+		t.Fatalf("target file content = %q, want %q", string(data), legacyContent)
+	}
+}
+
+func TestEffectiveCodeGraphMCPPathWorkspaceFallback(t *testing.T) {
+	home := t.TempDir()
+	workspace := filepath.Join(home, "project")
+
+	legacyWorkspaceMCP := filepath.Join(workspace, ".pi", "mcp.json")
+	if err := os.MkdirAll(filepath.Dir(legacyWorkspaceMCP), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacyWorkspaceMCP, []byte(`{"mcpServers":{"codegraph":{}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	effective, err := EffectiveCodeGraphMCPPath(home, workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if effective != legacyWorkspaceMCP {
+		t.Fatalf("effective = %q, want %q", effective, legacyWorkspaceMCP)
+	}
+
+	primaryWorkspaceMCP := filepath.Join(workspace, ".pi", "mcp-adapter.json")
+	if err := os.WriteFile(primaryWorkspaceMCP, []byte(`{"mcpServers":{"codegraph":{}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	effective, err = EffectiveCodeGraphMCPPath(home, workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if effective != primaryWorkspaceMCP {
+		t.Fatalf("effective = %q, want %q", effective, primaryWorkspaceMCP)
 	}
 }
 

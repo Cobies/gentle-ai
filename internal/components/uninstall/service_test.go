@@ -729,7 +729,7 @@ func TestExecutePlanCleansPiBeforeSharedMCPMutation(t *testing.T) {
 		t.Fatal(err)
 	}
 	svc.snapshotter = stubSnapshotter{}
-	mcpPath := filepath.Join(home, ".pi", "agent", "mcp.json")
+	mcpPath := filepath.Join(home, ".pi", "agent", "mcp-adapter.json")
 	child := filepath.Join(home, ".pi", "agent", "subagents", "worker.md")
 	if err := os.MkdirAll(filepath.Dir(child), 0o755); err != nil {
 		t.Fatal(err)
@@ -770,7 +770,7 @@ func TestExecutePlanPiUninstallPreservesPreexistingMarkedUserChildAndUserMCP(t *
 		t.Fatalf("NewService() error = %v", err)
 	}
 	svc.snapshotter = stubSnapshotter{}
-	mcpPath := filepath.Join(homeDir, ".pi", "agent", "mcp.json")
+	mcpPath := filepath.Join(homeDir, ".pi", "agent", "mcp-adapter.json")
 	childPath := filepath.Join(homeDir, ".pi", "agent", "subagents", "worker.md")
 	preexisting := "---\ntools: bash, mcp\n---\nuser instructions\n\n<!-- gentle-ai:pi-codegraph-tool -->\npreexisting tool guidance\n<!-- /gentle-ai:pi-codegraph -->\n\n<!-- gentle-ai:pi-codegraph-guidance -->\npreexisting lazy-init guidance\n<!-- /gentle-ai:pi-codegraph -->\n"
 	if err := os.MkdirAll(filepath.Dir(mcpPath), 0o755); err != nil {

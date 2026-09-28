@@ -1238,7 +1238,7 @@ func TestConfigPathsForBackup_ExcludesPiSessionRuntimeFile(t *testing.T) {
 	homeDir := t.TempDir()
 
 	managedPiSettings := filepath.Join(homeDir, ".pi", "agent", "settings.json")
-	managedPiMCP := filepath.Join(homeDir, ".pi", "agent", "mcp.json")
+	managedPiMCP := filepath.Join(homeDir, ".pi", "agent", "mcp-adapter.json")
 	runtimeSession := filepath.Join(homeDir, ".pi", "agent", "sessions", "session.jsonl")
 	for _, path := range []string{managedPiSettings, managedPiMCP, runtimeSession} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
