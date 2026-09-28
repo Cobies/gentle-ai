@@ -1,6 +1,6 @@
 package catalog
 
-import "github.com/gentleman-programming/gentle-ai/v3/internal/model"
+import "github.com/gentleman-programming/gentle-ai/v4/internal/model"
 
 type Agent struct {
 	ID         model.AgentID
@@ -25,7 +25,7 @@ var allAgents = []Agent{
 	{ID: model.AgentVSCodeCopilot, Name: "VS Code Copilot", Tier: model.TierFull, ConfigPath: "~/.copilot"},
 	{ID: model.AgentAntigravity, Name: "Google Antigravity", Tier: model.TierFull, ConfigPath: "~/.gemini/antigravity-cli"},
 	{ID: model.AgentWindsurf, Name: "Windsurf", Tier: model.TierFull, ConfigPath: "~/.codeium/windsurf"},
-	{ID: model.AgentKimi, Name: "Kimi Code", Tier: model.TierFull, ConfigPath: "~/.kimi"},
+	{ID: model.AgentKimi, Name: "Kimi Code", Tier: model.TierFull, ConfigPath: "~/.kimi-code (or legacy ~/.kimi)"},
 	{ID: model.AgentQwenCode, Name: "Qwen Code", Tier: model.TierFull, ConfigPath: "~/.qwen"},
 	{ID: model.AgentKiroIDE, Name: "Kiro IDE", Tier: model.TierFull, ConfigPath: "~/.kiro"},
 	{ID: model.AgentOpenClaw, Name: "OpenClaw", Tier: model.TierFull, ConfigPath: "~/.openclaw"},

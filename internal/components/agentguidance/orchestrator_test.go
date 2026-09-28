@@ -4,13 +4,14 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
-	"github.com/gentleman-programming/gentle-ai/v3/internal/agents"
-	"github.com/gentleman-programming/gentle-ai/v3/internal/agents/capabilitymanifest"
-	"github.com/gentleman-programming/gentle-ai/v3/internal/catalog"
-	"github.com/gentleman-programming/gentle-ai/v3/internal/model"
+	"github.com/gentleman-programming/gentle-ai/v4/internal/agents"
+	"github.com/gentleman-programming/gentle-ai/v4/internal/agents/capabilitymanifest"
+	"github.com/gentleman-programming/gentle-ai/v4/internal/catalog"
+	"github.com/gentleman-programming/gentle-ai/v4/internal/model"
 )
 
 const (
@@ -237,7 +238,7 @@ func TestInjectRoutingReplacesLegacySDDOrchestratorBlockInPlace(t *testing.T) {
 			}
 			if info, err := os.Stat(promptPath); err != nil {
 				t.Fatal(err)
-			} else if info.Mode().Perm() != 0o600 {
+			} else if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 				t.Fatalf("prompt mode = %v, want preserved 0600", info.Mode().Perm())
 			}
 		})
