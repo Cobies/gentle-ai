@@ -690,14 +690,3 @@ func (p PreparedLoad) Commit(force bool) (Result, error) {
 		Cache:       p.CachePath,
 	}, nil
 }
-
-// LoadRegistry validates a curated registry file and commits it to the project's
-// .atl directory, returning the outcome. It is a convenience wrapper around
-// PrepareLoadRegistry followed by PreparedLoad.Commit.
-func LoadRegistry(loadPath, cwd string, force bool) (Result, error) {
-	prep, err := PrepareLoadRegistry(loadPath, cwd)
-	if err != nil {
-		return Result{}, err
-	}
-	return prep.Commit(force)
-}

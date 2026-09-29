@@ -876,6 +876,14 @@ Curated contract.
 `
 }
 
+func loadRegistry(loadPath, cwd string, force bool) (Result, error) {
+	prep, err := PrepareLoadRegistry(loadPath, cwd)
+	if err != nil {
+		return Result{}, err
+	}
+	return prep.Commit(force)
+}
+
 func TestHasRegistryMarkers(t *testing.T) {
 	valid := validCuratedRegistryContent()
 	if !hasRegistryMarkers(valid) {
@@ -994,9 +1002,9 @@ func TestRegeneratePreservesLoadedCuratedRegistryAndDetectsDrift(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	loadRes, err := LoadRegistry(curatedFile, cwd, false)
+	loadRes, err := loadRegistry(curatedFile, cwd, false)
 	if err != nil {
-		t.Fatalf("LoadRegistry failed: %v", err)
+		t.Fatalf("loadRegistry failed: %v", err)
 	}
 	if !loadRes.Regenerated || loadRes.Reason != "loaded" {
 		t.Fatalf("loadRes = %#v", loadRes)

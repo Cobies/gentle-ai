@@ -6,7 +6,7 @@
   Furthermore, if `--load ""` or a missing path is passed, a naive implementation risks falling through to regeneration and overwriting a curated registry instead of failing closed.
   Also, in non-interactive environments like `pi -ns` (where startup skill loading is disabled), a curated registry load must be completely explicit, manual, and self-contained without triggering automatic background skill sweeps.
 - **Chosen Approach**:
-  1. Add `PrepareLoadRegistry` and `PreparedLoad.Commit` (with public helper `LoadRegistry(loadPath, cwd string, force bool) (Result, error)`) in `internal/skillregistry`.
+  1. Add `PrepareLoadRegistry` and `PreparedLoad.Commit` in `internal/skillregistry`.
   2. Require full validation of markdown shape: `# Skill Registry`, `## Skills`, `| Skill | Trigger / description | Scope | Path |`, and `| --- | --- | --- | --- |`.
   3. Support atomic pair commit (`.atl/skill-registry.md` and `.atl/.skill-registry.cache.json`) with rollback on failure.
   4. Fingerprint loaded registry with `loaded:<sha256>`, preserving it during non-forced refreshes (`manually-loaded`) and detecting drift (`loaded-drifted`).
@@ -32,7 +32,7 @@
 
 ## 3. Tasks & Evidence
 - [x] 1. TDD RED: Unit tests for registry loading, shape validation, rollback, and fail-closed arguments.
-- [x] 2. TDD GREEN: Implement `PrepareLoadRegistry`, `Commit`, `LoadRegistry`, and CLI argument handling.
+- [x] 2. TDD GREEN: Implement `PrepareLoadRegistry`, `Commit`, and CLI argument handling.
 - [x] 3. Verification: Run tests for `internal/skillregistry` and `internal/app`, check build and help output.
 - [ ] 4. Commit: Atomic work-unit commit on `feat/516-load-curated-skill-registry`.
 
