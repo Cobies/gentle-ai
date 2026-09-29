@@ -2704,3 +2704,97 @@ func writeFakeOpenCodeRuntime(t *testing.T) string {
 	}
 	return binDir
 }
+
+func TestRunSkillRegistryLoadAndRefreshFailClosed(t *testing.T) {
+	home := t.TempDir()
+	setupMockHome(t, home)
+	projectDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(projectDir, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. refresh --load "" fails closed and does not touch .atl/skill-registry.md
+	var buf bytes.Buffer
+	err := runSkillRegistryRefresh([]string{"--load", "", "--cwd", projectDir}, &buf)
+	if err == nil {
+		t.Fatal("refresh --load \"\" should fail with error")
+	}
+	if _, statErr := os.Stat(filepath.Join(projectDir, ".atl", "skill-registry.md")); !os.IsNotExist(statErr) {
+		t.Fatalf(".atl/skill-registry.md should not exist after failed --load \"\": statErr = %v", statErr)
+	}
+
+	// 2. refresh --load missing value fails closed
+	err = runSkillRegistryRefresh([]string{"--load"}, &buf)
+	if err == nil {
+		t.Fatal("refresh --load without value should fail")
+	}
+
+	// 3. load "" fails closed
+	err = runSkillRegistryLoad([]string{"", "--cwd", projectDir}, &buf)
+	if err == nil {
+		t.Fatal("load \"\" should fail with error")
+	}
+	if _, statErr := os.Stat(filepath.Join(projectDir, ".atl", "skill-registry.md")); !os.IsNotExist(statErr) {
+		t.Fatalf(".atl/skill-registry.md should not exist after failed load \"\": statErr = %v", statErr)
+	}
+
+	// 4. load without args fails closed
+	err = runSkillRegistryLoad([]string{}, &buf)
+	if err == nil {
+		t.Fatal("load without args should fail")
+	}
+
+	// Prepare a valid curated registry file
+	curatedFile := filepath.Join(t.TempDir(), "curated-registry.md")
+	curatedContent := `# Skill Registry — test-proj
+
+## Skills
+
+| Skill | Trigger / description | Scope | Path |
+| --- | --- | --- | --- |
+| ` + "`foo`" + ` | foo desc | project | ` + "`skills/foo/SKILL.md`" + ` |
+`
+	if err := os.WriteFile(curatedFile, []byte(curatedContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 5. load <path> succeeds
+	buf.Reset()
+	err = runSkillRegistryLoad([]string{curatedFile, "--cwd", projectDir}, &buf)
+	if err != nil {
+		t.Fatalf("load curatedFile failed: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(projectDir, ".atl", "skill-registry.md"))
+	if err != nil {
+		t.Fatalf("read registry after load: %v", err)
+	}
+	if string(data) != curatedContent {
+		t.Fatalf("registry content = %q, want %q", string(data), curatedContent)
+	}
+
+	// 6. refresh --load <path> succeeds
+	buf.Reset()
+	err = runSkillRegistryRefresh([]string{"--load", curatedFile, "--cwd", projectDir}, &buf)
+	if err != nil {
+		t.Fatalf("refresh --load curatedFile failed: %v", err)
+	}
+
+	// 7. refresh --load="" fails closed
+	err = runSkillRegistryRefresh([]string{"--load=", "--cwd", projectDir}, &buf)
+	if err == nil {
+		t.Fatal("refresh --load= should fail with error")
+	}
+
+	// 8. runSkillRegistry dispatch for "load"
+	buf.Reset()
+	err = runSkillRegistry([]string{"load", curatedFile, "--cwd", projectDir}, &buf)
+	if err != nil {
+		t.Fatalf("runSkillRegistry load failed: %v", err)
+	}
+
+	// 9. runSkillRegistry unknown command names load
+	err = runSkillRegistry([]string{"unknown"}, &buf)
+	if err == nil || !strings.Contains(err.Error(), "want refresh, load, or list") {
+		t.Fatalf("runSkillRegistry unknown got %v, want error naming 'want refresh, load, or list'", err)
+	}
+}
