@@ -2798,3 +2798,54 @@ func TestRunSkillRegistryLoadAndRefreshFailClosed(t *testing.T) {
 		t.Fatalf("runSkillRegistry unknown got %v, want error naming 'want refresh, load, or list'", err)
 	}
 }
+
+func TestRunSkillRegistryLoadInvalidDoesNotCallEnsureATLIgnored(t *testing.T) {
+	setupMockHome(t, t.TempDir())
+	projectDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(projectDir, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitignorePath := filepath.Join(projectDir, ".gitignore")
+
+	// 1. Invalid registry markdown via load
+	invalidFile := filepath.Join(t.TempDir(), "invalid.md")
+	if err := os.WriteFile(invalidFile, []byte("not a valid registry"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	err := runSkillRegistryLoad([]string{invalidFile, "--cwd", projectDir}, &buf)
+	if err == nil {
+		t.Fatal("load with invalid file should fail")
+	}
+	if _, statErr := os.Stat(gitignorePath); !os.IsNotExist(statErr) {
+		t.Fatalf(".gitignore should not exist after failed load: statErr = %v", statErr)
+	}
+
+	// 2. Nonexistent file via load
+	err = runSkillRegistryLoad([]string{filepath.Join(projectDir, "nonexistent.md"), "--cwd", projectDir}, &buf)
+	if err == nil {
+		t.Fatal("load with nonexistent file should fail")
+	}
+	if _, statErr := os.Stat(gitignorePath); !os.IsNotExist(statErr) {
+		t.Fatalf(".gitignore should not exist after failed load nonexistent: statErr = %v", statErr)
+	}
+
+	// 3. Invalid file via refresh --load
+	err = runSkillRegistryRefresh([]string{"--load", invalidFile, "--cwd", projectDir}, &buf)
+	if err == nil {
+		t.Fatal("refresh --load with invalid file should fail")
+	}
+	if _, statErr := os.Stat(gitignorePath); !os.IsNotExist(statErr) {
+		t.Fatalf(".gitignore should not exist after failed refresh --load: statErr = %v", statErr)
+	}
+
+	// 4. Nonexistent file via refresh --load
+	err = runSkillRegistryRefresh([]string{"--load", filepath.Join(projectDir, "nonexistent.md"), "--cwd", projectDir}, &buf)
+	if err == nil {
+		t.Fatal("refresh --load with nonexistent file should fail")
+	}
+	if _, statErr := os.Stat(gitignorePath); !os.IsNotExist(statErr) {
+		t.Fatalf(".gitignore should not exist after failed refresh --load nonexistent: statErr = %v", statErr)
+	}
+}

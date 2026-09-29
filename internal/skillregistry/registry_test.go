@@ -1125,4 +1125,103 @@ func TestCommitRegistryPairRollbackOnCacheWriteFailure(t *testing.T) {
 	if string(restored) != string(originalReg) {
 		t.Fatalf("registry should have been rolled back to original: got %q, want %q", string(restored), string(originalReg))
 	}
+
+	// Case 3: registry was read-only prior to write (0444)
+	if err := os.Chmod(regPath, 0o444); err != nil {
+		t.Fatal(err)
+	}
+	err = commitRegistryPair(regPath, []byte("new registry data"), cachePath, []byte("cache data"))
+	if err == nil {
+		t.Fatal("commitRegistryPair should have failed")
+	}
+	restored, readErr = os.ReadFile(regPath)
+	if readErr != nil {
+		t.Fatalf("read restored registry: %v", readErr)
+	}
+	if string(restored) != string(originalReg) {
+		t.Fatalf("read-only registry should have been rolled back to original: got %q, want %q", string(restored), string(originalReg))
+	}
+}
+
+func TestPreparedLoadCommitRestoresCuratedBytesOnDrift(t *testing.T) {
+	cwd := t.TempDir()
+	curatedFile := filepath.Join(cwd, "curated-registry.md")
+	content := validCuratedRegistryContent()
+	if err := os.WriteFile(curatedFile, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	prep, err := PrepareLoadRegistry(curatedFile, cwd)
+	if err != nil {
+		t.Fatalf("PrepareLoadRegistry failed: %v", err)
+	}
+
+	// First commit: writes curated bytes
+	first, err := prep.Commit(false)
+	if err != nil {
+		t.Fatalf("first prep.Commit() failed: %v", err)
+	}
+	if !first.Regenerated || first.Reason != "loaded" {
+		t.Fatalf("first result = %#v, want Regenerated=true Reason=loaded", first)
+	}
+
+	// Second commit without drift: reports cache-hit
+	second, err := prep.Commit(false)
+	if err != nil {
+		t.Fatalf("second prep.Commit() failed: %v", err)
+	}
+	if second.Regenerated || second.Reason != "cache-hit" {
+		t.Fatalf("second result = %#v, want Regenerated=false Reason=cache-hit", second)
+	}
+
+	// Drift the destination registry by manually modifying it
+	driftedBytes := []byte(content + "\n<!-- drifted manual edit -->\n")
+	if err := os.WriteFile(prep.RegistryPath, driftedBytes, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Commit again without force: destination drift must be detected,
+	// avoiding false cache-hit and restoring curated bytes
+	driftCommit, err := prep.Commit(false)
+	if err != nil {
+		t.Fatalf("drift Commit(false) failed: %v", err)
+	}
+	if !driftCommit.Regenerated || driftCommit.Reason != "loaded" {
+		t.Fatalf("drift result = %#v, want Regenerated=true Reason=loaded", driftCommit)
+	}
+
+	restoredBytes, err := os.ReadFile(prep.RegistryPath)
+	if err != nil {
+		t.Fatalf("read restored registry: %v", err)
+	}
+	if string(restoredBytes) != content {
+		t.Fatalf("registry bytes not restored: got %q, want %q", string(restoredBytes), content)
+	}
+}
+
+func TestEnsureATLIgnoredNotCalledOnInvalidLoad(t *testing.T) {
+	cwd := t.TempDir()
+	gitignorePath := filepath.Join(cwd, ".gitignore")
+
+	// Missing file: PrepareLoadRegistry returns error
+	_, err := PrepareLoadRegistry(filepath.Join(cwd, "nonexistent.md"), cwd)
+	if err == nil {
+		t.Fatal("PrepareLoadRegistry with nonexistent file should fail")
+	}
+	if fileExists(gitignorePath) {
+		t.Fatal(".gitignore should not exist when load validation fails on missing file")
+	}
+
+	// Invalid format: missing required markers
+	invalidFile := filepath.Join(cwd, "invalid.md")
+	if err := os.WriteFile(invalidFile, []byte("Just plain text without markers"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err = PrepareLoadRegistry(invalidFile, cwd)
+	if err == nil {
+		t.Fatal("PrepareLoadRegistry with invalid markdown should fail")
+	}
+	if fileExists(gitignorePath) {
+		t.Fatal(".gitignore should not exist when load validation fails on invalid content")
+	}
 }

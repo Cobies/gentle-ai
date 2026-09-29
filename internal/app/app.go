@@ -368,6 +368,7 @@ func gentleAIUpgradeVersionFromTUI(finalModel tea.Model) (string, bool) {
 	}
 }
 
+// runSkillRegistry dispatches skill-registry subcommands (refresh, load, list).
 func runSkillRegistry(args []string, stdout io.Writer) error {
 	if len(args) == 0 {
 		return fmt.Errorf("usage: gentle-ai skill-registry <refresh|load|list> [flags]")
@@ -401,6 +402,9 @@ func resolveSkillRegistryDirs(cwd string) (string, string, error) {
 	return cwd, home, nil
 }
 
+// runSkillRegistryRefresh refreshes the project skill registry or loads a
+// curated registry when --load is provided. When loading a curated file, it
+// validates the file via PrepareLoadRegistry before modifying .gitignore.
 func runSkillRegistryRefresh(args []string, stdout io.Writer) error {
 	cwd := ""
 	loadPath := ""
@@ -456,19 +460,31 @@ func runSkillRegistryRefresh(args []string, stdout io.Writer) error {
 		}
 		return nil
 	}
-	if ensureGitignore {
-		if err := skillregistry.EnsureATLIgnored(cwd); err != nil {
-			return err
-		}
-	}
 	var result skillregistry.Result
 	if hasLoad {
-		result, err = skillregistry.LoadRegistry(loadPath, cwd, force)
+		prepared, err := skillregistry.PrepareLoadRegistry(loadPath, cwd)
+		if err != nil {
+			return err
+		}
+		if ensureGitignore {
+			if err := skillregistry.EnsureATLIgnored(cwd); err != nil {
+				return err
+			}
+		}
+		result, err = prepared.Commit(force)
+		if err != nil {
+			return err
+		}
 	} else {
+		if ensureGitignore {
+			if err := skillregistry.EnsureATLIgnored(cwd); err != nil {
+				return err
+			}
+		}
 		result, err = skillregistry.Regenerate(cwd, home, force)
-	}
-	if err != nil {
-		return err
+		if err != nil {
+			return err
+		}
 	}
 	if !quiet {
 		if result.Regenerated {
@@ -484,6 +500,9 @@ func runSkillRegistryRefresh(args []string, stdout io.Writer) error {
 	return nil
 }
 
+// runSkillRegistryLoad validates and installs a pre-curated skill registry file
+// into the project's .atl directory, updating .gitignore only after validation
+// succeeds.
 func runSkillRegistryLoad(args []string, stdout io.Writer) error {
 	cwd := ""
 	loadPath := ""
@@ -527,12 +546,16 @@ func runSkillRegistryLoad(args []string, stdout io.Writer) error {
 	if cwd == filepath.Dir(cwd) || cwd == home {
 		return fmt.Errorf("cannot load skill registry in %s", cwd)
 	}
+	prepared, err := skillregistry.PrepareLoadRegistry(loadPath, cwd)
+	if err != nil {
+		return err
+	}
 	if ensureGitignore {
 		if err := skillregistry.EnsureATLIgnored(cwd); err != nil {
 			return err
 		}
 	}
-	result, err := skillregistry.LoadRegistry(loadPath, cwd, force)
+	result, err := prepared.Commit(force)
 	if err != nil {
 		return err
 	}
@@ -546,6 +569,7 @@ func runSkillRegistryLoad(args []string, stdout io.Writer) error {
 	return nil
 }
 
+// runSkillRegistryList displays or outputs in JSON the list of skills discovered across project and user skill roots.
 func runSkillRegistryList(args []string, stdout io.Writer) error {
 	cwd := ""
 	asJSON := false
