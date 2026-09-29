@@ -519,7 +519,7 @@ func probePiCodeGraphMCPWithAgentDirContext(ctx context.Context, mcpPath, agentD
 		return PiCodeGraphMCPProbeResult{}, fmt.Errorf("Pi MCP adapter extension is unavailable at %q: %w", adapterPath, err)
 	}
 	command := exec.CommandContext(ctx, "codegraph", "serve", "--mcp")
-	system.EnsureCommandDir(command)
+	system.ConfigureCommandProcess(command, "codegraph", []string{"serve", "--mcp"})
 	stdin, err := command.StdinPipe()
 	if err != nil {
 		return PiCodeGraphMCPProbeResult{}, err
