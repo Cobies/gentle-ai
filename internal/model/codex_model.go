@@ -156,14 +156,12 @@ const (
 	CodexEffortMedium CodexEffort = "medium"
 	CodexEffortHigh   CodexEffort = "high"
 	CodexEffortXHigh  CodexEffort = "xhigh"
-	CodexEffortMax    CodexEffort = "max"
-	CodexEffortUltra  CodexEffort = "ultra"
 )
 
-// Valid reports whether the effort value is one of the known levels.
+// Valid reports whether the effort value is one of the four known levels.
 func (e CodexEffort) Valid() bool {
 	switch e {
-	case CodexEffortLow, CodexEffortMedium, CodexEffortHigh, CodexEffortXHigh, CodexEffortMax, CodexEffortUltra:
+	case CodexEffortLow, CodexEffortMedium, CodexEffortHigh, CodexEffortXHigh:
 		return true
 	default:
 		return false
@@ -477,8 +475,6 @@ var codexEffortRank = map[CodexEffort]int{
 	CodexEffortMedium: 1,
 	CodexEffortHigh:   2,
 	CodexEffortXHigh:  3,
-	CodexEffortMax:    4,
-	CodexEffortUltra:  5,
 }
 
 func maxEffort(assignments map[string]CodexEffort, phases []string) CodexEffort {
