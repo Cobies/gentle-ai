@@ -62,7 +62,7 @@ func TestPiCodeGraphReconcileInjectsOnlyCompatibleToolsAndGuidanceForEveryChild(
 		t.Fatalf("guidance-only child received tools:\n%s", limited)
 	}
 	var mcp map[string]any
-	data, _ := os.ReadFile(filepath.Join(home, ".pi", "agent", "mcp-adapter.json"))
+	data, _ := os.ReadFile(filepath.Join(home, ".pi", "agent", "mcp.json"))
 	if err := json.Unmarshal(data, &mcp); err != nil || !strings.Contains(string(data), "codegraph") {
 		t.Fatalf("mcp config = %s, err=%v", data, err)
 	}
@@ -70,7 +70,7 @@ func TestPiCodeGraphReconcileInjectsOnlyCompatibleToolsAndGuidanceForEveryChild(
 
 func TestPiCodeGraphRejectsParentMarkerAndRestoresOnConflict(t *testing.T) {
 	home := t.TempDir()
-	settings := filepath.Join(home, ".pi", "agent", "mcp-adapter.json")
+	settings := filepath.Join(home, ".pi", "agent", "mcp.json")
 	writePiFile(t, filepath.Join(home, ".pi", "agent", "APPEND_SYSTEM.md"), "<!-- gentle-ai:codegraph-guidance -->")
 	writePiFile(t, filepath.Join(home, ".pi", "agent", "subagents", "worker.md"), "---\ntools: bash\n---\nwork\n")
 	writePiFile(t, settings, `{"mcpServers":{"codegraph":{"command":"other"}}}`)
@@ -164,7 +164,7 @@ func TestPiCodeGraphRootValidationRejectsUnsafeRoots(t *testing.T) {
 
 func TestPiCodeGraphReconcileIsByteIdempotentAndUninstallPreservesUserMCP(t *testing.T) {
 	home := t.TempDir()
-	mcpPath := filepath.Join(home, ".pi", "agent", "mcp-adapter.json")
+	mcpPath := filepath.Join(home, ".pi", "agent", "mcp.json")
 	childPath := filepath.Join(home, ".pi", "agent", "subagents", "worker.md")
 	writePiFile(t, mcpPath, `{"mcpServers":{"user":{"command":"user-server"}}}`)
 	writePiFile(t, childPath, "---\ntools: bash\n---\nwork\n")
@@ -210,7 +210,7 @@ func TestPiChildToolsAcceptsYAMLBlockList(t *testing.T) {
 
 func TestPiCodeGraphUninstallRestoresAdoptedAndOwnedArtifacts(t *testing.T) {
 	home := t.TempDir()
-	mcpPath := filepath.Join(home, ".pi", "agent", "mcp-adapter.json")
+	mcpPath := filepath.Join(home, ".pi", "agent", "mcp.json")
 	userChild := filepath.Join(home, ".pi", "agent", "subagents", "worker.md")
 	packageChild := filepath.Join(home, ".pi", "agent", "node_modules", "gentle-pi", "subagents", "package.md")
 	adopted := `{"mcpServers":{"codegraph":{"command":"codegraph","args":["serve","--mcp"]},"user":{"command":"user"}}}`
@@ -261,7 +261,7 @@ func TestPiCodeGraphUninstallPreservesPreexistingMarkedUserChildWithoutManifest(
 
 func TestPiCodeGraphDeselectionRemovesOnlyOwnedIntegration(t *testing.T) {
 	home := t.TempDir()
-	mcpPath := filepath.Join(home, ".pi", "agent", "mcp-adapter.json")
+	mcpPath := filepath.Join(home, ".pi", "agent", "mcp.json")
 	childPath := filepath.Join(home, ".pi", "agent", "subagents", "worker.md")
 	writePiFile(t, mcpPath, `{"mcpServers":{"user":{"command":"user"}}}`)
 	writePiFile(t, childPath, "---\ntools: bash\n---\nuser instructions\n")
@@ -404,28 +404,29 @@ func TestReadPiCodeGraphManifestPreservesFileErrors(t *testing.T) {
 
 func TestVerifyPiCodeGraphRejectsNonCanonicalMCP(t *testing.T) {
 	home := t.TempDir()
-	mcpPath := filepath.Join(home, "mcp-adapter.json")
+	mcpPath := filepath.Join(home, "mcp.json")
 	writePiFile(t, mcpPath, `{"mcpServers":{"not-codegraph":{"command":"other codegraph"}}}`)
 	if err := verifyPiCodeGraph(mcpPath, nil); err == nil {
 		t.Fatal("verifyPiCodeGraph() accepted substring-only MCP evidence")
 	}
 }
 
-func TestVerifyPiMCPFailsClosedWithoutAdapterOrProcess(t *testing.T) {
+func TestVerifyPiMCPFailsClosedWithoutMCPProcess(t *testing.T) {
 	home := t.TempDir()
-	mcpPath := filepath.Join(home, "mcp-adapter.json")
+	t.Setenv("PATH", t.TempDir())
+	mcpPath := filepath.Join(home, "mcp.json")
 	writePiFile(t, mcpPath, `{"mcpServers":{"codegraph":{"command":"codegraph","args":["serve","--mcp"]}}}`)
 	previous := piCodeGraphEffectiveMCPProbe
 	piCodeGraphEffectiveMCPProbe = probePiCodeGraphMCP
 	t.Cleanup(func() { piCodeGraphEffectiveMCPProbe = previous })
 
 	if _, err := verifyPiMCP(mcpPath); err == nil {
-		t.Fatal("verifyPiMCP() succeeded without a Pi MCP adapter or MCP process")
+		t.Fatal("verifyPiMCP() succeeded without a CodeGraph MCP process")
 	}
 }
 
 func TestVerifyPiMCPUsesInjectedEffectiveProbe(t *testing.T) {
-	mcpPath := filepath.Join(t.TempDir(), "mcp-adapter.json")
+	mcpPath := filepath.Join(t.TempDir(), "mcp.json")
 	writePiFile(t, mcpPath, `{"mcpServers":{"codegraph":{"command":"codegraph","args":["serve","--mcp"]}}}`)
 
 	validTool := PiCodeGraphMCPTool{
@@ -512,7 +513,7 @@ func TestVerifyPiMCPUsesInjectedEffectiveProbe(t *testing.T) {
 
 func TestPiCodeGraphFailureRestoresNewMCPAndChild(t *testing.T) {
 	home := t.TempDir()
-	mcpPath := filepath.Join(home, ".pi", "agent", "mcp-adapter.json")
+	mcpPath := filepath.Join(home, ".pi", "agent", "mcp.json")
 	childPath := filepath.Join(home, ".pi", "agent", "subagents", "worker.md")
 	original := "---\ntools: bash\n---\nwork\n"
 	writePiFile(t, childPath, original)
@@ -563,11 +564,10 @@ func TestPiCodeGraphFailureRemovesNewPackageOverlayWithoutVerificationSuccess(t 
 
 func TestPiCodeGraphPendingProbePreservesConfiguredFiles(t *testing.T) {
 	home := t.TempDir()
-	mcpPath := filepath.Join(home, ".pi", "agent", "mcp-adapter.json")
+	mcpPath := filepath.Join(home, ".pi", "agent", "mcp.json")
 	childPath := filepath.Join(home, ".pi", "agent", "subagents", "worker.md")
 	manifestPath := filepath.Join(home, ".gentle-ai", "pi-codegraph.json")
 	writePiFile(t, childPath, "---\ntools: bash\n---\nwork\n")
-	writePiFile(t, filepath.Join(home, ".pi", "agent", "npm", "node_modules", "pi-mcp-adapter", "index.ts"), "export default {}\n")
 	installFakeCodeGraph(t)
 	previousProbe := piCodeGraphEffectiveMCPProbe
 	piCodeGraphEffectiveMCPProbe = probePiCodeGraphMCP
@@ -623,7 +623,7 @@ func TestPiCodeGraphPendingProbeRejectsConflictingChildAndRollsBack(t *testing.T
 
 func TestPiCodeGraphUninstallRollsBackWhenManifestRemovalFails(t *testing.T) {
 	home := t.TempDir()
-	mcpPath := filepath.Join(home, ".pi", "agent", "mcp-adapter.json")
+	mcpPath := filepath.Join(home, ".pi", "agent", "mcp.json")
 	packageChild := filepath.Join(home, ".pi", "agent", "node_modules", "gentle-pi", "subagents", "package.md")
 	overlay := filepath.Join(home, ".pi", "agent", "subagents", "package.md")
 	writePiFile(t, mcpPath, `{"mcpServers":{"user":{"command":"user"}}}`)
@@ -727,15 +727,15 @@ func TestPiCodeGraphFailsClosedForBrokenProjectMCPOverride(t *testing.T) {
 	}
 }
 
+// Pi >= 0.99.0 runs MCP servers through its built-in MCP support, so the
+// probe must not require the retired pi-mcp-adapter package on disk.
 func TestPiCodeGraphProbeVerifiesDirectMCPWithoutPiProcess(t *testing.T) {
 	home := t.TempDir()
-	agentDir := filepath.Join(home, "custom-agent")
 	mcpPath := filepath.Join(home, "project", ".mcp.json")
-	writePiFile(t, filepath.Join(agentDir, "npm", "node_modules", "pi-mcp-adapter", "index.ts"), "export default {}\n")
 	writePiFile(t, mcpPath, `{"mcpServers":{"codegraph":{"command":"codegraph","args":["serve","--mcp"]}}}`)
 	installFakeCodeGraph(t)
 
-	result, err := probePiCodeGraphMCPWithAgentDir(mcpPath, agentDir)
+	result, err := probePiCodeGraphMCP(mcpPath)
 	if !errors.Is(err, ErrPiCodeGraphAdapterHealthUnavailable) {
 		t.Fatalf("probe error = %v, want unavailable adapter health", err)
 	}
@@ -821,8 +821,6 @@ func TestPiCodeGraphProbeRejectsInvalidInitializeResponses(t *testing.T) {
 	for _, response := range responses {
 		t.Run(response, func(t *testing.T) {
 			home := t.TempDir()
-			agentDir := filepath.Join(home, "custom-agent")
-			writePiFile(t, filepath.Join(agentDir, "npm", "node_modules", "pi-mcp-adapter", "index.ts"), "export default {}\n")
 			if runtime.GOOS == "windows" {
 				t.Setenv("GENTLE_AI_CODEGRAPH_TEST_RESPONSE", response)
 				installFakeCodeGraphHelper(t, "invalid-response")
@@ -830,7 +828,7 @@ func TestPiCodeGraphProbeRejectsInvalidInitializeResponses(t *testing.T) {
 				installFakeCodeGraphScript(t, `while IFS= read -r request; do printf '%s\n' '`+response+`'; done`)
 			}
 
-			_, err := probePiCodeGraphMCPWithAgentDir(filepath.Join(home, "mcp-adapter.json"), agentDir)
+			_, err := probePiCodeGraphMCP(filepath.Join(home, "mcp.json"))
 			if err == nil || !strings.Contains(err.Error(), "invalid JSON-RPC 2.0 result") {
 				t.Fatalf("probe error = %v, want invalid initialize response", err)
 			}
@@ -840,7 +838,7 @@ func TestPiCodeGraphProbeRejectsInvalidInitializeResponses(t *testing.T) {
 
 func TestPiCodeGraphRejectsMalformedMCPServersWithoutChangingBytes(t *testing.T) {
 	home := t.TempDir()
-	mcpPath := filepath.Join(home, ".pi", "agent", "mcp-adapter.json")
+	mcpPath := filepath.Join(home, ".pi", "agent", "mcp.json")
 	before := []byte(`{"mcpServers":["user-server"]}`)
 	writePiFile(t, mcpPath, string(before))
 
@@ -857,7 +855,7 @@ func TestPiCodeGraphPreservesSensitiveFileModes(t *testing.T) {
 		t.Skip("exact POSIX file modes are unavailable on Windows")
 	}
 	home := t.TempDir()
-	mcpPath := filepath.Join(home, ".pi", "agent", "mcp-adapter.json")
+	mcpPath := filepath.Join(home, ".pi", "agent", "mcp.json")
 	childPath := filepath.Join(home, ".pi", "agent", "subagents", "worker.md")
 	writePiFile(t, mcpPath, `{"mcpServers":{"user":{"command":"user"}}}`)
 	writePiFile(t, childPath, "---\ntools: bash\n---\nwork\n")
