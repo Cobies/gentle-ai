@@ -221,6 +221,9 @@ func resolveReviewNextTransition(status ReviewTargetStatusResult, selectedLenses
 				return reviewStopTransition("rdd_disabled")
 			}
 			if status.Action == reviewtransaction.TargetStatusActionStop && status.Replayability == reviewtransaction.ReplayabilityNotReplayable {
+				if status.passiveDeltaAfterAcknowledgement {
+					return reviewStopTransition("acknowledged_predecessor_passive_delta")
+				}
 				return reviewStopTransition("target_already_acknowledged")
 			}
 			if input.Selector != nil && input.Selector.Kind == reviewtransaction.TargetBaseWorkspaceOverlay &&
@@ -955,6 +958,9 @@ func reviewStartArguments(status ReviewTargetStatusResult, lineage string, runti
 		arguments = append(arguments, ReviewTransitionArgument{Name: "consent", Value: string(reviewConsentModeRelay)})
 	}
 	arguments = append(arguments, reviewStartIntendedUntrackedArguments(intended)...)
+	// rdd-risk-gated S17: preflighted START options ride last, so a STATUS
+	// without them renders the exact vector it always did.
+	arguments = append(arguments, status.startOptions.arguments()...)
 	return arguments
 }
 
@@ -1278,7 +1284,8 @@ var reviewRepositoryContextKeyUnsafeReason = reviewPreflightReason{
 // the sealed rctx3 handle its relay resolves. The relay runs in the host
 // session directory, which names nothing about the review (#5136, #4516), so
 // the handle has to carry its own root. The runtime is the one this STATUS
-// renders for -- the declared --agent, else the lineage's frozen runtime -- so
+// renders for (reviewEffectiveRuntime: the declared --agent, else Pi under its
+// relay handshake, else the lineage's frozen runtime), so
 // a lineage driven by another runtime is reissued in that runtime's format.
 // Every other runtime keeps the unchanged rctx2 digest.
 func reviewOpenCodeTransitionBinding(root string, binding ReviewTransitionBinding, runtime model.AgentID) (ReviewTransitionBinding, error) {

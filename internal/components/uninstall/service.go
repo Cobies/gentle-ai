@@ -24,6 +24,7 @@ import (
 	"github.com/gentleman-programming/gentle-ai/v4/internal/components/gga"
 	"github.com/gentleman-programming/gentle-ai/v4/internal/components/opencodedefault"
 	"github.com/gentleman-programming/gentle-ai/v4/internal/components/opencoderuntimeplugins"
+	"github.com/gentleman-programming/gentle-ai/v4/internal/components/reviewassets"
 	"github.com/gentleman-programming/gentle-ai/v4/internal/components/skills"
 	"github.com/gentleman-programming/gentle-ai/v4/internal/components/telemetryruntime"
 	"github.com/gentleman-programming/gentle-ai/v4/internal/components/theme"
@@ -79,6 +80,9 @@ const (
 	opRewriteFile opType = iota
 	opRemoveFile
 	opRemoveTree
+	// opRetireSDD runs after every file and tree removal, so the empty
+	// directories it leaves are still pruned by opRemoveIfEmpty.
+	opRetireSDD
 	opRemoveIfEmpty
 )
 
@@ -116,6 +120,12 @@ type operation struct {
 	// cleanup it was.
 	agents []model.AgentID
 	apply  func(path string) (changed bool, removed bool, err error)
+	// report, when set, adds to the result what an operation changed
+	// beyond its own path. It runs after apply, even when apply failed.
+	report func(result *Result)
+	// notes, when set, names what a successful apply kept for the user to
+	// decide on.
+	notes func() []string
 }
 
 // operationFailure records one operation that did not complete, so the run can
@@ -168,7 +178,7 @@ func PartialUninstall(homeDir, workspaceDir, appVersion string, agentIDs []strin
 	return svc.PartialUninstall(agentsTyped, componentsTyped)
 }
 
-func PartialUninstallWithProfileSelection(homeDir, workspaceDir, appVersion string, agentIDs []string, componentIDs []string, profileNames []string, engramScope model.EngramUninstallScope) (Result, error) {
+func PartialUninstallWithEngramScopeSelection(homeDir, workspaceDir, appVersion string, agentIDs []string, componentIDs []string, engramScope model.EngramUninstallScope) (Result, error) {
 	svc, err := NewService(homeDir, workspaceDir, appVersion)
 	if err != nil {
 		return Result{}, err
@@ -184,7 +194,7 @@ func PartialUninstallWithProfileSelection(homeDir, workspaceDir, appVersion stri
 		componentsTyped = append(componentsTyped, model.ComponentID(componentID))
 	}
 
-	return svc.PartialUninstallWithProfiles(agentsTyped, componentsTyped, profileNames, engramScope)
+	return svc.PartialUninstallWithEngramScope(agentsTyped, componentsTyped, engramScope)
 }
 
 func CompleteUninstall(homeDir, workspaceDir, appVersion string) (Result, error) {
@@ -201,10 +211,7 @@ func (s *Service) PartialUninstall(agentIDs []model.AgentID, componentIDs []mode
 	return s.partialUninstall(agentIDs, componentIDs)
 }
 
-func (s *Service) PartialUninstallWithProfiles(agentIDs []model.AgentID, componentIDs []model.ComponentID, profileNames []string, engramScope model.EngramUninstallScope) (Result, error) {
-	// Profiles only applied to the retired SDD component; component validation
-	// rejects that request before planning and preserves existing profiles.
-	_ = profileNames
+func (s *Service) PartialUninstallWithEngramScope(agentIDs []model.AgentID, componentIDs []model.ComponentID, engramScope model.EngramUninstallScope) (Result, error) {
 	s.SetEngramUninstallScope(engramScope)
 	defer func() {
 		s.engramUninstallScope = model.EngramUninstallScopeGlobal
@@ -214,7 +221,7 @@ func (s *Service) PartialUninstallWithProfiles(agentIDs []model.AgentID, compone
 }
 
 // partialUninstall is the shared body of PartialUninstall and
-// PartialUninstallWithProfiles. It resolves the requested components,
+// PartialUninstallWithEngramScope. It resolves the requested components,
 // downgrades any that are still shared with an agent this run is not
 // removing (see reconcileSharedComponents), and executes the resulting plan.
 func (s *Service) partialUninstall(agentIDs []model.AgentID, componentIDs []model.ComponentID) (Result, error) {
@@ -491,6 +498,21 @@ func (s *Service) buildPlan(agentIDs []model.AgentID, componentIDs []model.Compo
 	}
 	if removesAllAgentComponents(componentIDs) {
 		for _, agentID := range agentIDs {
+			adapter, _ := s.registry.Get(agentID)
+			op, targets, ok := s.retiredSDDOperation(adapter)
+			if !ok {
+				continue
+			}
+			for _, target := range targets {
+				backupTargets[target] = struct{}{}
+			}
+			// One retirement per runtime: runtimes sharing a config root
+			// still retire their own inventories.
+			operationsByKey["retire-sdd:"+string(agentID)] = op
+		}
+	}
+	if removesAllAgentComponents(componentIDs) {
+		for _, agentID := range agentIDs {
 			if agentID != model.AgentOpenCode && agentID != model.AgentKilocode {
 				continue
 			}
@@ -505,6 +527,22 @@ func (s *Service) buildPlan(agentIDs []model.AgentID, componentIDs []model.Compo
 				}
 				operationsByKey[key] = op
 			}
+			for _, op := range retainedOpenCodePluginOperations(adapter, s.homeDir) {
+				backupTargets[op.path] = struct{}{}
+				operationsByKey[operationKey(op)] = op
+			}
+		}
+	}
+	if slices.Contains(agentIDs, model.AgentClaudeCode) && removesAllAgentComponents(componentIDs) {
+		// Only a complete Claude removal retires the module pilot (see
+		// retireClaudeGlobalModules); snapshot every file it may change. An
+		// unreadable ledger path fails the plan before any write.
+		paths, err := agentguidance.ClaudeGlobalModulePaths(s.homeDir)
+		if err != nil {
+			return plan{}, err
+		}
+		for _, path := range paths {
+			backupTargets[path] = struct{}{}
 		}
 	}
 	if slices.Contains(agentIDs, model.AgentOpenCode) && removesAllAgentComponents(componentIDs) {
@@ -536,10 +574,6 @@ func (s *Service) buildPlan(agentIDs []model.AgentID, componentIDs []model.Compo
 			return plan{}, err
 		}
 		for _, op := range removeOwnedTelemetryRuntime(configDir) {
-			backupTargets[op.path] = struct{}{}
-			operationsByKey[operationKey(op)] = op
-		}
-		for _, op := range retainedOpenCodePluginOperations(adapter, s.homeDir) {
 			backupTargets[op.path] = struct{}{}
 			operationsByKey[operationKey(op)] = op
 		}
@@ -639,9 +673,15 @@ func (s *Service) executePlan(p plan, agentsToRemove []model.AgentID) (Result, e
 
 	for _, op := range p.operations {
 		changed, removed, err := op.apply(op.path)
+		if op.report != nil {
+			op.report(&result)
+		}
 		if err != nil {
 			failures = append(failures, operationFailure{path: op.path, agents: op.agents, err: err})
 			continue
+		}
+		if op.notes != nil {
+			result.ManualActions = append(result.ManualActions, op.notes()...)
 		}
 		if op.typeID == opRemoveIfEmpty && !removed {
 			if note, ok := manualActionForNonEmptyDirectory(op.path); ok {
@@ -662,6 +702,16 @@ func (s *Service) executePlan(p plan, agentsToRemove []model.AgentID) (Result, e
 			if removed {
 				result.RemovedDirectories = append(result.RemovedDirectories, op.path)
 			}
+		}
+	}
+
+	if slices.Contains(agentsToRemove, model.AgentClaudeCode) {
+		if err := s.retireClaudeGlobalModules(&result); err != nil {
+			failures = append(failures, operationFailure{
+				path:   claude.NewAdapter().GlobalConfigDir(s.homeDir),
+				agents: []model.AgentID{model.AgentClaudeCode},
+				err:    fmt.Errorf("retire Claude orchestrator modules: %w", err),
+			})
 		}
 	}
 
@@ -695,6 +745,51 @@ func (s *Service) executePlan(p plan, agentsToRemove []model.AgentID) (Result, e
 		return result, errors.Join(errs...)
 	}
 	return result, nil
+}
+
+// retireClaudeGlobalModules returns a complete Claude removal from the module
+// pilot to the monolithic orchestrator, and does nothing without a module
+// ledger. Each known path is reported as it is on disk afterwards: removed or
+// changed when retirement touched it, and kept for manual review otherwise.
+// Nothing else in the module directory is enumerated.
+func (s *Service) retireClaudeGlobalModules(result *Result) error {
+	paths, err := agentguidance.ClaudeGlobalModulePaths(s.homeDir)
+	if err != nil || paths == nil {
+		return err
+	}
+	retired, err := agentguidance.RetireClaudeGlobalModules(s.homeDir, reviewassets.ReviewExecutionContractFor)
+	return reportClaudeModuleRetirement(result, paths, retired, err)
+}
+
+// reportClaudeModuleRetirement records in result what retiring the module
+// pilot did to paths, the files ClaudeGlobalModulePaths planned. A failed
+// retirement that still reports Changed did not finish its rollback, so which
+// files it left changed is unknown: none is reported as removed or changed,
+// and the user is asked to inspect the core and the module directory.
+func reportClaudeModuleRetirement(result *Result, paths []string, retired agentguidance.Result, err error) error {
+	if err != nil {
+		if retired.Changed {
+			result.ManualActions = append(result.ManualActions, fmt.Sprintf(
+				"Inspect %s and %s before rerunning the uninstall: the failed Claude orchestrator module retirement did not finish its rollback, so they may be partially changed",
+				paths[0], filepath.Dir(paths[len(paths)-1])))
+		}
+		return err
+	}
+	for _, path := range paths {
+		_, statErr := os.Lstat(path)
+		switch {
+		case slices.Contains(retired.Files, path) && os.IsNotExist(statErr):
+			result.RemovedFiles = append(result.RemovedFiles, path)
+		case slices.Contains(retired.Files, path):
+			if !slices.Contains(result.ChangedFiles, path) {
+				result.ChangedFiles = append(result.ChangedFiles, path)
+			}
+		case statErr == nil:
+			result.ManualActions = append(result.ManualActions, fmt.Sprintf(
+				"Remove manually if no longer needed: %s (orchestrator module modified or not owned by Gentle AI, kept)", path))
+		}
+	}
+	return nil
 }
 
 // failedAgents reports which agents cannot claim a completed uninstall. A
@@ -1414,13 +1509,17 @@ func retainedOpenCodePluginOperations(adapter agents.Adapter, homeDir string) []
 		return removeEmpty(path)
 	}
 	ops = append(ops, dirOp)
-	for _, path := range modelVariantsCachePaths(filepath.Join(homeDir, ".gentle-ai", "cache")) {
-		op := removeFile(path)
-		op.agents = []model.AgentID{model.AgentOpenCode}
-		ops = append(ops, op)
+	// The model-variants cache is shared by the OpenCode family; only an
+	// OpenCode removal clears it, as before Kilocode plugins were removed.
+	if adapter.Agent() == model.AgentOpenCode {
+		for _, path := range modelVariantsCachePaths(filepath.Join(homeDir, ".gentle-ai", "cache")) {
+			ops = append(ops, removeFile(path))
+		}
 	}
+	// Attribute every operation to the agent being removed, so a failure keeps
+	// that agent's uninstall incomplete and names it in the rerun hint.
 	for i := range ops {
-		ops[i].agents = []model.AgentID{model.AgentOpenCode}
+		ops[i].agents = []model.AgentID{adapter.Agent()}
 	}
 	return ops
 }
@@ -1745,6 +1844,15 @@ func mergeRewriteOps(a, b operation) operation {
 			}
 			changed2, removed2, err2 := b.apply(path)
 			return changed1 || changed2, removed2, err2
+		},
+		notes: func() []string {
+			var notes []string
+			for _, op := range []operation{a, b} {
+				if op.notes != nil {
+					notes = append(notes, op.notes()...)
+				}
+			}
+			return notes
 		},
 	}
 }

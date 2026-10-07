@@ -11,12 +11,10 @@ Canonical bodies for the orchestrator subsections shared across runtimes.
 <!-- odd-orchestrator-section:Language Domain Contract:end -->
 
 <!-- odd-orchestrator-section:Delegated Verification Gate (MANDATORY):start -->
-Verification of a delegated writer's work is decided by two inputs the parent reads deterministically: the receipt-driven development (RDD) state for the repository (`on`, `off`, or `unknown`), and the native risk tier from `gentle-ai review assess --cwd <repo> --json` (`gentle-ai.review-assessment/v1`, `risk` one of `passive`, `medium`, `high`). A runtime that already renders an RDD status line reads it from there; otherwise read `gentle-ai review mode status` (read-only) and treat a failure as `unknown`. Any assessment failure or an unrecognized verb is treated as `high`.
+Verification of a delegated writer's work follows the native risk tier whether receipt-driven development (RDD) is on or off. After the writer returns, the parent runs `gentle-ai review assess --cwd <repo> --agent {{GENTLE_AI_RUNTIME_AGENT_ID}} --json` (`gentle-ai.review-assessment/v1`, `risk` one of `passive`, `medium`, `high`) over the writer's diff; any assessment failure or an unrecognized verb is treated as `high`.
 
-The `on` branch below holds only while the native review reaches a terminal outcome for this candidate. When the human declines the consent envelope for this candidate (candidate-scoped; never the kill switch), when receipt-driven development is disabled for the clone after this status was read, or when START or STATUS refuses, the parent follows the RDD off path instead: run `gentle-ai review assess --cwd <repo> --json` over the writer's diff and apply the tier table below. An unknown outcome is treated as not closed, never as terminal.
-
-- **RDD on**: the bounded writer runs the parent-authorized `## Verification` commands in the foreground and reports `<command>: <observed result>`; that report is the verification of record, and the native review is the independent check. A separate verifier stays on-demand only — the writer reported `partial` or `blocked`, an expensive or external check the parent wants run on a cheaper profile, or a parent spot check. A passive candidate needs only the parent's structural readback.
-- **RDD off or unknown**: after the writer returns, the parent runs `gentle-ai review assess` over the writer's diff and follows the tier — passive: structural readback only; medium: writer self-verification, with a separate verifier only when the writer ran on a small-model profile (low effort or a mini model); high or unassessable: writer self-verification plus an independent verifier. `unknown` never lowers a tier, and the small-model bias raises the tier by one for verification purposes.
+- **Risk tier**: passive: structural readback only; medium: writer self-verification, with a separate verifier only when the writer ran on a small-model profile (low effort or a mini model); high or unassessable: writer self-verification plus an independent verifier. The small-model bias raises the tier by one for verification purposes. The bounded writer runs the parent-authorized `## Verification` commands in the foreground and reports `<command>: <observed result>`.
+- **RDD on**: the native review is an additional outside view of the change, from the lenses pertinent to what was touched; it never replaces or skips the tier's verification, and the tier's verifier runs before review. A runtime that renders an RDD status line reads it from there; otherwise read `gentle-ai review mode status` (read-only) and treat a failure as `unknown`. A declined consent, a disabled clone, or a refused START or STATUS changes nothing about verification.
 - The parent spot check — re-running one reported command before delivery — stays in every tier.
 - **Verification timing**: when the same model wrote several deliveries of one feature inline, run one independent verifier at the feature's end instead of one per delivery; verify per unit only when that unit is really high risk (its Risk line or the assessment of its actual diff) and always when a smaller-model profile wrote the code.
 - **Correction bounds**: verifier blockers get one correction batch that fixes every reported blocker, then one recheck limited to those blockers, never a new full sweep. A second correction runs only when the recheck shows the same blocker still failing; a new finding never earns one. Blockers still open after that become one **Needs your decision** result. A writer's self-review follows the same bound, then reports `partial`.
@@ -135,9 +133,10 @@ stop writes → parent captures git status → diagnose affected repositories/wo
 
 ### Allowed edit surfaces (MANDATORY)
 
+<!-- odd-orchestrator-fragment:writer.edit-surfaces:start -->
 A bounded writer refuses to write outside the exact allowed edit surfaces and stops for interaction when they are missing. The parent owns that input. Deriving it is part of planning the delegation, not something the writer or the human can be left to supply.
 
-Before launching a bounded writer through the runtime's delegation mechanism, derive the allowed edit surface from the task being delegated — the files the planned change must touch, plus the directories where the task authorizes new files — and pass it in the delegated prompt under an `## Allowed edit surfaces` heading, in the same exact-path form as `## Skills to load before work`:
+Before launching a bounded writer through the runtime's delegation mechanism, derive the allowed edit surface from the task being delegated — the files the planned change must touch, plus the directories where the task authorizes new files — and pass it in the delegated prompt under an `## Allowed edit surfaces` heading:
 
 - exact repository-relative paths or narrow globs, one per line; never `.`, a bare repository root, or an absolute path; paths containing whitespace require whole-entry backticks;
 - the section ends at the next Markdown heading; every non-empty line before it must be a valid surface entry, so put explanatory prose under a following heading;
@@ -148,10 +147,13 @@ Before launching a bounded writer through the runtime's delegation mechanism, de
 If the surface genuinely cannot be derived, do not launch the writer, and do not ask the human to author paths. Derive a candidate set first — the exact paths this task would touch — and present that enumerated list as an approve/decline choice under the Lossless Blocking Prompts rules. A free-text question asking which paths or globs to authorize is never a valid escalation.
 
 Relay a writer's interaction request about edit surfaces the same way: present its derived candidate paths as the choice, and add or drop paths only on the human's explicit instruction.
+<!-- odd-orchestrator-fragment:writer.edit-surfaces:end -->
 
 ### Key Learnings closing block
 
+<!-- odd-orchestrator-fragment:delegation.key-learnings:start -->
 When delegating to a generic exploration, writer, or verification worker, include the same `## Key Learnings` closing instruction in the delegated prompt: after the worker returns its normal result envelope or handoff, it closes its final response text with a `## Key Learnings` block of 1–5 numbered items, each a standalone factual sentence of at least 20 characters and at least 4 words, omitting the block when there is genuinely no reusable learning. The block layers on after the structured return contract and does not alter its fields. This applies to final response text only — not intermediate tool output. The Engram memory provider extracts and persists these items as passive capture; the worker does not parse the block or invoke passive-capture tools itself. This is separate from explicit `mem_save` persistence. Agents that must return strict JSON never receive this closing instruction; their required output shape remains unchanged.
+<!-- odd-orchestrator-fragment:delegation.key-learnings:end -->
 
 ### Delivery strategy
 
@@ -159,6 +161,7 @@ Use the ODD delivery strategy and work-unit boundaries under `## Implementation 
 
 ### Intent-Driven Skill Discovery
 
+<!-- odd-orchestrator-fragment:skills.discovery:start -->
 For skill-shaped requests, do not treat the injected skill list as complete. Use the skill registry and filesystem only as a discovery aid; do not let a trigger table override the user's concrete request or turn a small request into a larger workflow.
 
 Discovery order:
@@ -179,6 +182,7 @@ Common intent hints, not hard routing:
 | Split/stack/large PR       | `chained-pr`                           |
 
 Keep this lightweight: loading a skill should improve the immediate task, not force extra ceremony.
+<!-- odd-orchestrator-fragment:skills.discovery:end -->
 
 ### Safety
 
@@ -189,6 +193,7 @@ Keep this lightweight: loading a skill should improve the immediate task, not fo
 <!-- odd-orchestrator-section:Orchestrator Routing and Delivery:end -->
 
 <!-- odd-orchestrator-section:Skill Registry Protocol:start -->
+<!-- odd-orchestrator-fragment:skills.registry:start -->
 The parent resolves skills once per session or before first delegation:
 
 1. Read `.atl/skill-registry.md` if present.
@@ -207,4 +212,5 @@ If a subagent reports `skill_resolution`, interpret it as project/user skill res
 - `none`: no project/user skills were loaded.
 
 If any subagent reports a fallback instead of `paths-injected`, treat it as an orchestration gap and correct future delegations by passing exact indexed paths directly.
+<!-- odd-orchestrator-fragment:skills.registry:end -->
 <!-- odd-orchestrator-section:Skill Registry Protocol:end -->
