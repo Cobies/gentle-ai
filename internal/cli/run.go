@@ -159,21 +159,39 @@ func SetCommandOutputStreaming(enabled bool) func() {
 var deriveManagedAssetWriter = managedAssetDigest
 var installStagePlan = func(runtime *installRuntime) pipeline.StagePlan { return runtime.stagePlan() }
 
-func RunInstall(args []string, detection system.DetectionResult) (InstallResult, error) {
+// PreparedInstall is a validated install plan, ready for execution after app preflight.
+// Its fields stay private so dispatch reuses the exact parsed and resolved input.
+type PreparedInstall struct {
+	flags    InstallFlags
+	input    InstallInput
+	resolved planner.ResolvedPlan
+}
+
+// PrepareInstall resolves and validates without reading or writing install state.
+func PrepareInstall(args []string, detection system.DetectionResult) (PreparedInstall, error) {
 	flags, err := ParseInstallFlags(args)
 	if err != nil {
-		return InstallResult{}, err
+		return PreparedInstall{}, err
 	}
 
 	input, err := NormalizeInstallFlags(flags, detection)
 	if err != nil {
-		return InstallResult{}, err
+		return PreparedInstall{}, err
 	}
 
 	resolved, err := planner.NewResolver(planner.MVPGraph()).Resolve(input.Selection)
 	if err != nil {
-		return InstallResult{}, err
+		return PreparedInstall{}, err
 	}
+	if err := validateInstallModifierConsumers(flags, input.Selection, resolved.OrderedComponents); err != nil {
+		return PreparedInstall{}, err
+	}
+	return PreparedInstall{flags: flags, input: input, resolved: resolved}, nil
+}
+
+// RunPreparedInstall executes a plan returned by PrepareInstall.
+func RunPreparedInstall(prepared PreparedInstall, detection system.DetectionResult) (InstallResult, error) {
+	flags, input, resolved := prepared.flags, prepared.input, prepared.resolved
 	profile := ResolveInstallProfile(detection)
 	resolved.PlatformDecision = planner.PlatformDecisionFromProfile(profile)
 	homeDir, err := osUserHomeDir()
@@ -2258,13 +2276,21 @@ func installOpenCodeReviewProviderRoles(settingsPath string, agent model.AgentID
 		return false, err
 	}
 	task := map[string]any{}
+	agents, _ := root["agent"].(map[string]any)
+	orchestrator, _ := agents["gentle-orchestrator"].(map[string]any)
+	current, _ := orchestrator["permission"].(map[string]any)
+	// Delegate only to Gentle AI agents: without a wildcard deny the
+	// orchestrator can pick OpenCode's built-in explore/general subagents,
+	// which lack the skill tool. OpenCode applies the last matching rule, and
+	// "*" sorts before every agent name, so the wildcard precedes the grants.
+	// A wildcard rule the user already set is kept.
+	if currentTask, _ := current["task"].(map[string]any); currentTask["*"] == nil {
+		task["*"] = "deny"
+	}
 	for _, name := range opencodeagents.Roles(agent) {
 		task[name] = "allow"
 	}
 	permission := map[string]any{"task": task}
-	agents, _ := root["agent"].(map[string]any)
-	orchestrator, _ := agents["gentle-orchestrator"].(map[string]any)
-	current, _ := orchestrator["permission"].(map[string]any)
 	if _, set := current["question"]; !set && !userDeniesQuestion(root, orchestrator) {
 		permission["question"] = "allow"
 	}
