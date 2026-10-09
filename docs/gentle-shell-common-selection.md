@@ -15,6 +15,8 @@ args := cli.ShellInstallArguments(selection)
 - Windows selection-only behavior is explicit opt-in through this constructor. Ordinary Windows installation still owns its worker and waits for stop/reap after cancellation.
 - An unrelated final model returns an actionable error.
 
+The existing Linux/macOS `gentle-ai shell install` route already consumes these helpers: it creates the selector, reads its outcome and forwards its argument vector only after its owning program returns. Cancellation still produces no worker invocation.
+
 This is an internal application API, not a new user command. It does not add a Welcome entry, experience controls, terminal handoff integration, acquisition or installed Ready. Those are separately qualified units. Default CLI behavior is unchanged.
 
 ## Verification and rollback
