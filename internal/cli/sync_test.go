@@ -2821,7 +2821,7 @@ func TestRestorePersistedCommunityToolsRequiresInstallerSelection(t *testing.T) 
 func TestRestorePersistedCommunityToolsDoesNotAdoptExternalWiring(t *testing.T) {
 	home := t.TempDir()
 	mustWriteFile(t, filepath.Join(home, ".config", "opencode", "opencode.json"), []byte(`{"mcp":{"codegraph":{"type":"local","command":["codegraph","serve","--mcp"],"enabled":true}}}`))
-	mustWriteFile(t, filepath.Join(home, ".pi", "agent", "mcp-adapter.json"), []byte(`{"mcpServers":{"codegraph":{"command":"codegraph"}}}`))
+	mustWriteFile(t, filepath.Join(home, ".pi", "agent", "mcp.json"), []byte(`{"mcpServers":{"codegraph":{"command":"codegraph"}}}`))
 
 	selection := model.Selection{}
 	restorePersistedCommunityTools(home, &selection, state.InstallState{})
@@ -2984,7 +2984,7 @@ func TestRunSyncReportsLegacySelectionMigrationPersistenceFailure(t *testing.T) 
 		t.Fatal(readErr)
 	}
 	opencodeConfig := filepath.Join(home, ".config", "opencode", "opencode.json")
-	piMCP := filepath.Join(home, ".pi", "agent", "mcp-adapter.json")
+	piMCP := filepath.Join(home, ".pi", "agent", "mcp.json")
 	statePath := state.Path(home)
 	stateTarget := filepath.Join(home, ".gentle-ai", "persisted-state.json")
 	if err := os.Rename(statePath, stateTarget); err != nil {
@@ -3037,7 +3037,7 @@ func TestRunSyncReportsLegacySelectionMigrationPersistenceFailure(t *testing.T) 
 func writeManagedPiCodeGraphManifest(t *testing.T, home string) {
 	t.Helper()
 	manifestPath := filepath.Join(home, ".gentle-ai", "pi-codegraph.json")
-	mcpPath := filepath.Join(home, ".pi", "agent", "mcp-adapter.json")
+	mcpPath := filepath.Join(home, ".pi", "agent", "mcp.json")
 	mustWriteFile(t, manifestPath, []byte(`{"mcpPath":`+strconv.Quote(mcpPath)+`,"mcp":{"afterHash":"managed"},"children":{}}`))
 	if err := os.Chmod(manifestPath, 0o600); err != nil {
 		t.Fatal(err)
