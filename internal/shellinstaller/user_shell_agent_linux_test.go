@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -18,6 +19,12 @@ func agentModeFixture(t *testing.T) (target, agent string) {
 	}
 	agent = filepath.Join(parent, "agent")
 	if err := os.Mkdir(agent, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// The guest umask (0055) strips the group/other bits from Mkdir's
+	// argument (0755 -> 0700); make the intended owned 0755 mode real
+	// regardless of umask.
+	if err := os.Chmod(agent, 0755); err != nil {
 		t.Fatal(err)
 	}
 	target = filepath.Join(parent, "installed")
@@ -36,8 +43,23 @@ func TestUserValidateAgentReuse(t *testing.T) {
 	main.SDKSource = "main-preview"
 	allowed := req
 	allowed.Experience = &main
+	// The Main SDK selection binds the agent as a private 0700 directory, so a
+	// 0755 agent is refused up front, before any write, with the exact fix.
+	before := agentTargetRecord(t, agent)
+	if err := userValidateInstall(allowed); err == nil || !strings.Contains(err.Error(), "Main preview") || !strings.Contains(err.Error(), "chmod 700 "+strconv.Quote(agent)) {
+		t.Fatalf("Main on a 0755 agent was not refused up front: %v", err)
+	}
+	if after := agentTargetRecord(t, agent); after != before {
+		t.Fatalf("refused Main selection changed the agent:\n%s\n->\n%s", before, after)
+	}
+	if err := os.Chmod(agent, 0700); err != nil {
+		t.Fatal(err)
+	}
 	if err := userValidateInstall(allowed); err != nil {
-		t.Fatalf("Main was refused for agent reuse: %v", err)
+		t.Fatalf("Main was refused for a 0700 agent reuse: %v", err)
+	}
+	if err := os.Chmod(agent, 0755); err != nil {
+		t.Fatal(err)
 	}
 	gga := profile
 	gga.GGA, gga.GGAProvider = "on", "codex"

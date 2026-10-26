@@ -9,7 +9,7 @@ func userValidateStageExperience(profile *UserExperience) error {
 	if err := userValidateStagePreferences(profile); err != nil {
 		return err
 	}
-	if userQualifiedStockExperience(profile) {
+	if userQualifiedStockExperience(profile) || userQualifiedDarwinExperience(profile) {
 		return nil
 	}
 	if profile != nil && profile.SDKSource == "main-preview" && runtime.GOOS != "windows" {
@@ -102,3 +102,11 @@ func userExperienceConfigFiles(profile *UserExperience) ([]userExperienceStageFi
 	}
 	return files, nil
 }
+
+// UserKernelGate is the kernel-qualification seam for the shell installer
+// entry points, mirroring the darwin userKernelGate pattern: tests stub it to
+// exercise flow logic on hosts the real guard refuses (Windows Server
+// runners) and must restore the previous value. It is nil in production, so
+// the Windows check in UserKernelCheck always runs its real guard; the Linux
+// and darwin checks keep their own platforms' guards.
+var UserKernelGate func() error

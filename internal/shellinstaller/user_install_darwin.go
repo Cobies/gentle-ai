@@ -75,7 +75,14 @@ func RunUserEntry(ctx context.Context, _ string, args []string, stdin io.Reader,
 		}
 		result, err := RunUserInstall(ctx, req)
 		if err == nil {
-			_, err = fmt.Fprintf(stdout, "Installed %s; commands %s/bin/gentle-shell and %s/bin/pi\n", result.Destination, result.Destination, result.Destination)
+			if _, err = fmt.Fprintf(stdout, "Installed %s; commands %s/bin/gentle-shell and %s/bin/pi\n", result.Destination, result.Destination, result.Destination); err != nil {
+				return err
+			}
+			if result.LauncherNote != "" {
+				if _, err = fmt.Fprintf(stdout, "%s\n", result.LauncherNote); err != nil {
+					return err
+				}
+			}
 		}
 		return err
 	case "recover":
@@ -329,3 +336,8 @@ func userStageVerify(ctx context.Context, stage string, nodeSize int64, nodeSHA 
 	}
 	return err
 }
+
+// RunUserLaunchProbe is the macOS stub of the Linux delegated-unit launch
+// probe (#5713): macOS supervises the runtime through its own launch path, so
+// there is no transient-unit precondition to prove here.
+func RunUserLaunchProbe(context.Context, string) error { return nil }

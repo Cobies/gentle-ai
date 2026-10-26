@@ -59,27 +59,40 @@ func TestUserWindowsStageExperienceCanonicalFiles(t *testing.T) {
 	}
 }
 
+// Main preview stages the same channel-independent RDD state as Stable (the
+// TUI always emits GlobalRDD), in parity with the Linux Main route.
 func TestUserWindowsStageExperienceAdvancedChoices(t *testing.T) {
-	root := windowsExperienceStage(t)
-	profile := DefaultUserExperience()
-	profile.StrictTDD = "on"
-	profile.GlobalRDD = "off"
-	profile.Context7 = "on"
-	if err := userStageExperience(context.Background(), root, &profile); err != nil {
-		t.Fatal(err)
-	}
-	for _, item := range []struct {
-		path string
-		want string
-	}{
-		{filepath.Join(root, "config", "strict-tdd.json"), `"policy": "on"`},
-		{filepath.Join(root, "home", ".gentle-ai", "state.json"), `"rdd_mode": "off"`},
-		{filepath.Join(root, "agent", "mcp.json"), `"enabled": true`},
+	for _, tc := range []struct{ source, rdd, context7, enabled string }{
+		{"stable", "off", "on", "true"},
+		{"main-preview", "on", "on", "true"},
+		{"main-preview", "off", "off", "false"},
 	} {
-		data, err := userWindowsRead(item.path, 1<<20)
-		if err != nil || !strings.Contains(string(data), item.want) {
-			t.Fatalf("advanced preference %q = %q, %v", item.path, data, err)
-		}
+		t.Run(tc.source+"-rdd-"+tc.rdd, func(t *testing.T) {
+			root := windowsExperienceStage(t)
+			profile := DefaultUserExperience()
+			profile.SDKSource = tc.source
+			profile.StrictTDD = "on"
+			profile.GlobalRDD = tc.rdd
+			profile.Context7 = tc.context7
+			if err := userStageExperience(context.Background(), root, &profile); err != nil {
+				t.Fatal(err)
+			}
+			for _, item := range []struct {
+				path string
+				want string
+			}{
+				{filepath.Join(root, "config", "strict-tdd.json"), `"policy": "on"`},
+				{filepath.Join(root, "config", "background-subagents.json"), `"schema": "gentle-pi.background-subagents/v1"`},
+				{filepath.Join(root, "home", ".gentle-ai", "state.json"), `"rdd_mode": "` + tc.rdd + `"`},
+				{filepath.Join(root, "agent", "mcp.json"), `"enabled": ` + tc.enabled},
+				{filepath.Join(root, "agent", "mcp.json"), `"url": "https://mcp.context7.com/mcp"`},
+			} {
+				data, err := userWindowsRead(item.path, 1<<20)
+				if err != nil || !strings.Contains(string(data), item.want) {
+					t.Fatalf("advanced preference %q = %q, %v", item.path, data, err)
+				}
+			}
+		})
 	}
 }
 
@@ -136,7 +149,6 @@ func TestUserWindowsStageExperienceRefusesBeforeWrites(t *testing.T) {
 		profile UserExperience
 	}{
 		{"invalid", context.Background(), UserExperience{}},
-		{"explicit CodeGraph", context.Background(), UserExperience{Persona: "neutral", BackgroundSubagents: "on", CodeGraph: "on"}},
 		{"explicit GGA", context.Background(), UserExperience{Persona: "neutral", BackgroundSubagents: "on", GGA: "on"}},
 		{"canceled", canceled, DefaultUserExperience()},
 		{"nil context", nil, DefaultUserExperience()},
@@ -154,5 +166,23 @@ func TestUserWindowsStageExperienceRefusesBeforeWrites(t *testing.T) {
 	}
 	if err := userStageExperience(nil, "not-a-private-path", nil); err != nil {
 		t.Fatalf("nil legacy profile performed a lookup: %v", err)
+	}
+}
+
+// CodeGraph is a supported Windows combination (the runtime stage was built
+// for Windows deliberately): the experience stage admits the selection and
+// writes the base preferences, while the CodeGraph runtime itself is staged
+// by the install flow's own provision step after this writer returns.
+func TestUserWindowsStageExperienceAdmitsCodeGraphSelection(t *testing.T) {
+	root := windowsExperienceStage(t)
+	profile := UserExperience{Persona: "neutral", BackgroundSubagents: "on", CodeGraph: "on"}
+	if err := userStageExperience(context.Background(), root, &profile); err != nil {
+		t.Fatalf("CodeGraph selection refused at the experience stage: %v", err)
+	}
+	config := filepath.Join(root, "config")
+	for _, name := range []string{"background-subagents.json", "persona.json"} {
+		if _, err := os.Lstat(filepath.Join(config, name)); err != nil {
+			t.Fatalf("CodeGraph admission skipped a base preference: %v", err)
+		}
 	}
 }

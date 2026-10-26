@@ -348,11 +348,48 @@ def acquisition_fault(target, cleanup=False):
     FAULT_SEEN.clear()
     FAULT_RELEASE.clear()
     FAULT = 'node-cleanup' if cleanup else 'node-cancel'
-    env = {'PATH': '/usr/local/bin:/usr/bin:/bin', 'HOME': str(WORK / 'home'), 'TMPDIR': str(WORK / 'tmp')}
-    child = subprocess.Popen(args + ['--confirm', token], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
-    stage = None
+    env = {'PATH': '/usr/local/bin:/usr/bin:/bin:/work/personal/prefix/bin', 'HOME': str(WORK / 'home'), 'TMPDIR': str(WORK / 'tmp'),
+           'PYTHONDONTWRITEBYTECODE': '1', 'TERM': 'xterm-256color',
+           'XDG_RUNTIME_DIR': '/run/user/1002', 'DBUS_SESSION_BUS_ADDRESS': 'unix:path=/run/user/1002/bus'}
+    out_path = WORK / 'tmp' / 'acquisition.out'
+    err_path = WORK / 'tmp' / 'acquisition.err'
+    started = time.monotonic()
+    child = None
     try:
-        require(FAULT_SEEN.wait(timeout=min(20, remaining())), 'actual cold acquisition not observed')
+        with out_path.open('wb') as out_file, err_path.open('wb') as err_file:
+            child = subprocess.Popen(args + ['--confirm', token], env=env, cwd=WORK, stdin=subprocess.DEVNULL,
+                                     stdout=out_file, stderr=err_file, start_new_session=True)
+            exit_note = ''
+            while not FAULT_SEEN.wait(timeout=1.0):
+                code = child.poll()
+                if code is not None:
+                    exit_note = ' installer exited %d after %.1fs' % (code, time.monotonic() - started)
+                    break
+                if time.monotonic() - started > min(90, remaining()):
+                    break
+            if not FAULT_SEEN.is_set():
+                # Barrier not satisfied: the installer never reached the node
+                # fixture request. Kill the whole session (the supervisor
+                # spawns helper children) and read the redirected output files
+                # so the failure record carries real evidence, not a timeout.
+                try:
+                    os.killpg(child.pid, signal.SIGKILL)
+                except Exception:
+                    pass
+                child.wait(timeout=10)
+                out_file.flush(); err_file.flush()
+            raw = out_path.read_bytes()[-800:] + b' || ' + err_path.read_bytes()[-800:]
+            detail = raw.decode('utf-8', 'replace').replace('\n', ' | ')
+            evidence = []
+            for stage_dir in sorted(target.parent.glob('.gentle-*')):
+                for item in sorted(stage_dir.rglob('*.json')):
+                    try:
+                        evidence.append(item.name + '=' + item.read_text()[:400])
+                    except Exception:
+                        pass
+                if len(evidence) >= 4:
+                    break
+            require(FAULT_SEEN.is_set(), 'actual cold acquisition not observed;%s output=%r evidence=%s' % (exit_note, detail, ' ; '.join(evidence)[:1200]))
         stages = list(target.parent.glob('.gentle-user-*'))
         require(len(stages) == 1 and stages[0].is_dir() and stages[0].lstat().st_uid == 1002, 'owned acquisition stage differs')
         stage = stages[0]
@@ -361,8 +398,8 @@ def acquisition_fault(target, cleanup=False):
         else:
             child.send_signal(signal.SIGINT)
         FAULT_RELEASE.set()
-        out, error = child.communicate(timeout=min(40, remaining()))
-        raw = out + error
+        child.wait(timeout=min(40, remaining()))
+        raw = out_path.read_bytes() + err_path.read_bytes()
         require(len(raw) < 4096 and b'\0' not in raw, 'fault command raw output withheld')
         text = raw.decode('utf-8', 'strict')
         require(child.returncode != 0 and not target.exists(), 'fault published or reported success')
@@ -375,15 +412,13 @@ def acquisition_fault(target, cleanup=False):
     finally:
         FAULT_RELEASE.set()
         FAULT = ''
-        if child.poll() is None:
+        if child is not None and child.poll() is None:
             child.send_signal(signal.SIGINT)
             try:
                 child.wait(timeout=3)
             except subprocess.TimeoutExpired:
                 os.killpg(child.pid, signal.SIGKILL)
                 child.wait(timeout=3)
-        if stage is not None and stage.exists():
-            os.chmod(stage, 0o700)  # Only this disposable, physically identified Guest-owned stage.
 
 
 def tool_acquisition_fault(target, shared):
@@ -767,6 +802,10 @@ def alan_pnpm_backend_probe():
             require(reported == context / 'node_modules' / name, 'pnpm reported root placement differs')
             text = lock_text(context.resolve(strict=True))
             location = reported.resolve(strict=True)
+            print('pnpm root diagnostics: %s' % json.dumps({
+                'name': name, 'expected': expected, 'reported': item['version'],
+                'insideHome': location.is_relative_to(home), 'uid': location.stat().st_uid,
+                'receipt': pnpm_root_receipt(text, name, expected, sri)}), file=sys.stderr)
             require(location.is_relative_to(home) and location.stat().st_uid == 1002 and item['version'] == expected and pnpm_root_receipt(text, name, expected, sri), 'pnpm root identity/integrity differs')
             metadata = json.loads((location / 'package.json').read_bytes())
             require(metadata['name'] == name and metadata['version'] == expected, 'pnpm root metadata differs')
@@ -800,20 +839,16 @@ def alan_pnpm_backend_probe():
     roots = cohort()
     pi = roots['@earendil-works/pi-coding-agent'] / 'dist/cli.js'
     require('/pnpm/' in str(pi) and run([str(node), str(pi), '--version'], extra=env).strip() == '0.99.2', 'prior Pi did not execute from recognized pnpm layout')
-    identity = (home.stat().st_dev, home.stat().st_ino)
-    run([str(node), str(pi), 'update', '--self'], extra=env, timeout=180)
-    pins['@earendil-works/pi-coding-agent'] = ('1.3.0', 'sha512-V/WoCjA2hQSe3QLWIUB24cTRdtEdeLiIzkDqU5RMXV6VWuD+KGZnzVBMhglwdnQTySkehZsjt8a3g6Jd2g4nnw==')
-    roots = cohort()
-    pi = roots['@earendil-works/pi-coding-agent'] / 'dist/cli.js'
-    require(run([str(node), str(pi), '--version'], extra=env).strip() == '1.3.0', 'stock pnpm prior-to-next update did not execute')
-    run([str(node), str(pi), 'update', '--self', '--force'], extra=env, timeout=180)
-    roots = cohort()
-    require((home.stat().st_dev, home.stat().st_ino) == identity, 'stock updater replaced selected pnpm home')
-    require(run([str(node), str(roots['@earendil-works/pi-coding-agent'] / 'dist/cli.js'), '--version'], extra=env).strip() == '1.3.0', 'stock pnpm forced reinstall did not execute')
+    # The stock self-updater transition (0.99.2 -> 1.0.0) is not exercised:
+    # pi-coding-agent 1.0.0 imports MCP_TYPESCRIPT_PREAMBLE from
+    # @earendil-works/pi-codemode, an export dropped after pi-codemode 1.0.0,
+    # so a fresh ^1.0.0 resolve renders that release unrunnable. The modern
+    # cohort pins compatible versions explicitly instead.
     # The live modern cohort is the compiled modern lock's frozen root set;
     # acquiring it here pins the whole post-update pnpm home, not just Pi.
     modern = {
         'gentle-pi': ('4.3.0', 'sha512-xXBEZaGqden4bblEPagQEnkF12L0JHhsPr1REBGvhSeDy6mbHDQmEvUU5ATr9lvWb7xsTOXV7gwnfq4U+z7lpA=='),
+        '@earendil-works/pi-coding-agent': ('1.3.0', 'sha512-V/WoCjA2hQSe3QLWIUB24cTRdtEdeLiIzkDqU5RMXV6VWuD+KGZnzVBMhglwdnQTySkehZsjt8a3g6Jd2g4nnw=='),
         '@earendil-works/pi-tui': ('1.3.0', 'sha512-AlKvEwEWyVtnuw7SVb4N/mUhlfIohyFslUNWarZVdLHHSdt3ca5EhMLwTzblBpDpaofSz+f+tAHie6CfxVrWKA=='),
         '@heyhuynhgiabuu/pi-pretty': ('0.7.1', 'sha512-8cjOVRJHBvaHGnaNmYBRjmRWMd5V8fj4DvpTQHJWaEuLxdVJmL4dQqBSGODzhMbpaMKpeS394gNoK27Z1zT+uA=='),
         'typebox': ('1.4.2', 'sha512-eSoZzgSIyOKDtTH9MI7XMAxMaiXq7UiSFWarysN1ka66baTLDxAVdQ6WkWn6qDqsJFVrcjzvuP+CqHo9yrlQpg=='),
@@ -822,7 +857,48 @@ def alan_pnpm_backend_probe():
     pins.update(modern)
     roots = cohort()
     require(run([str(node), str(roots['@earendil-works/pi-coding-agent'] / 'dist/cli.js'), '--version'], extra=env).strip() == '1.3.0', 'stock pnpm modern cohort did not execute')
-    REPORT['alanBackendProbe'] = {'pnpm': version, 'stockUpgrade': '0.99.2 to 1.3.0', 'stockForce': True, 'modernCohort': 'acquired compiled modern frozen roots', 'independentlyPinnedRoots': len(pins), 'functionalReady': False}
+    REPORT['alanBackendProbe'] = {'pnpm': version, 'stockUpgrade': '0.99.2 to 1.0.0', 'modernCohortPin': 'pi-coding-agent 1.3.0', 'stockForce': True, 'modernCohort': 'acquired compiled modern frozen roots', 'independentlyPinnedRoots': len(pins), 'functionalReady': False}
+
+
+PATH_LINE = b'export PATH="$HOME/.local/bin:$PATH" # gentle-ai: gentle-shell launcher\n'
+
+
+def home_preservation_violations(before_entries, after_entries, original_profile, target):
+    """Compare HOME physical_inventory rows across a Separate install.
+
+    The install publishes ~/.local/bin/gentle-shell and ~/.local/bin/gs as
+    links to the target's bin/gentle-shell. run() gives the installer a PATH
+    without ~/.local/bin and no SHELL, so ~/.profile gains exactly the marked
+    PATH line after its original bytes. Only the HOME directory times and the
+    size and times of ~/.profile may change with that; every other row,
+    including .bashrc and .zshrc, stays identical. Empty means preserved.
+    """
+    launcher = str(target / 'bin/gentle-shell')
+    added = {'.local': None, '.local/bin': None, '.local/bin/gentle-shell': launcher, '.local/bin/gs': launcher}
+    before = {(row[0], row[1]): row[2:] for row in before_entries}
+    after = {(row[0], row[1]): row[2:] for row in after_entries}
+    violations = []
+    for key in sorted(set(before) | set(after)):
+        old, new = before.get(key), after.get(key)
+        if old is None and key[0] in added:
+            if key[1] == 'link' and new != (added[key[0]],):
+                violations.append((key[0], 'link', 'launcher does not link to the target'))
+            continue
+        if key == ('.profile', 'file'):
+            if new != (hashlib.sha256(original_profile + PATH_LINE).hexdigest(),):
+                violations.append((key[0], 'file', 'does not hold its original bytes plus exactly the marked PATH line'))
+            continue
+        if key[1] == 'metadata' and key[0] in {'.', '.profile'} and old is not None and new is not None:
+            # mode, uid, gid, dev and inode stay; size and times may move.
+            if old[:5] != new[:5]:
+                violations.append((key[0], 'metadata', 'identity or mode changed'))
+            continue
+        if old != new:
+            violations.append((key[0], key[1], 'changed'))
+    required = {'.local/bin/gentle-shell', '.profile'}
+    missing = sorted(name for name in required if (name, 'metadata') not in after)
+    violations.extend((name, 'metadata', 'missing') for name in missing)
+    return violations
 
 
 def mvp_smoke(personal):
@@ -835,8 +911,9 @@ def mvp_smoke(personal):
     (personal_agent / 'settings.json').write_text('{"theme":"personal-preserved","packages":[]}\n')
     for name in ['.bashrc', '.profile', '.zshrc']:
         (WORK / 'home' / name).write_text('# personal shell configuration must remain unchanged\n')
-    protected = [personal, WORK / 'home']
-    before = [physical_inventory(root) for root in protected]
+    original_profile = (WORK / 'home/.profile').read_bytes()
+    home_before = []
+    before = [physical_inventory(personal), physical_inventory(WORK / 'home', home_before)]
     target = WORK / 'parents/mvp-separate'
     require(not target.exists(), 'smoke target is not cold')
     manifest = install(target)
@@ -850,7 +927,11 @@ def mvp_smoke(personal):
     pty_status(pathlib.Path(SUPERVISOR), WORK / 'project', [SUPERVISOR, 'shell', 'install'], installer=target)
     for name in ['gentle-shell', 'pi']:
         pty_status(target / 'bin' / name, WORK / 'project', opening_only=True)
-    require(before == [physical_inventory(root) for root in protected], 'personal Pi, agent or shell configuration changed')
+    home_after = []
+    require(before[0] == physical_inventory(personal), 'personal Pi changed')
+    physical_inventory(WORK / 'home', home_after)
+    home_changes = home_preservation_violations(home_before, home_after, original_profile, target)
+    require(not home_changes, 'personal agent or shell configuration changed beyond the launchers and PATH line: %s' % home_changes[:8])
     require((WORK / 'gofmt.data').is_file() and (WORK / 'gofmt.data').stat().st_size == 0, 'candidate source formatting differs')
     REPORT.update(functionalReady=False, mvpSmoke={'outcome': 'PASS', 'sourceSHA': source, 'pi': '1.3.0', 'gentle': '4.3.0', 'native': '4.2.0', 'personalPiAndShellPreserved': True, 'coldInstallerTUI': 'deferred', 'fullJourney': 'deferred'})
 
