@@ -46,6 +46,9 @@ Both repositories maintain their active `feat/hybrid-odd-specification` branches
   - Evidence: Commit `9ca40534`, `routing_test.go` migrated to `/v4`, `go test ./internal/components/agentguidance/...` PASS.
 - [x] Task 3: Final cross-repository verification and status check.
   - Evidence: Verified clean branch state and test green in both gentle-ai and gentle-pi.
+- [x] Task 4: Integrate latest `origin/main` (`a6942c7dd`) into `feat/hybrid-odd-specification` preserving Hybrid ODD pattern and verifying tests.
+  - Evidence: Merge commit cleanly applied with zero conflicts; agentguidance suite PASS (`0.892s`), shellinstaller scoped update and agent-carry suites PASS, TUI component scope tests PASS (`6.314s`).
+
 
 ---
 
